@@ -348,13 +348,28 @@ class PostgreSQLBackend:
     def get(self, report_id: str) -> dict[str, Any] | None:
         """Retrieve a report by ID."""
         conn = self._get_conn()
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM reports WHERE report_id = %s", (report_id,))
-            row = cur.fetchone()
-            if row is None:
-                return None
-            cols = [desc[0] for desc in cur.description]
-            return self._row_to_dict(dict(zip(cols, row)))
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM reports WHERE report_id = %s", (report_id,))
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                cols = [desc[0] for desc in cur.description]
+                return self._row_to_dict(dict(zip(cols, row)))
+        finally:
+            # Found 2026-09-17: this connection isn't autocommit, so a plain
+            # SELECT with no commit/rollback left the transaction open
+            # indefinitely - the thread-local connection sits idle in
+            # transaction forever, holding a lock that blocks any later
+            # DDL (e.g. this same class's own __init__ schema check on a
+            # fresh connection) queuing up behind it. Confirmed live on
+            # baden: exactly this pileup was why a report generation
+            # request just sat "spinning" - the report itself had already
+            # generated successfully, but a stuck read from an earlier
+            # call was blocking everything downstream of it. rollback()
+            # rather than commit() since nothing was written; either ends
+            # the transaction, but this is a pure read.
+            conn.rollback()
 
     def delete(self, report_id: str) -> bool:
         """Delete a report. Returns True if found."""
@@ -397,10 +412,15 @@ class PostgreSQLBackend:
         query += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
         params.extend([limit, offset])
 
-        with conn.cursor() as cur:
-            cur.execute(query, params)
-            cols = [desc[0] for desc in cur.description]
-            return [self._row_to_dict(dict(zip(cols, row))) for row in cur.fetchall()]
+        try:
+            with conn.cursor() as cur:
+                cur.execute(query, params)
+                cols = [desc[0] for desc in cur.description]
+                return [self._row_to_dict(dict(zip(cols, row))) for row in cur.fetchall()]
+        finally:
+            # See get()'s identical note above - same missing-commit bug,
+            # same fix.
+            conn.rollback()
 
     def count(self, scan_id: str | None = None, workspace_id: str | None = None) -> int:
         """Count reports, optionally filtered by scan_id and/or workspace_id."""
@@ -416,10 +436,15 @@ class PostgreSQLBackend:
             params.append(workspace_id)
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
-        with conn.cursor() as cur:
-            cur.execute(query, params)
-            row = cur.fetchone()
-            return row[0] if row else 0
+        try:
+            with conn.cursor() as cur:
+                cur.execute(query, params)
+                row = cur.fetchone()
+                return row[0] if row else 0
+        finally:
+            # See get()'s identical note above - same missing-commit bug,
+            # same fix.
+            conn.rollback()
 
     def cleanup_old(self, max_age_days: int) -> int:
         """Delete reports older than max_age_days. Returns count deleted."""
