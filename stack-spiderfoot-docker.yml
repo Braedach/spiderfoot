@@ -1,23 +1,25 @@
 # =============================================================================
 # stack-spiderfoot-docker.yml — reference Docker deployment, builds from source
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-09-10
-# Updated: 2026-09-16
+# Updated: 2026-09-17
 #
 # Published from this fork's own private dev/repro stack of the same name -
 # history below predates publication and references stack-spiderfoot-
-# podman.yml, the maintainer's own production Podman deployment. That file
-# isn't published here (it has host-specific paths and a private reverse
-# proxy setup); it's the source of truth for application-level config
-# (LLM routing, model names, env var meanings) that this file mirrors.
+# podman.yml, the maintainer's own production Podman deployment - also
+# published here now, at the repo root alongside this file. It's the
+# source of truth for application-level config (LLM routing, model names,
+# env var meanings) that this file mirrors.
 #
 # Summary:
 #   Purpose:
 #     Builds every image from source and runs the full stack locally via
 #     plain `docker compose` - no Traefik, no profiles, one flat file. See
 #     docker-compose.yml (+ docker/compose/*.yml) for the profile-gated
-#     reference deployment instead, or docker-compose-podman.yml to pull
-#     this fork's own pre-built images rather than building anything.
+#     reference deployment instead, or stack-spiderfoot-podman.yml for the
+#     production Podman deployment (pulls this fork's own pre-built images
+#     rather than building anything, and is genuinely Podman-compatible -
+#     standard Compose syntax throughout).
 #     This file is NOT derived by copying the maintainer's own podman
 #     deployment's service list - the shapes differ on purpose:
 #       - podman/prod has no MinIO/Tika at all (and had no Qdrant either,
@@ -49,14 +51,15 @@
 #     CertSpotter, FullHunt. Full list: docs/free-api-modules.md
 #
 #   Builds:
-#     development branch commit 4b0231b2 is a known good build (2026-09-13,
-#     matches stack-spiderfoot-podman.yml's 6.1.0-g4b0231b2) - fully tested
-#     end-to-end on this deployment after fixing this file's own build-arg
-#     bug (see Changelog 1.7.0): all 11 services healthy, AI report
-#     generation/persistence/delete confirmed working (scan-level and
-#     workspace-level), scanner/active-scanner queue split confirmed
-#     correct via each container's actual running process, not just its
-#     config.
+#     development branch commit 4b0231b2 is NOT good - do not use. Real
+#     Postgres connection-leak bug in ReportStore's read-only methods (see
+#     stack-spiderfoot-podman.yml's Changelog 2.4.0 for the full incident -
+#     same shared source, same bug, both platforms) - causes AI report
+#     generation to appear to hang/spin after a few uses.
+#     development branch commit b05e98c3 (image tag 6.1.0-gb05e98c3) is the
+#     new known-good build (2026-09-17) - fixes the above. Built and
+#     confirmed genuinely public on GHCR; not yet verified live in
+#     production - pending redeploy on baden.
 #
 #     Images pull CPU-only torch (fork requirements.txt, verified
 #     2026-09-11) - base/api/scanner 6.71GB -> 1.97GB, active-scanner
@@ -111,6 +114,13 @@
 #       may go ballistic.
 #
 # Changelog:
+#   1.9.0 (2026-09-17) - New known-good build: commit b05e98c3 (image tag
+#     6.1.0-gb05e98c3). 4b0231b2 (1.7.0's known-good build) has a real Postgres
+#     connection-leak bug - see stack-spiderfoot-podman.yml's Changelog
+#     2.4.0 for the full incident and verification detail (same shared
+#     source, same bug, same fix, both platforms - not repeated here).
+#     Also added SF_REPORT_MAX_EVENTS_PER_SCAN=2000 to agents - unset here
+#     too, same fix as stack-spiderfoot-podman.yml's identical addition.
 #   1.8.0 (2026-09-16) - BREAKING CHANGE: qdrant v1.12.4 -> v1.19.1, kept
 #     in sync with stack-spiderfoot-podman.yml's identical bump (see its
 #     2.3.0 changelog entry for the full incident and verification detail
@@ -855,6 +865,10 @@ services:
       SF_EMBEDDING_DIMENSIONS: 384
       SF_EMBEDDING_API_KEY: ${SF_LLM_API_KEY}
       SF_EMBEDDING_API_BASE: ${SF_EMBEDDING_API_BASE:-http://litellm:4000}
+      # Added 2026-09-17: was unset everywhere (this file,
+      # stack-spiderfoot-podman.yml, both env-examples) - see
+      # stack-spiderfoot-podman.yml's identical addition for why.
+      SF_REPORT_MAX_EVENTS_PER_SCAN: ${SF_REPORT_MAX_EVENTS_PER_SCAN:-2000}
       SF_RERANKER_PROVIDER: ${SF_RERANKER_PROVIDER:-litellm}
       SF_RERANKER_MODEL: ${SF_RERANKER_MODEL:-gpt-4o-mini}
       SF_RERANKER_API_KEY: ${SF_LLM_API_KEY}
