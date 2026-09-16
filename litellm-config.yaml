@@ -1,0 +1,25 @@
+# =============================================================================
+# LiteLLM proxy config — spiderfoot-dev (local repro stack)
+#
+# Same aliasing trick as the prod config.yml on baden: report_generator.py
+# hardcodes model="gemma3-27b" in its own source (ReportGeneratorAgent.create())
+# regardless of SF_LLM_MODEL, so "gemma3-27b" has to exist as a model_name here
+# even though it's actually routed to Claude. "spiderfoot-llm" covers every
+# other agent, which does respect SF_LLM_MODEL.
+#
+# Tracked in git (no secrets — ANTHROPIC_API_KEY is read from the environment
+# via os.environ/ syntax, supplied by stack-spiderfoot-dev.env at runtime).
+# =============================================================================
+
+model_list:
+  - model_name: spiderfoot-llm
+    litellm_params:
+      model: anthropic/claude-sonnet-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: gemma3-27b
+    litellm_params:
+      model: anthropic/claude-sonnet-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+litellm_settings:
+  drop_params: true
