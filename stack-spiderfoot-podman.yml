@@ -1,8 +1,8 @@
 # =============================================================================
 # stack-spiderfoot-podman.yml
-# Version: 2.3.0
+# Version: 2.4.0
 # Created: 2026-08-06
-# Updated: 2026-09-16
+# Updated: 2026-09-17
 #
 # Summary:
 #   Purpose:
@@ -15,9 +15,8 @@
 #     Single network for isolation
 #
 #     110 of SpiderFoot's 310 modules need an API key; 80 of those are free (sign up, generate a key)
-#     Highest-value free ones: 
+#     Highest-value free ones:
 #        - Shodan, VirusTotal, AlienVault OTX, Censys, BinaryEdge, Hunter.io, AbuseIPDB, IPInfo.io, WhoisXML API, CertSpotter, FullHunt.
-#        - The above is not right - nope - definitely not.
 #     Full list: docs/free-api-modules.md
 #
 #  GPU Passthrough:
@@ -27,10 +26,14 @@
 #     - Get rid of the current solution and make it better and smaller.
 #
 #   Builds
-#     - 6.1.0-g4b0231b2 is a known good build (2026-09-13) - fully tested end-to-end on this deployment: all 9 services healthy, 
-#       AI report generation/persistence/delete confirmed working (scan-level and workspace-level reports both persist server-side correctly now,
-#       not just in the requesting browser's localStorage), scanner/ active-scanner queue split confirmed correct. 
-#       Also independently verified the same commit on the Docker side (stack-spiderfoot-docker.yml) the same day.
+#     - 6.1.0-g4b0231b2 is NOT good - do not use. Real Postgres connection-leak
+#       bug in ReportStore's read-only methods (get/list_reports/count never
+#       committed, leaving transactions open indefinitely) - causes AI report
+#       generation to appear to hang/spin after a few uses, once enough stuck
+#       connections pile up blocking the reports table. See Changelog 2.4.0.
+#     - 6.1.0-gb05e98c3 is the new known-good build (2026-09-17) - fixes the
+#       above. Built and confirmed genuinely public on GHCR; not yet
+#       verified live in production - pending redeploy on baden.
 #     - Remove other builds prior to starting major modifications
 #
 #   Usage:
@@ -62,11 +65,17 @@
 #    - Reverse proxy system - network modification may be required due to your network structure
 #
 #   Warnings:
-#     - BREAKING CHANGE (2.3.0, 2026-09-16): sf-qdrant jumped v1.12.4 -> v1.19.1, a 7-minor-version bump. 
-#       Qdrant's own upgrade docs are explicit that a single-node deployment cannot skip minor versions with existing data on disk
-#       Fix - stop the container and remove the following.  
+#     - BREAKING CHANGE (2.3.0, 2026-09-16): sf-qdrant jumped v1.12.4 -> v1.19.1, a 7-minor-version bump.
+#       Qdrant's own upgrade docs are explicit that a single-node deployment cannot skip minor versions with
+#       existing data on disk. Confirmed the hard way here: bumping the tag and restarting in place crash-looped
+#       immediately (RocksDB->Gridstore storage format incompatibility). Safe fix, NOT a generic answer to every
+#       Qdrant upgrade - only correct because nothing this stack stores in Qdrant is anything other than a
+#       reconstructable derivative of Postgres scan data (confirmed by tracing every write path into it fork-wide,
+#       2026-09-16 - see PR history). Stop the container and wipe its volume entirely, then restart clean:
+#           - podman stop sf-qdrant
 #           - rm -rf /srv/spiderfoot/qdrant/collections /srv/spiderfoot/qdrant/aliases /srv/spiderfoot/qdrant/.deleted /srv/spiderfoot/qdrant/raft_state.json
-#           - Restart the container - tested.
+#           - podman start sf-qdrant
+#       Tested live on baden.
 #     - BREAKING CHANGE (2.1.0, 2026-09-12): image tags 6.1.0-g529d9da2 and later have NO torch/sentence-transformers anywhere 
 #       SF_EMBEDDING_PROVIDER=sentence_transformer silently degrades to mock (fake) embeddings on those tags, not an error. 
 #       This file already runs fastembed - see Changelog 2.1.0.
@@ -77,13 +86,38 @@
 #     - IDS/IPS systems may go ballistic
 #
 # Changelog:
+#   2.4.0 (2026-09-17) - New known-good build: 6.1.0-gb05e98c3.
+#     6.1.0-g4b0231b2 (2.2.0's known-good build) has a real bug: ReportStore's
+#     read-only methods (get, list_reports, count in
+#     spiderfoot/reporting/report_storage.py) never called conn.commit() or
+#     rollback() after a SELECT. Since that connection is explicitly
+#     non-autocommit, every plain read left its transaction open
+#     indefinitely - confirmed live: a single stuck read held a lock for 9+
+#     minutes, blocking every later attempt to touch the reports table
+#     (including the schema-check any fresh ReportStore init runs), and kept
+#     recurring within minutes of manually clearing it. From the frontend
+#     this looked exactly like AI report generation "just spinning" - the
+#     report itself, and the LLM call, had already completed successfully;
+#     an unrelated stuck read was blocking everything downstream of it.
+#     Fixed by wrapping each read-only method's query in try/finally with
+#     conn.rollback() in finally. Verified in isolation (10 rounds of
+#     get/list_reports/count left zero idle-in-transaction connections
+#     afterward, versus one per call before the fix).
+#     Also added SF_REPORT_MAX_EVENTS_PER_SCAN=2000 to sf-agents - the
+#     configurable cap added for the same reason (see 2.2.0's changelog
+#     entry, and PR #393) was never actually set anywhere, so it kept
+#     silently defaulting back to 500 regardless.
 #   2.3.0 (2026-09-16) - BREAKING CHANGE: sf-qdrant v1.12.4 -> v1.19.1.
 #     Verified via Qdrant's own upgrade documentation that a single-node deployment cannot skip minor versions with existing data on disk -
 #     On that basis, fixed by stopping sf-qdrant, wiping /srv/spiderfoot/qdrant entirely, and starting clean on v1.19.1
-#   2.2.0 (2026-09-13) - New known-good build: 6.1.0-g4b0231b2. 
+#   2.2.0 (2026-09-13) - New known-good build: 6.1.0-g4b0231b2. Superseded by
+#     2.4.0 below - this build has a real Postgres connection-leak bug, see
+#     that entry.
 #     Fixed on the fork side and verified live on this deployment: AI reports generated via sf-agents' /report endpoint (the only path the
 #     frontend actually calls) were never persisted server-side - only ever reached the requesting browser's own localStorage, invisible
-#    
+#     from any other browser/device, no server-side audit trail. Now persisted via the same Postgres-backed store the (separate, previously
+#     UI-unused) sf-api report pipeline already had. Covers both scan-level and workspace-level reports; GUI delete added. See PR #393 and
+#     the fork's README for full detail. Independently verified the same commit on the Docker side (stack-spiderfoot-docker.yml) the same day.
 #   2.1.0 (2026-09-12) - BREAKING CHANGE
 #     - sf-agents: SF_EMBEDDING_PROVIDER sentence_transformer -> fastembed.
 #     - drop torch and everything associated with it and switch the sentence_transformer.
@@ -432,6 +466,13 @@ services:
       - SF_EMBEDDING_PROVIDER=fastembed
       - SF_EMBEDDING_MODEL=all-MiniLM-L6-v2
       - SF_EMBEDDING_DIMENSIONS=384
+      # Added 2026-09-17: was unset everywhere (this file, stack-spiderfoot-
+      # docker.yml, both env-examples), meaning report_generator.py's own
+      # configurable-cap fix (see PR #393) had nothing to actually raise it
+      # to - every report was still silently capped at the hardcoded-default
+      # 500 events regardless. 2000 comfortably covers the 687-event scan
+      # that originally exposed the cap.
+      - SF_REPORT_MAX_EVENTS_PER_SCAN=${SF_REPORT_MAX_EVENTS_PER_SCAN:-2000}
       # Real-time Qdrant indexing via EventBus - CURRENTLY INERT, same as
       # sf-celery-worker above (reverted 2026-09-11, kept for later). This
       # is also where the indexer itself would run once re-enabled.
