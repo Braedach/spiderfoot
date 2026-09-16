@@ -1,0 +1,506 @@
+# =============================================================================
+# stack-spiderfoot-podman.yml
+# Version: 2.3.0
+# Created: 2026-08-06
+# Updated: 2026-09-16
+#
+# Summary:
+#   Purpose:
+#     Self-hosted OSINT correlation platform (poppopjmp/spiderfoot v6.1.0, microservices fork). 
+#     Standalone manual investigation dashboard - separate from the osint stack's n8n automation pipeline. 
+#     This is the podman deployment.
+#
+#     AI report generation (sf-agents + sf-litellm) uses Anthropic's API (Claude Sonnet 5) rather than local Ollama.
+#     Matches the pattern Pulse monitoring and n8n already use on baden. No dependency on Ollama LLM.
+#     Single network for isolation
+#
+#     110 of SpiderFoot's 310 modules need an API key; 80 of those are free (sign up, generate a key)
+#     Highest-value free ones: 
+#        - Shodan, VirusTotal, AlienVault OTX, Censys, BinaryEdge, Hunter.io, AbuseIPDB, IPInfo.io, WhoisXML API, CertSpotter, FullHunt. 
+#     Full list: docs/free-api-modules.md
+#
+#  GPU Passthrough:
+#     - This is your fault
+#     - current implementation uses torch which is massive and unwieldy
+#     - torch takes the results of the scan and reduced the calls to the AI decreasing time and cost
+#     - Get rid of the current solution and make it better and smaller.
+#
+#   Builds
+#     - 6.1.0-g4b0231b2 is a known good build (2026-09-13) - fully tested
+#       end-to-end on this deployment: all 9 services healthy, AI report
+#       generation/persistence/delete confirmed working (scan-level and
+#       workspace-level reports both persist server-side correctly now,
+#       not just in the requesting browser's localStorage), scanner/
+#       active-scanner queue split confirmed correct. Also independently
+#       verified the same commit on the Docker side
+#       (stack-spiderfoot-docker.yml) the same day.
+#     - Remove other builds prior to starting major modifications
+#
+#   Usage:
+#     UI at http://localhost:5001
+#     Reverse proxy will require configuration along with appropriate CNAMES
+#
+#     FULL DEPLOYMENT SEQUENCE, from nothing, on baden:
+#       1. Generate the runtime secrets (one time only, ever):
+#             - ./bootstrap-spiderfoot-env.sh
+#             - This writes /srv/spiderfoot/stack-spiderfoot-env.env and prints
+#             -  If you've lost them later, read the file directly instead:
+#             -  cat /srv/spiderfoot/stack-spiderfoot-env.env
+#       2. Create the data directories, and stage litellm's config:
+#             - mkdir -p /srv/spiderfoot/{postgres,redis,litellm,qdrant,embeddings-cache}
+#          Copy litellm-config-podman.yaml (in this same directory) to
+#             - /srv/spiderfoot/litellm/config.yaml
+#       3. In Portainer, create a new stack:
+#          - Paste or upload this file
+#          - Environment variables -> load the file into portainer
+#            point it at /srv/spiderfoot/stack-spiderfoot-env.env
+#          - Deploy
+#       4. Confirm all 9 containers report healthy, then log in at the UI above with the admin password from step 1.
+#
+#       5. Beware if the build tag changes you will need to adjust the env variable
+#
+#   Prerequisites:
+#    - CNAME entries appropriate for you deployment
+#    - Working Podman managed LXC Debian
+#    - Reverse proxy system - network modification may be required due to your network structure
+#
+#   Warnings:
+#     - BREAKING CHANGE (2.3.0, 2026-09-16): sf-qdrant jumped v1.12.4 -> v1.19.1,
+#       a 7-minor-version bump. Qdrant's own upgrade docs are explicit that a
+#       single-node deployment cannot skip minor versions with existing data on
+#       disk - confirmed the hard way here (see Changelog 2.3.0). If you are
+#       instead upgrading an existing deployment still on v1.12.4 or nearby,
+#       either step through each intermediate minor version's latest patch in
+#       order, or - since nothing in this stack stores anything in Qdrant that
+#       isn't reconstructable from Postgres (confirmed by tracing every write
+#       path, 2026-09-16) - stop sf-qdrant, wipe its volume entirely, and start
+#       clean on the new version. Do not just bump the tag and restart in place.
+#     - BREAKING CHANGE (2.1.0, 2026-09-12): image tags 6.1.0-g529d9da2 and later
+#       have NO torch/sentence-transformers anywhere - SF_EMBEDDING_PROVIDER=
+#       sentence_transformer silently degrades to mock (fake) embeddings on those
+#       tags, not an error. This file already runs fastembed - see Changelog 2.1.0.
+#     - depends_on is start-order only, not health-gated - deliberate.
+#     - read_only + tmpfs mode=1777 on the api/worker containers and nginx's tmpfs + cap_add [CHOWN, SETGID, SETUID] on the frontend were both found the hard way.
+#     - Runs 300+ modules incl. 33+ active recon tools (scan profile) that make outbound requests to third parties during scans
+#     - only scan targets you are authorised to investigate
+#     - IDS/IPS systems may go ballistic
+#
+# Changelog:
+#   2.3.0 (2026-09-16) - BREAKING CHANGE: sf-qdrant v1.12.4 -> v1.19.1.
+#     Verified via Qdrant's own upgrade documentation that a single-node
+#     deployment cannot skip minor versions with existing data on disk -
+#     confirmed live here: bumping the tag and restarting in place
+#     crash-looped immediately (RestartCount climbed to 70) with
+#     `unknown variant "on_disk", expected "mmap" or "in_ram_mmap"` -
+#     exactly the RocksDB->Gridstore storage-engine migration (phased out
+#     1.15->1.17, fully removed 1.18.0) that skipping versions is not
+#     supposed to survive. Before touching the running tag, traced every
+#     write path into Qdrant across the whole fork (report_generator.py's
+#     on-demand backfill, the EventIndexer real-time path - confirmed
+#     dead code, never started anywhere - and every agent/API consumer)
+#     and confirmed nothing stored there is anything other than a
+#     reconstructable derivative of Postgres scan data. On that basis,
+#     fixed by stopping sf-qdrant, wiping /srv/spiderfoot/qdrant entirely,
+#     and starting clean on v1.19.1 - sidesteps the migration path
+#     entirely rather than stepping through it, verified end-to-end
+#     afterward (fresh collection, real embeddings, real backfill from
+#     an existing scan, correct 384-dim/Cosine config). Also worth
+#     noting for currency: v1.18.2 fixed a REST auth-whitelist bypass,
+#     v1.19.0 fixed an S3 snapshot path-traversal vulnerability - neither
+#     exploitable via this stack's config, but good reason on its own to
+#     not sit on 1.12.4 indefinitely.
+#   2.2.0 (2026-09-13) - New known-good build: 6.1.0-g4b0231b2. Fixed on
+#     the fork side and verified live on this deployment: AI reports
+#     generated via sf-agents' /report endpoint (the only path the
+#     frontend actually calls) were never persisted server-side - only
+#     ever reached the requesting browser's own localStorage, invisible
+#     from any other browser/device, no server-side audit trail. Now
+#     persisted via the same Postgres-backed store the (separate,
+#     previously UI-unused) sf-api report pipeline already had. Covers
+#     both scan-level and workspace-level reports; GUI delete added.
+#     See PR #393 and the fork's README for full detail. Independently
+#     verified the same commit on the Docker side
+#     (stack-spiderfoot-docker.yml) the same day.
+#   2.1.0 (2026-09-12) - BREAKING CHANGE
+#     - sf-agents: SF_EMBEDDING_PROVIDER sentence_transformer -> fastembed. BREAKING:
+#       the fork's requirements.txt no longer carries sentence-transformers/torch at
+#       all as of image tag 6.1.0-g529d9da2 onward (they were ~1GB+ for a 384-dim
+#       model, and mandatory regardless of backend - confirmed via PyPI's own
+#       metadata) - any deployment still explicitly set to SF_EMBEDDING_PROVIDER=
+#       sentence_transformer will silently degrade to mock (fake) embeddings via
+#       that backend's existing ImportError fallback on any image built from this
+#       commit or later, NOT an error you'll see anywhere. fastembed (onnxruntime-
+#       backed) does the same job with no torch anywhere in its tree. Verified live
+#       end-to-end on baden 2026-09-12 - real embeddings, real semantic search, real
+#       CTI reports, at three scan scales (10/13/687 events) - see Builds note above
+#       for the current verified tag.
+#   1.17.0 (2026-09-11)
+#     - Reverted the real-time EventBus/Qdrant indexing deploy (1bead36e) after a scan looked stalled - turned out to be a bad baseline comparison on my part, not a confirmed bug, but reverted rather than trust something already under suspicion mid-incident. CPU-only torch fix kept. New known-good tag: 6.1.0-gf75ce847. See Builds note above.
+#   1.16.0 (2026-09-11)
+#     - Noted in Summary: CPU-only torch fix (fork requirements.txt) - images ~4.7GB smaller each, verified (see stack-spiderfoot-docker.yml's changelog for the fork-side commit)
+#   1.15.0 (2026-09-11)
+#     - Added SF_EVENTBUS_BACKEND/SF_EVENTBUS_REDIS_URL to sf-celery-worker, sf-celery-worker-active and sf-agents 
+#     - wires the real-time EventIndexer(Qdrant), previously complete code that nothing ever started (report_generator.py's on-demand Postgres backfill stays as a safety net, not replaced)
+#   1.14.0 (2026-09-10)
+#     - sf-agents now runs as root (0:0) instead of 1000:1000 - the embeddings-cache bind mount's ":U" auto-chown flag wasn't actually being applied by this stack's compose engine (confirmed via podman inspect)
+#     - leaving the model cache root-owned and unwritable by a non-root container. Contained via the existing cap_drop: ALL + no-new-privileges, so root here carries no elevated capabilities.
+#     - Removed the ineffective ":U" suffix from the embeddings-cache mount
+#   1.13.0 (2026-09-10)
+#     - Summary now notes 110/310 modules need an API key, 80 free - see docs/free-api-modules.md
+#   1.12.0 (2026-09-10)
+#     - Added sf-qdrant (missing service - sf-agents had nothing to point at, so Qdrant silently ran on the empty ephemeral in-memory backend every restart, even after 1.11.0's healthcheck fix)
+#     - Wired SF_QDRANT_BACKEND/HOST/PORT and SF_EMBEDDING_PROVIDER/MODEL/DIMENSIONS into sf-agents - embeddings were also defaulting to mock (fake) vectors with nothing set
+#     - Added a persistent bind mount for sf-agents' embeddings model cache
+#     - Added cap_drop: ALL to sf-litellm (tested first on the local stack - safe; read_only was tested too and breaks it silently, not applied)
+#     - Updated mkdir instructions and container count (6 -> 9) for the new service
+#   1.11.0 (2026-09-10)
+#     - sf-litellm had no healthcheck at all - added one (see inline comment)
+#     - Fixed sf-litellm's comment block, which had reverted to stale pre-1.7.0 text claiming it fronts Ollama - it fronts Anthropic, matching the Summary and its own env vars
+#   1.10.0 (2026-09-10)
+#     - All 5 spiderfoot-* image: paths updated to ghcr.io/braedach/spiderfoot/spiderfoot-<service>
+#   Previous builds refer to github history
+#
+# =============================================================================
+
+name: spiderfoot
+
+services:
+  sf-postgres:
+    image: public.ecr.aws/docker/library/postgres:15-alpine
+    container_name: sf-postgres
+    hostname: sf-postgres
+    restart: always
+    environment:
+      - TZ=${TZ}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - /srv/spiderfoot/postgres:/var/lib/postgresql/data:U
+      - /etc/localtime:/etc/localtime:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - spiderfoot-net
+
+  sf-redis:
+    image: public.ecr.aws/docker/library/redis:7-alpine
+    container_name: sf-redis
+    hostname: sf-redis
+    restart: always
+    environment:
+      - TZ=${TZ}
+    volumes:
+      - /srv/spiderfoot/redis:/data:U
+      - /etc/localtime:/etc/localtime:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - spiderfoot-net
+
+  sf-api:
+    image: ghcr.io/braedach/spiderfoot/spiderfoot-api:${SPIDERFOOT_TAG}
+    container_name: sf-api
+    hostname: sf-api
+    restart: always
+    user: "1000:1000"
+    read_only: true
+    labels:
+      - com.docker.compose.project=spiderfoot
+      - com.docker.compose.service=sf-api
+      - com.centurylinklabs.watchtower.enable=true
+    tmpfs:
+      - /home/spiderfoot/cache:mode=1777
+      - /home/spiderfoot/logs:mode=1777
+      - /tmp
+    environment:
+      - TZ=${TZ}
+      - SF_DEPLOYMENT_MODE=${SF_DEPLOYMENT_MODE}
+      - SF_POSTGRES_DSN=${SF_DATABASE_URL}
+      - SF_REDIS_URL=${SF_REDIS_URL}
+      - SF_LOG_FORMAT=${SF_LOG_FORMAT}
+      - SF_JWT_SECRET=${SF_JWT_SECRET_KEY}
+      - SF_ADMIN_PASSWORD=${SF_ADMIN_PASSWORD}
+    depends_on:
+      - sf-postgres
+      - sf-redis
+    healthcheck:
+      test: ["CMD", "python3", "-c", "__import__('urllib.request').request.urlopen('http://127.0.0.1:9001/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      spiderfoot-net:
+        aliases:
+          - api
+
+  sf-celery-worker:
+    image: ghcr.io/braedach/spiderfoot/spiderfoot-scanner:${SPIDERFOOT_TAG}
+    container_name: sf-celery-worker
+    hostname: sf-celery-worker
+    restart: always
+    user: "1000:1000"
+    read_only: true
+    labels:
+      - com.docker.compose.project=spiderfoot
+      - com.docker.compose.service=sf-celery-worker
+      - com.centurylinklabs.watchtower.enable=true
+    tmpfs:
+      - /home/spiderfoot/cache:mode=1777
+      - /home/spiderfoot/logs:mode=1777
+      - /tmp
+    environment:
+      - TZ=${TZ}
+      - SF_DEPLOYMENT_MODE=${SF_DEPLOYMENT_MODE}
+      - SF_POSTGRES_DSN=${SF_DATABASE_URL}
+      - SF_REDIS_URL=${SF_REDIS_URL}
+      - SF_LOG_FORMAT=${SF_LOG_FORMAT}
+      # Real-time Qdrant indexing via EventBus - CURRENTLY INERT. The
+      # scanner-side publish code (commit 1bead36e) was reverted on
+      # 2026-09-11 after a scan looked stalled post-deploy; turned out to
+      # be a bad baseline comparison, not a confirmed bug, but reverted
+      # anyway rather than trust something already under suspicion
+      # mid-incident. Nothing in the currently-deployed image reads these
+      # two vars. Left in place, not removed, for whenever that feature
+      # gets a clean, unhurried verification pass and goes back in - see
+      # stack-spiderfoot-podman.yml's git history / PR #393 for the fix.
+      - SF_EVENTBUS_BACKEND=redis
+      - SF_EVENTBUS_REDIS_URL=${SF_REDIS_URL}
+    depends_on:
+      - sf-postgres
+      - sf-redis
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - spiderfoot-net
+
+  sf-celery-worker-active:
+    image: ghcr.io/braedach/spiderfoot/spiderfoot-active-scanner:${SPIDERFOOT_TAG}
+    container_name: sf-celery-worker-active
+    hostname: sf-celery-worker-active
+    restart: always
+    profiles:
+      - scan
+    user: "1000:1000"
+    read_only: true
+    labels:
+      - com.docker.compose.project=spiderfoot
+      - com.docker.compose.service=sf-celery-worker-active
+      - com.centurylinklabs.watchtower.enable=true
+    tmpfs:
+      - /home/spiderfoot/cache:mode=1777
+      - /home/spiderfoot/logs:mode=1777
+      - /tmp
+    environment:
+      - TZ=${TZ}
+      - SF_DEPLOYMENT_MODE=${SF_DEPLOYMENT_MODE}
+      - SF_POSTGRES_DSN=${SF_DATABASE_URL}
+      - SF_REDIS_URL=${SF_REDIS_URL}
+      - SF_LOG_FORMAT=${SF_LOG_FORMAT}
+      # Real-time Qdrant indexing via EventBus - CURRENTLY INERT, same as
+      # sf-celery-worker above (reverted 2026-09-11, kept for later).
+      - SF_EVENTBUS_BACKEND=redis
+      - SF_EVENTBUS_REDIS_URL=${SF_REDIS_URL}
+    depends_on:
+      - sf-postgres
+      - sf-redis
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - spiderfoot-net
+
+  sf-frontend-ui:
+    image: ghcr.io/braedach/spiderfoot/spiderfoot-frontend:${SPIDERFOOT_TAG}
+    container_name: sf-frontend-ui
+    hostname: sf-frontend-ui
+    restart: always
+    read_only: true
+    ports:
+      - 5001:80
+    labels:
+      - com.docker.compose.project=spiderfoot
+      - com.docker.compose.service=sf-frontend-ui
+      - homepage.group=Open-Source Intelligence
+      - homepage.name=SpiderFoot Service
+      - homepage.href=https://spiderfoot.baden.braedach.com
+      - homepage.description=Spiderfoot Intelligence Tool
+      - homepage.icon=spiderfoot.png
+    tmpfs:
+      - /etc/nginx/conf.d
+      - /var/cache/nginx
+      - /var/run
+    environment:
+      - TZ=${TZ}
+      - NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1
+    depends_on:
+      - sf-api
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - NET_BIND_SERVICE
+    networks:
+      - spiderfoot-net
+
+  sf-litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: sf-litellm
+    hostname: sf-litellm
+    restart: always
+    labels:
+      - com.docker.compose.project=spiderfoot
+      - com.docker.compose.service=sf-litellm
+      - com.centurylinklabs.watchtower.enable=true
+    volumes:
+      - /srv/spiderfoot/litellm/config.yaml:/app/config.yaml:ro
+    environment:
+      - LITELLM_MASTER_KEY=${SF_LLM_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      spiderfoot-net:
+        aliases:
+          - litellm
+
+  sf-qdrant:
+    image: qdrant/qdrant:v1.19.1
+    container_name: sf-qdrant
+    hostname: sf-qdrant
+    restart: always
+    environment:
+      - TZ=${TZ}
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__SERVICE__HTTP_PORT=6333
+    volumes:
+      - /srv/spiderfoot/qdrant:/qdrant/storage:U
+      - /etc/localtime:/etc/localtime:ro
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/6333'"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      spiderfoot-net:
+        aliases:
+          - qdrant
+
+  sf-agents:
+    image: ghcr.io/braedach/spiderfoot/spiderfoot-base:${SPIDERFOOT_TAG}
+    container_name: sf-agents
+    hostname: sf-agents
+    restart: always
+    # Runs as root (0:0), unlike the other services - the embeddings-cache
+    # bind mount below needs a writable owner and podman's ":U" auto-chown
+    # bind option isn't actually being honored through this stack's compose
+    # engine (confirmed: podman inspect showed a plain rbind, no chown
+    # applied). Running as root sidesteps the UID-mismatch entirely without
+    # a manual host-side chown on every fresh deploy. Contained by cap_drop:
+    # ALL below - root here has no elevated Linux capabilities (no
+    # CAP_DAC_OVERRIDE, CAP_SYS_ADMIN, etc.), so it's UID 0 in name only.
+    user: "0:0"
+    entrypoint: ["/usr/local/bin/docker-entrypoint.sh"]
+    command: ["python", "-m", "spiderfoot.agents.service"]
+    devices:
+      # Podman CDI - NVIDIA RTX 3070 passthrough (configured via
+      # setup-lxc-gpu.sh). Needs read_only removed (see below) - the
+      # nvidia-cdi-hook writes into the container's filesystem at startup
+      # and fails outright if it can't.
+      - nvidia.com/gpu=all
+    labels:
+      - com.docker.compose.project=spiderfoot
+      - com.docker.compose.service=sf-agents
+      - com.centurylinklabs.watchtower.enable=true
+    tmpfs:
+      - /home/spiderfoot/cache:mode=1777
+      - /home/spiderfoot/logs:mode=1777
+      - /home/spiderfoot/data:mode=1777
+      - /home/spiderfoot/.spiderfoot:mode=1777
+      - /tmp
+    environment:
+      - TZ=${TZ}
+      - HF_HOME=/home/spiderfoot/.cache/huggingface
+      - SF_SERVICE_ROLE=agents
+      - SF_AGENTS_HOST=0.0.0.0
+      - SF_AGENTS_PORT=8100
+      - SF_POSTGRES_DSN=${SF_DATABASE_URL}
+      - SF_REDIS_URL=${SF_REDIS_URL}
+      - SF_LLM_PROVIDER=openai
+      - SF_LLM_API_BASE=http://litellm:4000
+      - SF_LLM_API_KEY=${SF_LLM_API_KEY}
+      - SF_LLM_MODEL=spiderfoot-llm
+      - SF_QDRANT_BACKEND=http
+      - SF_QDRANT_HOST=qdrant
+      - SF_QDRANT_PORT=6333
+      - SF_QDRANT_GRPC_PORT=6334
+      - SF_QDRANT_PREFIX=sf_
+      - SF_EMBEDDING_PROVIDER=fastembed
+      - SF_EMBEDDING_MODEL=all-MiniLM-L6-v2
+      - SF_EMBEDDING_DIMENSIONS=384
+      # Real-time Qdrant indexing via EventBus - CURRENTLY INERT, same as
+      # sf-celery-worker above (reverted 2026-09-11, kept for later). This
+      # is also where the indexer itself would run once re-enabled.
+      - SF_EVENTBUS_BACKEND=redis
+      - SF_EVENTBUS_REDIS_URL=${SF_REDIS_URL}
+    volumes:
+      - /srv/spiderfoot/embeddings-cache:/home/spiderfoot/.cache/huggingface
+    depends_on:
+      - sf-postgres
+      - sf-redis
+      - sf-litellm
+      - sf-qdrant
+    healthcheck:
+      test: ["CMD", "python3", "-c", "__import__('urllib.request').request.urlopen('http://127.0.0.1:8100/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - spiderfoot-net
+
+networks:
+  spiderfoot-net:
+    name: spiderfoot-net
+    driver: bridge
