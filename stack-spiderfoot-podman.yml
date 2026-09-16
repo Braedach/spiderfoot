@@ -87,26 +87,15 @@
 #
 # Changelog:
 #   2.4.0 (2026-09-17) - New known-good build: 6.1.0-gb05e98c3.
-#     6.1.0-g4b0231b2 (2.2.0's known-good build) has a real bug: ReportStore's
-#     read-only methods (get, list_reports, count in
-#     spiderfoot/reporting/report_storage.py) never called conn.commit() or
-#     rollback() after a SELECT. Since that connection is explicitly
-#     non-autocommit, every plain read left its transaction open
-#     indefinitely - confirmed live: a single stuck read held a lock for 9+
-#     minutes, blocking every later attempt to touch the reports table
-#     (including the schema-check any fresh ReportStore init runs), and kept
-#     recurring within minutes of manually clearing it. From the frontend
-#     this looked exactly like AI report generation "just spinning" - the
-#     report itself, and the LLM call, had already completed successfully;
+#     6.1.0-g4b0231b2 (2.2.0's known-good build) has a real bug: 
+#     ReportStore's read-only methods (get, list_reports, count in spiderfoot/reporting/report_storage.py) never called conn.commit() or
+#     rollback() after a SELECT. Since that connection is explicitly non-autocommit, every plain read left its transaction open
+#     indefinitely - confirmed live: a single stuck read held a lock for 9+ minutes, blocking every later attempt to touch the reports table
+#     (including the schema-check any fresh ReportStore init runs), and kept recurring within minutes of manually clearing it. From the frontend
+#     this looked exactly like AI report generation "just spinning" - the report itself, and the LLM call, had already completed successfully;
 #     an unrelated stuck read was blocking everything downstream of it.
-#     Fixed by wrapping each read-only method's query in try/finally with
-#     conn.rollback() in finally. Verified in isolation (10 rounds of
-#     get/list_reports/count left zero idle-in-transaction connections
-#     afterward, versus one per call before the fix).
-#     Also added SF_REPORT_MAX_EVENTS_PER_SCAN=2000 to sf-agents - the
-#     configurable cap added for the same reason (see 2.2.0's changelog
-#     entry, and PR #393) was never actually set anywhere, so it kept
-#     silently defaulting back to 500 regardless.
+#     Also added SF_REPORT_MAX_EVENTS_PER_SCAN=2000 to sf-agents - the configurable cap added for the same reason (see 2.2.0's changelog
+#     entry, and PR #393) was never actually set anywhere, so it kept silently defaulting back to 500 regardless.
 #   2.3.0 (2026-09-16) - BREAKING CHANGE: sf-qdrant v1.12.4 -> v1.19.1.
 #     Verified via Qdrant's own upgrade documentation that a single-node deployment cannot skip minor versions with existing data on disk -
 #     On that basis, fixed by stopping sf-qdrant, wiping /srv/spiderfoot/qdrant entirely, and starting clean on v1.19.1
