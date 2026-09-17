@@ -119,6 +119,7 @@ def _redis_snapshot(scan_id: str) -> "ProgressSnapshot | None":
     updated_at = _f("updated_at", time.time())
     modules_completed = int(_f("modules_completed"))
     modules_total = int(_f("modules_total"))
+    modules_running = int(_f("modules_running"))
     events_total = int(_f("events_produced"))
     progress_pct = _f("progress")
 
@@ -127,6 +128,7 @@ def _redis_snapshot(scan_id: str) -> "ProgressSnapshot | None":
         overall_pct=progress_pct,
         modules_completed=modules_completed,
         modules_total=modules_total,
+        modules_running=modules_running,
         events_total=events_total,
         throughput_eps=0.0,
         eta_seconds=None,

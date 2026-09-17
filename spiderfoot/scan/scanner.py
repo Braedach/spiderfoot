@@ -40,6 +40,19 @@ from .scan_state_map import (
 import logging
 log = logging.getLogger("spiderfoot.scanner")
 
+# In-process registry of live "modules currently running" counts, keyed by
+# scan_id. threadsFinished() already recomputes this on every poll of its own
+# wait loop (see below) - this just makes that number readable from the
+# scan-task's separate progress-poller thread, which runs in the same worker
+# process. Plain dict get/set is atomic under the GIL, so no lock is needed
+# for this best-effort metric.
+_running_module_counts: dict[str, int] = {}
+
+
+def get_running_module_count(scan_id: str) -> int:
+    """Return the number of modules currently executing for scan_id (0 if untracked)."""
+    return _running_module_counts.get(scan_id, 0)
+
 
 def startSpiderFootScanner(loggingQueue: Any, *args, **kwargs) -> SpiderFootScanner:
     """Initialize and start the SpiderFootScanner.
@@ -691,6 +704,7 @@ class SpiderFootScanner():
             for mod in self.__moduleInstances.values():
                 mod._stopScanning = True
             self.__sharedThreadPool.shutdown(wait=True)
+            _running_module_counts.pop(self.__scanId, None)
 
     def threadsFinished(self, log_status: bool = False) -> bool:
         """Check whether all module queues are empty and no modules are running."""
@@ -716,6 +730,9 @@ class SpiderFootScanner():
             except Exception as e:
                 with suppress(Exception):
                     m.errorState = True
+
+        with suppress(Exception):
+            _running_module_counts[self.__scanId] = len(modules_running)
 
         modules_errored = []
         for m in self.__moduleInstances.values():
