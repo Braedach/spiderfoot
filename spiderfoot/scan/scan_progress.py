@@ -76,6 +76,7 @@ class ProgressSnapshot:
     events_total: int
     throughput_eps: float  # events per second
     eta_seconds: float | None
+    modules_running: int = 0
 
     def to_dict(self) -> dict:
         """Return a dictionary representation."""
@@ -84,6 +85,7 @@ class ProgressSnapshot:
             "overall_pct": round(self.overall_pct, 2),
             "modules_completed": self.modules_completed,
             "modules_total": self.modules_total,
+            "modules_running": self.modules_running,
             "events_total": self.events_total,
             "throughput_eps": round(self.throughput_eps, 2),
             "eta_seconds": round(self.eta_seconds, 1) if self.eta_seconds is not None else None,
@@ -240,6 +242,9 @@ class ScanProgressTracker:
                     1 for m in self._modules.values() if m.is_terminal
                 ),
                 modules_total=len(self._modules),
+                modules_running=sum(
+                    1 for m in self._modules.values() if m.status == ModuleStatus.RUNNING
+                ),
                 events_total=self._total_events,
                 throughput_eps=self._total_events / max(0.001, self.elapsed),
                 eta_seconds=self._calc_eta(),
@@ -307,6 +312,9 @@ class ScanProgressTracker:
                         1 for m in self._modules.values() if m.is_terminal
                     ),
                     modules_total=len(self._modules),
+                    modules_running=sum(
+                        1 for m in self._modules.values() if m.status == ModuleStatus.RUNNING
+                    ),
                     events_total=self._total_events,
                     throughput_eps=self._total_events / max(0.001, self.elapsed),
                     eta_seconds=self._calc_eta(),

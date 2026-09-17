@@ -71,8 +71,15 @@ def _poll_scan_progress(
             modules_with_events = len(rows)
             events_produced = sum(r[3] for r in rows) if rows else 0
             progress = round(min(99.0, (modules_with_events / modules_total) * 100), 1)
+            # get_running_module_count() reads an in-process registry that
+            # the scanner keeps updated on its own wait loop - safe to read
+            # from here since the poller runs as a separate thread in the
+            # same worker process as the scanner, not a separate process.
+            from spiderfoot.scan.scanner import get_running_module_count
+            modules_running = get_running_module_count(scan_id)
             update_scan_progress(
                 scan_id, progress, modules_with_events, modules_total, events_produced,
+                modules_running=modules_running,
             )
         except Exception as poll_err:
             logger.debug("scan.progress_poll_failed scan_id=%s: %s", scan_id, poll_err)
@@ -543,6 +550,7 @@ def update_scan_progress(
     modules_completed: int,
     modules_total: int,
     events_produced: int,
+    modules_running: int = 0,
 ) -> None:
     """Lightweight task to update scan progress in Redis.
 
@@ -561,6 +569,7 @@ def update_scan_progress(
         "progress": progress,
         "modules_completed": modules_completed,
         "modules_total": modules_total,
+        "modules_running": modules_running,
         "events_produced": events_produced,
         "updated_at": time.time(),
     }
