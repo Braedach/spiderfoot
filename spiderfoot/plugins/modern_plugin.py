@@ -90,6 +90,7 @@ class SpiderFootModernPlugin(SpiderFootPlugin):
         self._data_service = None
         self._event_bus = None
         self._metrics_imported = False
+        self._busy = False
         self._log = None
 
     # ------------------------------------------------------------------
@@ -437,6 +438,24 @@ class SpiderFootModernPlugin(SpiderFootPlugin):
     # Instrumented handleEvent wrapper
     # ------------------------------------------------------------------
 
+    @property
+    def running(self) -> bool:
+        """True while this module is actively inside handleEvent().
+
+        This overrides SpiderFootPlugin.running (which only checks
+        sharedThreadPool task state) because threadWorker() below calls
+        handleEvent() directly on this module's own dedicated thread,
+        never submitting to sharedThreadPool at all - so the base check
+        is permanently blind to activity here. Every module in the
+        codebase subclasses SpiderFootModernPlugin/SpiderFootAsyncPlugin,
+        so without this, threadsFinished() (scan-completion detection AND
+        the scan-progress "modules running" count) never sees a modern
+        plugin as busy, even mid-handleEvent - risking the scanner
+        deciding the scan is finished while a slow module (e.g.
+        sfp_accounts checking hundreds of sites) is still working.
+        """
+        return self._busy or super().running
+
     def threadWorker(self) -> None:
         """Override threadWorker to instrument handleEvent with metrics.
 
@@ -474,6 +493,7 @@ class SpiderFootModernPlugin(SpiderFootPlugin):
 
             self._currentEvent = sfEvent
 
+            self._busy = True
             try:
                 t0 = time.monotonic()
                 self.handleEvent(sfEvent)
@@ -482,6 +502,8 @@ class SpiderFootModernPlugin(SpiderFootPlugin):
                 self.log.error("Module %s failed: %s", self.__name__, e)
                 self._record_module_error(type(e).__name__)
                 self.errorState = True
+            finally:
+                self._busy = False
 
             self.incomingEventQueue.task_done()
 
