@@ -19,6 +19,10 @@
 #        - Shodan, VirusTotal, AlienVault OTX, Censys, BinaryEdge, Hunter.io, AbuseIPDB, IPInfo.io, WhoisXML API, CertSpotter, FullHunt.
 #     Full list: docs/free-api-modules.md
 #
+#  Functionality:
+#     - New - The answer is no till I fix what was intended from the fork
+#     - Get that going and working as intended - then I will think about it.  Would like to add SmartAI functionality but lets see.
+#
 #  GPU Passthrough:
 #     - This is your fault
 #     - current implementation uses torch which is massive and unwieldy
@@ -26,13 +30,10 @@
 #     - Get rid of the current solution and make it better and smaller.
 #
 #   Builds
-#     - 6.1.0-g4b0231b2 is NOT good - do not use. Real Postgres connection-leak
-#       bug in ReportStore's read-only methods (get/list_reports/count never
-#       committed, leaving transactions open indefinitely) - causes AI report
-#       generation to appear to hang/spin after a few uses, once enough stuck
+#     - 6.1.0-g4b0231b2 is NOT good - do not use. Real Postgres connection-leak bug in ReportStore's read-only methods (get/list_reports/count never
+#       committed, leaving transactions open indefinitely) - causes AI report generation to appear to hang/spin after a few uses, once enough stuck
 #       connections pile up blocking the reports table. See Changelog 2.4.0.
-#     - 6.1.0-gb05e98c3 is the new known-good build (2026-09-17) - fixes the
-#       above. Built and confirmed genuinely public on GHCR; not yet
+#     - 6.1.0-gb05e98c3 is the new known-good build (2026-09-17) - fixes the above. Built and confirmed genuinely public on GHCR; not yet
 #       verified live in production - pending redeploy on baden.
 #     - Remove other builds prior to starting major modifications
 #
@@ -86,32 +87,20 @@
 #     - IDS/IPS systems may go ballistic
 #
 # Changelog:
-#   2.5.0 (2026-09-18) - Two real scan-engine bugs found and fixed, not a new
-#     known-good build (still 6.1.0-gb05e98c3 below - not bumping that yet,
+#   2.5.0 (2026-09-18) - Two real scan-engine bugs found and fixed, not a new known-good build (still 6.1.0-gb05e98c3 below - not bumping that yet,
 #     giving it more soak time). Both confirmed live on this deployment,
 #     image tag 6.1.0-gfeede62f:
-#     - The frontend's scan-summary "modules running" count had been
-#       hardcoded to always show 0 since its own field never existed
-#       anywhere in the progress pipeline (ProgressSnapshot, the Redis
-#       progress hash, the SSE/REST endpoints). Wired it through end to
-#       end from an in-process registry the scan engine's own
-#       threadsFinished() poll already recomputes internally.
-#     - That alone wasn't enough: SpiderFootPlugin.running (what the fix
-#       above actually reads) checks sharedThreadPool task state, but
-#       SpiderFootModernPlugin.threadWorker() - used directly or via
-#       SpiderFootAsyncPlugin by every module in the codebase (310/310) -
-#       overrides threadWorker() to call handleEvent() directly on the
-#       module's own thread, never touching sharedThreadPool at all. So
-#       "running" was blind to real module activity regardless of the
-#       first fix. Not just cosmetic: threadsFinished() also drives
-#       waitForThreads()'s decision that the scan itself is finished, so a
-#       scan could plausibly be marked complete while a slow module (e.g.
-#       sfp_accounts checking hundreds of sites for one event) is still
-#       genuinely inside handleEvent(). Fixed with a _busy flag set/cleared
-#       around that call, ORed with the legacy check. See PR #393.
-#       Verified live: correlated the counter second-by-second against
-#       real sfp_accounts HTTP activity in celery-worker-active's logs -
-#       12 modules running at scan start, settling to 1 as only the slow
+#     - The frontend's scan-summary "modules running" count had been hardcoded to always show 0 since its own field never existed
+#       anywhere in the progress pipeline (ProgressSnapshot, the Redis progress hash, the SSE/REST endpoints). Wired it through end to
+#       end from an in-process registry the scan engine's own threadsFinished() poll already recomputes internally.
+#     - That alone wasn't enough: SpiderFootPlugin.running (what the fix above actually reads) checks sharedThreadPool task state, but
+#       SpiderFootModernPlugin.threadWorker() - used directly or via SpiderFootAsyncPlugin by every module in the codebase (310/310) -
+#       overrides threadWorker() to call handleEvent() directly on the module's own thread, never touching sharedThreadPool at all. So
+#       "running" was blind to real module activity regardless of the first fix. Not just cosmetic: threadsFinished() also drives
+#       waitForThreads()'s decision that the scan itself is finished, so a scan could plausibly be marked complete while a slow module (e.g.
+#       sfp_accounts checking hundreds of sites for one event) is still genuinely inside handleEvent(). Fixed with a _busy flag set/cleared
+#       around that call, ORed with the legacy check. See PR #393. Verified live: correlated the counter second-by-second against
+#       real sfp_accounts HTTP activity in celery-worker-active's logs -12 modules running at scan start, settling to 1 as only the slow
 #       ones remain, tracking real engine state throughout.
 #   2.4.0 (2026-09-17) - New known-good build: 6.1.0-gb05e98c3.
 #     6.1.0-g4b0231b2 (2.2.0's known-good build) has a real bug: 
