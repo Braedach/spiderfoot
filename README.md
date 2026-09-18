@@ -19,8 +19,10 @@ an unrelated stuck read was blocking everything downstream of it. See
 `stack-spiderfoot-podman.yml`'s Changelog 2.4.0 for the full incident.
 
 Fix verified in isolation (10 rounds of the affected methods left zero
-stuck connections afterward, versus one per call before); **not yet
-verified live in production** — pending redeploy on baden.
+stuck connections afterward, versus one per call before), and confirmed
+live in production, **2026-09-17**: real AI reports generated
+successfully end-to-end with no recurrence of the stuck-connection
+pileup.
 
 `6.1.0-g4b0231b2` itself was fully tested end-to-end on both Podman and
 Docker deployments, **2026-09-13**: all services healthy, AI report
@@ -57,6 +59,8 @@ files below) — same job, no torch, ~67MB instead of ~1GB+.
 - The generic `docker-compose.yml` + `docker/compose/*.yml` reference deployment had a real bug of its own: its general-purpose Celery worker still listened on the `scan` queue alongside the dedicated active-scanner worker, even though it lacks the recon tooling — scans could silently lose active modules depending on which worker claimed them
 - AI reports generated via `sf-agents`' `/report` endpoint (the only path the frontend actually calls) were never persisted server-side — only ever reached the requesting browser's own `localStorage`, invisible from any other browser/device
 - `ReportStore`'s read-only methods (`get`, `list_reports`, `count`) never committed after a `SELECT`, leaking a Postgres connection idle-in-transaction on every call — eventually blocks the whole `reports` table, surfacing as AI report generation appearing to hang
+- The scan-summary "modules running" count always showed 0 regardless of actual scan state, because the field never existed anywhere in the progress pipeline — wired through end to end from the scan engine's existing internal module-tracking
+- That alone wasn't enough: the scan engine's own "is this module running" check was blind to every module in the codebase (310/310), since the base check watches a shared thread pool that the actual per-module dispatch path never uses — not just cosmetic, since the same signal drives the scan-completion decision itself, not only the progress UI. Both confirmed live, **2026-09-18**.
 
 See the PR for full detail on each.
 
