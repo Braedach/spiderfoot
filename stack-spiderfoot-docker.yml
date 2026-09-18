@@ -1,8 +1,8 @@
 # =============================================================================
 # stack-spiderfoot-docker.yml — reference Docker deployment, builds from source
-# Version: 1.9.0
+# Version: 1.10.0
 # Created: 2026-09-10
-# Updated: 2026-09-17
+# Updated: 2026-09-18
 #
 # Published from this fork's own private dev/repro stack of the same name -
 # history below predates publication and references stack-spiderfoot-
@@ -114,6 +114,11 @@
 #       may go ballistic.
 #
 # Changelog:
+#   1.10.0 (2026-09-18) - Two real scan-engine bugs found and fixed, not a
+#     new known-good build (still 6.1.0-gb05e98c3 below - not bumping that
+#     yet, giving it more soak time). Same source, same fixes, same
+#     verification as stack-spiderfoot-podman.yml's identical 2.5.0 entry -
+#     not repeated here. Image tag 6.1.0-gfeede62f. See PR #393.
 #   1.9.0 (2026-09-17) - New known-good build: commit b05e98c3 (image tag
 #     6.1.0-gb05e98c3). 4b0231b2 (1.7.0's known-good build) has a real Postgres
 #     connection-leak bug - see stack-spiderfoot-podman.yml's Changelog
