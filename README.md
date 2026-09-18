@@ -52,7 +52,7 @@ files below) — same job, no torch, ~67MB instead of ~1GB+.
 
 - AI report generation returning empty/generic output (nine stacked bugs — service registry access, DB wiring, event-column mapping, Qdrant never populated, timeouts too short)
 - Scan progress API (`/progress`, `/progress/stream`) returning 404 for every scan
-- Local embeddings switched from `sentence-transformers`+`torch` (~1GB+, mandatory regardless of backend choice, per PyPI's own metadata) to `fastembed` (onnxruntime-backed, ~67MB, no torch anywhere) — real semantic search at a fraction of the size, with an optional `fastembed-gpu` build for deployments with GPU passthrough
+- Local embeddings switched from `sentence-transformers`+`torch` (~1GB+, mandatory regardless of backend choice, per PyPI's own metadata) to `fastembed` (onnxruntime-backed, ~67MB, no torch anywhere) — real semantic search at a fraction of the size, with an optional `fastembed-gpu` build for deployments with GPU passthrough - NOT yet built as I dont need it - yet.
 - Two Postgres connection leaks (`ConfigManager`, `AuthService`) — reads that never committed, leaving connections stuck open indefinitely
 - Deleting a scan never cleaned up its vectors in Qdrant — fixed to delete by `scan_id` from the shared events collection
 - AI reports silently capped at 500 analysed events per scan regardless of how many were actually indexed — now configurable (`SF_REPORT_MAX_EVENTS_PER_SCAN`), and both stack files now actually set it (`2000`) — the cap was configurable since 2026-09-13 but never actually raised anywhere, so it kept defaulting back to 500 regardless
