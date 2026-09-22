@@ -1,8 +1,8 @@
 # =============================================================================
 # stack-spiderfoot-podman.yml
-# Version: 2.5.0
+# Version: 2.6.0
 # Created: 2026-08-06
-# Updated: 2026-09-18
+# Updated: 2026-09-22
 #
 # Summary:
 #   Purpose:
@@ -33,8 +33,11 @@
 #     - 6.1.0-g4b0231b2 is NOT good - do not use. Real Postgres connection-leak bug in ReportStore's read-only methods (get/list_reports/count never
 #       committed, leaving transactions open indefinitely) - causes AI report generation to appear to hang/spin after a few uses, once enough stuck
 #       connections pile up blocking the reports table. See Changelog 2.4.0.
-#     - 6.1.0-gb05e98c3 is the new known-good build (2026-09-17) - fixes the above. Built and confirmed genuinely public on GHCR; not yet
-#       verified live in production - pending redeploy on baden.
+#     - 6.1.0-gb05e98c3 is NOT good - do not use. Despite its own changelog entry (2.4.0) claiming otherwise, the fix above never
+#       actually shipped in code - only in docs. See Changelog 2.6.0 for the full correction.
+#     - 6.1.0-g95d573f9 is the new known-good build (2026-09-22) - the ReportStore fix genuinely applied this time, plus the same
+#       missing-commit pattern fixed across 17 more spiderfoot/db/ methods. Verified live on baden via direct stress-test. See
+#       Changelog 2.6.0.
 #     - Remove other builds prior to starting major modifications
 #
 #   Usage:
@@ -87,6 +90,24 @@
 #     - IDS/IPS systems may go ballistic
 #
 # Changelog:
+#   2.6.0 (2026-09-22) - New known-good build: 6.1.0-g95d573f9. Correction:
+#     6.1.0-gb05e98c3 (2.4.0's known-good build) was never actually good -
+#     the ReportStore connection-leak fix it claimed never shipped in code,
+#     only in docs/changelog (a PR built fresh off master instead of
+#     merging the real development-branch commit). Recurred live 2026-09-22:
+#     list_reports(scan_id=...) held a transaction open 2h13m, five
+#     subsequent connections piled up behind it, took the API down. Fixed
+#     for real this time (6.1.0-g4899644a) - verified via the actual
+#     committed diff and by grepping the file inside the built image, not
+#     by trusting the log. While verifying it live, found the identical
+#     missing-commit pattern in 17 more spiderfoot/db/ methods backing
+#     nearly every page load (scan results, dashboard, scan list, log
+#     viewer) - very plausibly the real root cause behind this project's
+#     recurring GUI-hang pattern. Fixed the same way (6.1.0-g95d573f9),
+#     stress-tested live: 105 calls across the 7 highest-traffic methods,
+#     zero connections left idle-in-transaction afterward vs one per call
+#     before. See PR #393 and README.md's "Known good build" section for
+#     the full incident writeup.
 #   2.5.0 (2026-09-18) - Two real scan-engine bugs found and fixed, not a new known-good build (still 6.1.0-gb05e98c3 below - not bumping that yet,
 #     giving it more soak time). Both confirmed live on this deployment,
 #     image tag 6.1.0-gfeede62f:

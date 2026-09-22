@@ -1,8 +1,8 @@
 # =============================================================================
 # stack-spiderfoot-docker.yml — reference Docker deployment, builds from source
-# Version: 1.10.0
+# Version: 1.11.0
 # Created: 2026-09-10
-# Updated: 2026-09-18
+# Updated: 2026-09-22
 #
 # Published from this fork's own private dev/repro stack of the same name -
 # history below predates publication and references stack-spiderfoot-
@@ -56,10 +56,12 @@
 #     stack-spiderfoot-podman.yml's Changelog 2.4.0 for the full incident -
 #     same shared source, same bug, both platforms) - causes AI report
 #     generation to appear to hang/spin after a few uses.
-#     development branch commit b05e98c3 (image tag 6.1.0-gb05e98c3) is the
-#     new known-good build (2026-09-17) - fixes the above. Built and
-#     confirmed genuinely public on GHCR; not yet verified live in
-#     production - pending redeploy on baden.
+#     6.1.0-gb05e98c3 is NOT good - do not use. Despite its own changelog
+#     claiming otherwise, that fix never actually shipped in code, only in
+#     docs (see Changelog 1.11.0). 6.1.0-g95d573f9 is the new known-good
+#     build (2026-09-22) - fixes the above for real this time, plus the
+#     same missing-commit pattern found and fixed across 17 more
+#     spiderfoot/db/ methods. Verified live via direct stress-test.
 #
 #     Images pull CPU-only torch (fork requirements.txt, verified
 #     2026-09-11) - base/api/scanner 6.71GB -> 1.97GB, active-scanner
@@ -114,6 +116,9 @@
 #       may go ballistic.
 #
 # Changelog:
+#   1.11.0 (2026-09-22) - New known-good build: 6.1.0-g95d573f9. Same
+#     incident, same fixes, same verification as stack-spiderfoot-podman.yml's
+#     identical 2.6.0 entry - not repeated here. See PR #393.
 #   1.10.0 (2026-09-18) - Two real scan-engine bugs found and fixed, not a
 #     new known-good build (still 6.1.0-gb05e98c3 below - not bumping that
 #     yet, giving it more soak time). Same source, same fixes, same
