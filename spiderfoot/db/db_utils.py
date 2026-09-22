@@ -72,6 +72,7 @@ def check_connection(conn: object, db_type: str) -> bool:
         cursor.execute('SELECT 1')
         cursor.fetchone()
         cursor.close()
+        conn.commit()
         return True
     except Exception:
         return False

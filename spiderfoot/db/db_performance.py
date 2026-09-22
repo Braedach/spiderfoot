@@ -210,6 +210,7 @@ class PartitionManager:
                 )
                 parts = [row[0] for row in cursor.fetchall()]
                 cursor.close()
+                self._conn.commit()
                 return parts
             except Exception as e:
                 log.debug("list_partitions failed: %s", e)

@@ -103,7 +103,9 @@ class CorrelationManager:
             for attempt in range(3):
                 try:
                     self.dbh.execute(qry, qvars)
-                    return self.dbh.fetchall()
+                    rows = self.dbh.fetchall()
+                    self.conn.commit()
+                    return rows
                 except Exception as e:
                     self._log_db_error("SQL error encountered when fetching correlation summary", e)
                     if self._is_transient_error(e) and attempt < 2:
@@ -122,7 +124,9 @@ class CorrelationManager:
             for attempt in range(3):
                 try:
                     self.dbh.execute(qry, qvars)
-                    return self.dbh.fetchall()
+                    rows = self.dbh.fetchall()
+                    self.conn.commit()
+                    return rows
                 except Exception as e:
                     self._log_db_error("SQL error encountered when fetching correlation list", e)
                     if self._is_transient_error(e) and attempt < 2:
