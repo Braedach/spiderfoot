@@ -523,6 +523,7 @@ class DbCore:
                 queries = get_schema_version_queries(self.db_type)
                 self.dbh.execute(queries['get'])
                 row = self.dbh.fetchone()
+                self.conn.commit()
                 return int(row[0]) if row else 0
             except Exception:
                 # Rollback failed transaction for PostgreSQL
@@ -675,6 +676,8 @@ class DbCore:
         with self.dbhLock:
             try:
                 self.dbh.execute(qry)
-                return self.dbh.fetchall()
+                rows = self.dbh.fetchall()
+                self.conn.commit()
+                return rows
             except psycopg2.Error as e:
                 raise OSError("SQL error encountered when retrieving event types") from e

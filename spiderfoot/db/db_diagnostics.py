@@ -194,11 +194,13 @@ class QueryDiagnostics:
             raw_rows = cursor.fetchall()
             cursor.execute("RELEASE SAVEPOINT diag_sp")
             rows = [str(r[0]) if r else "" for r in raw_rows]
+            self.conn.commit()
             return _parse_explain_output(query_name, rows)
         except Exception as e:
             log.warning("EXPLAIN failed for %s: %s", query_name, e)
             try:
                 cursor.execute("ROLLBACK TO SAVEPOINT diag_sp")
+                self.conn.commit()
             except Exception:
                 pass
             result = ExplainResult(query_name=query_name)

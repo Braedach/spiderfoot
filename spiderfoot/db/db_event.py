@@ -152,7 +152,9 @@ class EventManager:
         with self.dbhLock:
             try:
                 self.dbh.execute(qry, qvars)
-                return self.dbh.fetchall()
+                rows = self.dbh.fetchall()
+                self.conn.commit()
+                return rows
             except psycopg2.Error as e:
                 raise OSError("SQL error encountered when fetching scan logs") from e
 
@@ -170,7 +172,9 @@ class EventManager:
         with self.dbhLock:
             try:
                 self.dbh.execute(qry, qvars)
-                return self.dbh.fetchall()
+                rows = self.dbh.fetchall()
+                self.conn.commit()
+                return rows
             except psycopg2.Error as e:
                 raise OSError("SQL error encountered when fetching scan errors") from e
 
@@ -235,7 +239,9 @@ class EventManager:
         with self.dbhLock:
             try:
                 self.dbh.execute(qry, qvars)
-                return self.dbh.fetchall()
+                rows = self.dbh.fetchall()
+                self.conn.commit()
+                return rows
             except psycopg2.Error as e:
                 raise OSError("SQL error encountered when fetching result events") from e
 
@@ -256,7 +262,9 @@ class EventManager:
         with self.dbhLock:
             try:
                 self.dbh.execute(qry, qvars)
-                return self.dbh.fetchall()
+                rows = self.dbh.fetchall()
+                self.conn.commit()
+                return rows
             except psycopg2.Error as e:
                 raise OSError("SQL error encountered when fetching unique result events") from e
 
@@ -278,7 +286,9 @@ class EventManager:
         with self.dbhLock:
             try:
                 self.dbh.execute(qry, qvars)
-                return self.dbh.fetchall()
+                rows = self.dbh.fetchall()
+                self.conn.commit()
+                return rows
             except psycopg2.Error as e:
                 raise OSError("SQL error encountered when fetching result summary") from e
 
@@ -294,7 +304,9 @@ class EventManager:
         with self.dbhLock:
             try:
                 self.dbh.execute(qry, qvars)
-                return self.dbh.fetchall()
+                rows = self.dbh.fetchall()
+                self.conn.commit()
+                return rows
             except psycopg2.Error as e:
                 raise OSError(f"SQL error encountered when fetching history for scan {instanceId}") from e
 
@@ -488,7 +500,9 @@ class EventManager:
         with self.dbhLock:
             try:
                 self.dbh.execute(qry, qvars)
-                return self.dbh.fetchall()
+                rows = self.dbh.fetchall()
+                self.conn.commit()
+                return rows
             except psycopg2.Error as e:
                 raise OSError("SQL error encountered when getting source element IDs") from e
 
@@ -518,7 +532,9 @@ class EventManager:
         with self.dbhLock:
             try:
                 self.dbh.execute(qry, qvars)
-                return self.dbh.fetchall()
+                rows = self.dbh.fetchall()
+                self.conn.commit()
+                return rows
             except psycopg2.Error as e:
                 raise OSError("SQL error encountered when getting child element IDs") from e
 
@@ -617,6 +633,7 @@ class EventManager:
                         'generated': row[4],
                         'source_event_hash': row[5]
                     })
+                self.conn.commit()
                 return sources
             except psycopg2.Error as e:
                 raise OSError("SQL error encountered when fetching event sources") from e
@@ -647,6 +664,7 @@ class EventManager:
                         'generated': row[4],
                         'source_event_hash': row[5]
                     })
+                self.conn.commit()
                 return entities
             except psycopg2.Error as e:
                 raise OSError("SQL error encountered when fetching entity events") from e
@@ -697,7 +715,9 @@ class EventManager:
         with self.dbhLock:
             try:
                 self.dbh.execute(qry, qvars)
-                return self.dbh.fetchall()
+                rows = self.dbh.fetchall()
+                self.conn.commit()
+                return rows
             except psycopg2.Error as e:
                 raise OSError("SQL error encountered when searching events") from e
 

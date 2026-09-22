@@ -125,7 +125,9 @@ class ScanManager:
             for attempt in range(3):
                 try:
                     self.dbh.execute(qry, qvars)
-                    return self.dbh.fetchall()
+                    rows = self.dbh.fetchall()
+                    self.conn.commit()
+                    return rows
                 except psycopg2.Error as e:
                     self._log_db_error("SQL error encountered when retrieving scan instance", e)
                     try:
@@ -144,7 +146,9 @@ class ScanManager:
             for attempt in range(3):
                 try:
                     self.dbh.execute(qry)
-                    return self.dbh.fetchall()
+                    rows = self.dbh.fetchall()
+                    self.conn.commit()
+                    return rows
                 except psycopg2.Error as e:
                     self._log_db_error("SQL error encountered when fetching scan list", e)
                     try:
