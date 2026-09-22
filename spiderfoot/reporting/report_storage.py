@@ -348,13 +348,21 @@ class PostgreSQLBackend:
     def get(self, report_id: str) -> dict[str, Any] | None:
         """Retrieve a report by ID."""
         conn = self._get_conn()
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM reports WHERE report_id = %s", (report_id,))
-            row = cur.fetchone()
-            if row is None:
-                return None
-            cols = [desc[0] for desc in cur.description]
-            return self._row_to_dict(dict(zip(cols, row)))
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM reports WHERE report_id = %s", (report_id,))
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                cols = [desc[0] for desc in cur.description]
+                return self._row_to_dict(dict(zip(cols, row)))
+        finally:
+            # This connection isn't autocommit, so a plain SELECT with no
+            # commit/rollback leaves the transaction open indefinitely,
+            # eventually blocking DDL (e.g. the schema-check every fresh
+            # ReportStore init runs) on this table. See report_storage.py
+            # git history / PR #393 for the full incident.
+            conn.rollback()
 
     def delete(self, report_id: str) -> bool:
         """Delete a report. Returns True if found."""
@@ -397,10 +405,13 @@ class PostgreSQLBackend:
         query += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
         params.extend([limit, offset])
 
-        with conn.cursor() as cur:
-            cur.execute(query, params)
-            cols = [desc[0] for desc in cur.description]
-            return [self._row_to_dict(dict(zip(cols, row))) for row in cur.fetchall()]
+        try:
+            with conn.cursor() as cur:
+                cur.execute(query, params)
+                cols = [desc[0] for desc in cur.description]
+                return [self._row_to_dict(dict(zip(cols, row))) for row in cur.fetchall()]
+        finally:
+            conn.rollback()
 
     def count(self, scan_id: str | None = None, workspace_id: str | None = None) -> int:
         """Count reports, optionally filtered by scan_id and/or workspace_id."""
@@ -416,10 +427,13 @@ class PostgreSQLBackend:
             params.append(workspace_id)
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
-        with conn.cursor() as cur:
-            cur.execute(query, params)
-            row = cur.fetchone()
-            return row[0] if row else 0
+        try:
+            with conn.cursor() as cur:
+                cur.execute(query, params)
+                row = cur.fetchone()
+                return row[0] if row else 0
+        finally:
+            conn.rollback()
 
     def cleanup_old(self, max_age_days: int) -> int:
         """Delete reports older than max_age_days. Returns count deleted."""
