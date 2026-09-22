@@ -8,21 +8,42 @@ This is a fork of [poppopjmp/spiderfoot](https://github.com/poppopjmp/spiderfoot
 
 ## ✅ Known good build
 
-**`6.1.0-gb05e98c3`** (commit `b05e98c3`), **2026-09-17** — fixes a real Postgres connection-leak bug in `6.1.0-g4b0231b2`
-(this section's previous known-good build, now **not good — do not use**):
-`ReportStore`'s read-only methods never committed or rolled back after a
-`SELECT`, so a plain read could leave its transaction open indefinitely,
-eventually blocking every later attempt to touch the `reports` table. From
-the outside this looked exactly like AI report generation "just
-spinning" — the report itself, and the LLM call, had already completed;
-an unrelated stuck read was blocking everything downstream of it. See
-`stack-spiderfoot-podman.yml`'s Changelog 2.4.0 for the full incident.
+**`6.1.0-g95d573f9`** (commit `95d573f9`), **2026-09-22**.
 
-Fix verified in isolation (10 rounds of the affected methods left zero
-stuck connections afterward, versus one per call before), and confirmed
-live in production, **2026-09-17**: real AI reports generated
-successfully end-to-end with no recurrence of the stuck-connection
-pileup.
+**Important correction:** `6.1.0-gb05e98c3` (this section's previous entry,
+dated 2026-09-17) was never actually good — the fix it described never
+shipped. The real code change lived on a `development`-branch commit, but
+the PR that brought it into `master` was built fresh off `master` instead
+of merging that commit, so it carried only the changelog/docs *claiming*
+the fix — `report_storage.py` itself was untouched. Every build after it
+(`6.1.0-ga4599e3f`, `6.1.0-gfeede62f`) silently carried the same unfixed
+code forward for 5 days despite changelogs saying otherwise, until it
+recurred live: a `list_reports(scan_id=...)` call held a Postgres
+transaction open for 2h13m, five subsequent connection attempts piled up
+behind it trying to run the schema-check, and the `reports` table — and
+with it the whole API — went down. Confirmed via `pg_stat_activity`,
+cleared with `pg_terminate_backend`.
+
+`6.1.0-g4899644a` (2026-09-22) then genuinely fixed it this time — verified
+by reading the actual committed diff and, after building, by pulling the
+image and grepping the file *inside the container*, not by trusting the
+build log or commit message.
+
+While verifying that fix live, the exact same pattern turned up in 17 more
+methods across the core `SpiderFootDb` layer (`db_scan.py`, `db_event.py`,
+`db_correlation.py`, `db_core.py`, `db_performance.py`, `db_diagnostics.py`,
+`db_utils.py`) — not just `ReportStore`. These back essentially every
+ordinary page load: scan results, dashboard, scan list, log viewer,
+correlation tab. This is very plausibly the actual root cause behind the
+pattern of GUI/API hangs this project has hit repeatedly, of which the
+`ReportStore` bug was only the most recently diagnosed instance. Fixed the
+same way, following the convention `db_config.py`'s `configGet()` already
+established elsewhere in this codebase.
+
+**`6.1.0-g95d573f9`** is that fix. Verified live in production, 2026-09-22:
+stress-tested the exact previously-buggy methods (105 calls across the 7
+highest-traffic ones) directly against baden with zero connections left
+idle-in-transaction afterward, versus one leaked per call before.
 
 `6.1.0-g4b0231b2` itself was fully tested end-to-end on both Podman and
 Docker deployments, **2026-09-13**: all services healthy, AI report
@@ -58,7 +79,8 @@ files below) — same job, no torch, ~67MB instead of ~1GB+.
 - AI reports silently capped at 500 analysed events per scan regardless of how many were actually indexed — now configurable (`SF_REPORT_MAX_EVENTS_PER_SCAN`), and both stack files now actually set it (`2000`) — the cap was configurable since 2026-09-13 but never actually raised anywhere, so it kept defaulting back to 500 regardless
 - The generic `docker-compose.yml` + `docker/compose/*.yml` reference deployment had a real bug of its own: its general-purpose Celery worker still listened on the `scan` queue alongside the dedicated active-scanner worker, even though it lacks the recon tooling — scans could silently lose active modules depending on which worker claimed them
 - AI reports generated via `sf-agents`' `/report` endpoint (the only path the frontend actually calls) were never persisted server-side — only ever reached the requesting browser's own `localStorage`, invisible from any other browser/device
-- `ReportStore`'s read-only methods (`get`, `list_reports`, `count`) never committed after a `SELECT`, leaking a Postgres connection idle-in-transaction on every call — eventually blocks the whole `reports` table, surfacing as AI report generation appearing to hang
+- `ReportStore`'s read-only methods (`get`, `list_reports`, `count`) never committed after a `SELECT`, leaking a Postgres connection idle-in-transaction on every call — eventually blocks the whole `reports` table, surfacing as AI report generation appearing to hang. **Genuinely fixed 2026-09-22** — see the "Known good build" section above for why this same line previously overstated the state of things.
+- The same missing-commit connection leak found in 17 more methods across the core `SpiderFootDb` layer, not just `ReportStore` — `scanResultEvent`, `scanResultSummary`, `scanInstanceGet`, `scanInstanceList`, `scanLogs`, `scanErrors`, `search`, `scanCorrelationList`/`Summary`, `eventTypes`, and others. These back essentially every ordinary page load, not an edge case — fixed and verified live, **2026-09-22**.
 - The scan-summary "modules running" count always showed 0 regardless of actual scan state, because the field never existed anywhere in the progress pipeline — wired through end to end from the scan engine's existing internal module-tracking
 - That alone wasn't enough: the scan engine's own "is this module running" check was blind to every module in the codebase (310/310), since the base check watches a shared thread pool that the actual per-module dispatch path never uses — not just cosmetic, since the same signal drives the scan-completion decision itself, not only the progress UI. Both confirmed live, **2026-09-18**.
 
