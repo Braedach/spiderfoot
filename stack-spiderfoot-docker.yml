@@ -4,11 +4,9 @@
 # Created: 2026-09-10
 # Updated: 2026-09-22
 #
-# Published from this fork's own private dev/repro stack of the same name -
-# history below predates publication and references stack-spiderfoot-
-# podman.yml, the maintainer's own production Podman deployment - also
-# published here now, at the repo root alongside this file. It's the
-# source of truth for application-level config (LLM routing, model names,
+# Published from this fork's own private dev/repro stack of the same name - history below predates publication 
+#  and references stack-spiderfoot-podman.yml, the maintainer's own production Podman deployment - also
+# published here now, at the repo root alongside this file. It's the source of truth for application-level config (LLM routing, model names,
 # env var meanings) that this file mirrors.
 #
 # Summary:
