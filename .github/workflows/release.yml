@@ -83,7 +83,9 @@ jobs:
 
       - name: Read version
         id: version
-        run: echo "version=$(cat VERSION)" >> $GITHUB_OUTPUT
+        run: |
+          echo "version=$(cat VERSION)" >> $GITHUB_OUTPUT
+          echo "owner_lc=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
       - name: Generate changelog
         id: changelog
@@ -101,6 +103,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.version.outputs.version }}
           name: SpiderFoot v${{ steps.version.outputs.version }}
           files: dist/sf-*
           body: |
@@ -118,13 +121,13 @@ jobs:
 
             #### Linux (amd64)
             ```bash
-            curl -L -o sf https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/sf-linux-amd64
+            curl -L -o sf https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/sf-linux-amd64
             chmod +x sf && sudo mv sf /usr/local/bin/
             ```
 
             #### macOS (Apple Silicon)
             ```bash
-            curl -L -o sf https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/sf-darwin-arm64
+            curl -L -o sf https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/sf-darwin-arm64
             chmod +x sf && mv sf /usr/local/bin/
             ```
 
@@ -144,14 +147,15 @@ jobs:
 
             ### Docker Images
             ```bash
-            docker pull ghcr.io/${{ github.repository_owner }}/spiderfoot-scanner:${{ steps.version.outputs.version }}
-            docker pull ghcr.io/${{ github.repository_owner }}/spiderfoot-api:${{ steps.version.outputs.version }}
-            docker pull ghcr.io/${{ github.repository_owner }}/spiderfoot-webui:${{ steps.version.outputs.version }}
+            docker pull ghcr.io/${{ steps.version.outputs.owner_lc }}/spiderfoot-scanner:${{ steps.version.outputs.version }}
+            docker pull ghcr.io/${{ steps.version.outputs.owner_lc }}/spiderfoot-api:${{ steps.version.outputs.version }}
+            docker pull ghcr.io/${{ steps.version.outputs.owner_lc }}/spiderfoot-frontend:${{ steps.version.outputs.version }}
+            docker pull ghcr.io/${{ steps.version.outputs.owner_lc }}/spiderfoot-active-scanner:${{ steps.version.outputs.version }}
             ```
 
             ### Helm Chart
             ```bash
-            helm install spiderfoot oci://ghcr.io/${{ github.repository_owner }}/charts/spiderfoot
+            helm install spiderfoot oci://ghcr.io/${{ steps.version.outputs.owner_lc }}/charts/spiderfoot
             ```
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
