@@ -1,8 +1,8 @@
 # =============================================================================
 # stack-spiderfoot-podman.yml
-# Version: 2.6.0
+# Version: 2.7.0
 # Created: 2026-08-06
-# Updated: 2026-09-22
+# Updated: 2026-09-24
 #
 # Summary:
 #   Purpose:
@@ -90,7 +90,14 @@
 #     - IDS/IPS systems may go ballistic
 #
 # Changelog:
-#   2.6.0 (2026-09-22) - New known-good build: 6.1.0-g95d573f9. 
+#   2.7.0 (2026-09-24) - Fixed all 5 spiderfoot-* image paths: 1.10.0 (below) set them to
+#     ghcr.io/braedach/spiderfoot/spiderfoot-<service>, an extra path segment that never
+#     matched what actually gets published (ghcr.io/braedach/spiderfoot-<service>, no
+#     middle segment - confirmed against the live GHCR packages). Every pull would have
+#     404'd. Also moved SPIDERFOOT_TAG to :latest now that .github/workflows/docker.yml
+#     builds and pushes it automatically on every release - pairs with this stack's
+#     existing Watchtower labels for auto-updates. See stack-spiderfoot-podman.env.example.
+#   2.6.0 (2026-09-22) - New known-good build: 6.1.0-g95d573f9.
 #     - 6.1.0-gb05e98c3 (2.4.0's known-good build) was never actually good - the ReportStore connection-leak fix it claimed never shipped in code,
 #       only in docs/changelog (a PR built fresh off master instead of merging the real development-branch commit). Recurred live 2026-09-22:
 #       list_reports(scan_id=...) held a transaction open 2h13m, five subsequent connections piled up behind it, took the API down. Fixed for real this time (6.1.0-g4899644a) 
@@ -215,7 +222,7 @@ services:
       - spiderfoot-net
 
   sf-api:
-    image: ghcr.io/braedach/spiderfoot/spiderfoot-api:${SPIDERFOOT_TAG}
+    image: ghcr.io/braedach/spiderfoot-api:${SPIDERFOOT_TAG}
     container_name: sf-api
     hostname: sf-api
     restart: always
@@ -255,7 +262,7 @@ services:
           - api
 
   sf-celery-worker:
-    image: ghcr.io/braedach/spiderfoot/spiderfoot-scanner:${SPIDERFOOT_TAG}
+    image: ghcr.io/braedach/spiderfoot-scanner:${SPIDERFOOT_TAG}
     container_name: sf-celery-worker
     hostname: sf-celery-worker
     restart: always
@@ -297,7 +304,7 @@ services:
       - spiderfoot-net
 
   sf-celery-worker-active:
-    image: ghcr.io/braedach/spiderfoot/spiderfoot-active-scanner:${SPIDERFOOT_TAG}
+    image: ghcr.io/braedach/spiderfoot-active-scanner:${SPIDERFOOT_TAG}
     container_name: sf-celery-worker-active
     hostname: sf-celery-worker-active
     restart: always
@@ -334,7 +341,7 @@ services:
       - spiderfoot-net
 
   sf-frontend-ui:
-    image: ghcr.io/braedach/spiderfoot/spiderfoot-frontend:${SPIDERFOOT_TAG}
+    image: ghcr.io/braedach/spiderfoot-frontend:${SPIDERFOOT_TAG}
     container_name: sf-frontend-ui
     hostname: sf-frontend-ui
     restart: always
@@ -430,7 +437,7 @@ services:
           - qdrant
 
   sf-agents:
-    image: ghcr.io/braedach/spiderfoot/spiderfoot-base:${SPIDERFOOT_TAG}
+    image: ghcr.io/braedach/spiderfoot-base:${SPIDERFOOT_TAG}
     container_name: sf-agents
     hostname: sf-agents
     restart: always
