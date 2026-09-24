@@ -25,12 +25,15 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}
+      owner_lc: ${{ steps.meta.outputs.owner_lc }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Read version
         id: meta
-        run: echo "version=$(cat VERSION)" >> $GITHUB_OUTPUT
+        run: |
+          echo "version=$(cat VERSION)" >> $GITHUB_OUTPUT
+          echo "owner_lc=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -118,6 +121,6 @@ jobs:
           tags: ${{ steps.docker_meta.outputs.tags }}
           labels: ${{ steps.docker_meta.outputs.labels }}
           build-args: |
-            BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-base:${{ needs.build-base.outputs.version }}
+            BASE_IMAGE=${{ env.REGISTRY }}/${{ needs.build-base.outputs.owner_lc }}/spiderfoot-base:${{ needs.build-base.outputs.version }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,scope=${{ matrix.service }},mode=max
