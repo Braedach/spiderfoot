@@ -372,6 +372,40 @@ class TestScanRouterPhase2:
         resp = self._client(svc).get("/scans/s1/events/export?filetype=pdf")
         assert resp.status_code == 400
 
+    def test_export_events_realistic_row_shape(self):
+        """Regression test: scanResultEvent() only ever returns 9 columns
+        (generated, data, module, hash, type, source_event_hash, confidence,
+        visibility, risk) - a 14-column fixture like test_export_events_csv's
+        would have masked the row[13] IndexError this endpoint raised on
+        every real scan's data, for every filetype including gexf."""
+        svc = _make_svc(scans=[REC], events={
+            "s1": [(time.time(), "1.2.3.4", "sfp_dns", "abc123",
+                    "IP_ADDRESS", "ROOT", 100, 100, 0)]
+        })
+        resp = self._client(svc).get("/scans/s1/events/export?filetype=csv")
+        assert resp.status_code == 200
+        assert "1.2.3.4" in resp.text
+
+        resp = self._client(svc).get("/scans/s1/events/export?filetype=gexf")
+        assert resp.status_code == 200
+        assert resp.content
+
+    # -- export search --
+
+    def test_export_search_realistic_row_shape(self):
+        """Regression test: search() has the same 9-column shape as
+        scanResultEvent() (see db_event.py). The old code required 12+
+        columns and indexed row[10]/row[11], so every row was silently
+        skipped and this endpoint always reported "no results found"
+        regardless of what search() actually returned."""
+        svc = _make_svc(scans=[REC], events={
+            "s1": [(time.time(), "1.2.3.4", "sfp_dns", "abc123",
+                    "IP_ADDRESS", "ROOT", 100, 100, 0)]
+        })
+        resp = self._client(svc).get("/scans/s1/search/export?filetype=csv")
+        assert resp.status_code == 200
+        assert "1.2.3.4" in resp.text
+
     # -- export multi --
 
     def test_export_multi(self):
