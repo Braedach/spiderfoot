@@ -4,7 +4,7 @@ This is a fork of [poppopjmp/spiderfoot](https://github.com/poppopjmp/spiderfoot
 
 **→ For the actual project — docs, issues, general use — go to [poppopjmp/spiderfoot](https://github.com/poppopjmp/spiderfoot).**
 
-**Pending PR:** [poppopjmp/spiderfoot#393](https://github.com/poppopjmp/spiderfoot/pull/393)
+**Upstream PRs:** [poppopjmp/spiderfoot#393](https://github.com/poppopjmp/spiderfoot/pull/393) (closed unmerged — grew to 53 files mixing fork-specific infra with genuine fixes, not realistically reviewable as one PR) has been superseded by smaller, focused PRs raised per fix as they're ready.
 
 ## ✅ Known good build
 
