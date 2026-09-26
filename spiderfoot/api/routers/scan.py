@@ -1542,7 +1542,12 @@ async def export_scan_event_results(
             continue
         lastseen = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(row[0]))
         datafield = str(row[1]).replace("<SFURL>", "").replace("</SFURL>", "")
-        rows.append([lastseen, str(row[4]), str(row[3]), str(row[2]), row[13], datafield])
+        # row[13] never existed: scanResultEvent() only returns 9 columns
+        # (generated, data, module, hash, type, source_event_hash,
+        # confidence, visibility, risk - see db_event.py's own SQL comment).
+        # No false_positive column is selected, so there's nothing real to
+        # put here; this endpoint doesn't call get_events(filter_fp=...).
+        rows.append([lastseen, str(row[4]), str(row[3]), str(row[2]), "", datafield])
 
     headings = ["Updated", "Type", "Module", "Source", "F/P", "Data"]
 
@@ -1626,10 +1631,13 @@ async def export_scan_search_results(
     """Export search result data as CSV or Excel."""
     data = []
     for row in svc.search_events(scan_id, event_type=event_type or "", value=value or ""):
-        if len(row) < 12 or row[10] == "ROOT":
+        # Same wrong assumption as export_scan_event_results above: dbh.search()
+        # only returns 9 columns (see db_event.py's own SQL comment), never 12+,
+        # so this always skipped every row and silently reported zero results.
+        if len(row) < 9 or row[4] == "ROOT":
             continue
         datafield = str(row[1]).replace("<SFURL>", "").replace("</SFURL>", "")
-        data.append([row[0], str(row[10]), str(row[3]), str(row[2]), row[11], datafield])
+        data.append([row[0], str(row[4]), str(row[3]), str(row[2]), "", datafield])
 
     headings = ["Updated", "Type", "Module", "Source", "F/P", "Data"]
 
