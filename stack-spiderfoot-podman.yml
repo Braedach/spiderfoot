@@ -1,8 +1,8 @@
 # =============================================================================
 # stack-spiderfoot-podman.yml
-# Version: 2.7.0
+# Version: 2.7.1
 # Created: 2026-08-06
-# Updated: 2026-09-24
+# Updated: 2026-10-23
 #
 # Summary:
 #   Purpose:
@@ -90,23 +90,25 @@
 #     - IDS/IPS systems may go ballistic
 #
 # Changelog:
-#   2.7.0 (2026-09-24) - Fixed all 5 spiderfoot-* image paths: 1.10.0 (below) set them to
-#     ghcr.io/braedach/spiderfoot/spiderfoot-<service>, an extra path segment that never
-#     matched what actually gets published (ghcr.io/braedach/spiderfoot-<service>, no
-#     middle segment - confirmed against the live GHCR packages). Every pull would have
-#     404'd. Also moved SPIDERFOOT_TAG to :latest now that .github/workflows/docker.yml
-#     builds and pushes it automatically on every release - pairs with this stack's
-#     existing Watchtower labels for auto-updates. See stack-spiderfoot-podman.env.example.
-#   2.6.0 (2026-09-22) - New known-good build: 6.1.0-g95d573f9.
+#   2.7.1 (2026-10-23)
+#     - Fixed the redis image and associated issues   
+#   2.7.0 (2026-09-24) 
+#     - Fixed all 5 spiderfoot-* image paths: 1.10.0 (below) set them to ghcr.io/braedach/spiderfoot/spiderfoot-<service>
+#       an extra path segment that never matched what actually gets published (ghcr.io/braedach/spiderfoot-<service>, no
+#       middle segment - confirmed against the live GHCR packages). Every pull would have 404'd. Also moved SPIDERFOOT_TAG to :latest 
+#       now that .github/workflows/docker.yml builds and pushes it automatically on every release - pairs with this stack's
+#       See stack-spiderfoot-podman.env.example.
+#   2.6.0 (2026-09-22) 
+#     - New known-good build: 6.1.0-g95d573f9.
 #     - 6.1.0-gb05e98c3 (2.4.0's known-good build) was never actually good - the ReportStore connection-leak fix it claimed never shipped in code,
 #       only in docs/changelog (a PR built fresh off master instead of merging the real development-branch commit). Recurred live 2026-09-22:
 #       list_reports(scan_id=...) held a transaction open 2h13m, five subsequent connections piled up behind it, took the API down. Fixed for real this time (6.1.0-g4899644a) 
 #     - verified via the actual  committed diff and by grepping the file inside the built image, not by trusting the log. While verifying it live, found the identical
 #       missing-commit pattern in 17 more spiderfoot/db/ methods backing
 #     - See PR #393 and README.md's "Known good build" section for the full incident writeup.
-#   2.5.0 (2026-09-18) - Two real scan-engine bugs found and fixed, not a new known-good build (still 6.1.0-gb05e98c3 below - not bumping that yet,
-#     giving it more soak time). Both confirmed live on this deployment,
-#     image tag 6.1.0-gfeede62f:
+#   2.5.0 (2026-09-18) 
+#     - Two real scan-engine bugs found and fixed, not a new known-good build (still 6.1.0-gb05e98c3 below - not bumping that yet,
+#       giving it more soak time). Both confirmed live on this deployment, image tag 6.1.0-gfeede62f:
 #     - The frontend's scan-summary "modules running" count had been hardcoded to always show 0 since its own field never existed
 #       anywhere in the progress pipeline (ProgressSnapshot, the Redis progress hash, the SSE/REST endpoints). Wired it through end to
 #       end from an in-process registry the scan engine's own threadsFinished() poll already recomputes internally.
@@ -119,28 +121,30 @@
 #       around that call, ORed with the legacy check. See PR #393. Verified live: correlated the counter second-by-second against
 #       real sfp_accounts HTTP activity in celery-worker-active's logs -12 modules running at scan start, settling to 1 as only the slow
 #       ones remain, tracking real engine state throughout.
-#   2.4.0 (2026-09-17) - New known-good build: 6.1.0-gb05e98c3.
-#     6.1.0-g4b0231b2 (2.2.0's known-good build) has a real bug: 
-#     ReportStore's read-only methods (get, list_reports, count in spiderfoot/reporting/report_storage.py) never called conn.commit() or
-#     rollback() after a SELECT. Since that connection is explicitly non-autocommit, every plain read left its transaction open
-#     indefinitely - confirmed live: a single stuck read held a lock for 9+ minutes, blocking every later attempt to touch the reports table
-#     (including the schema-check any fresh ReportStore init runs), and kept recurring within minutes of manually clearing it. From the frontend
-#     this looked exactly like AI report generation "just spinning" - the report itself, and the LLM call, had already completed successfully;
-#     an unrelated stuck read was blocking everything downstream of it.
-#     Also added SF_REPORT_MAX_EVENTS_PER_SCAN=2000 to sf-agents - the configurable cap added for the same reason (see 2.2.0's changelog
-#     entry, and PR #393) was never actually set anywhere, so it kept silently defaulting back to 500 regardless.
-#   2.3.0 (2026-09-16) - BREAKING CHANGE: sf-qdrant v1.12.4 -> v1.19.1.
-#     Verified via Qdrant's own upgrade documentation that a single-node deployment cannot skip minor versions with existing data on disk -
-#     On that basis, fixed by stopping sf-qdrant, wiping /srv/spiderfoot/qdrant entirely, and starting clean on v1.19.1
-#   2.2.0 (2026-09-13) - New known-good build: 6.1.0-g4b0231b2. Superseded by
-#     2.4.0 below - this build has a real Postgres connection-leak bug, see
-#     that entry.
-#     Fixed on the fork side and verified live on this deployment: AI reports generated via sf-agents' /report endpoint (the only path the
-#     frontend actually calls) were never persisted server-side - only ever reached the requesting browser's own localStorage, invisible
-#     from any other browser/device, no server-side audit trail. Now persisted via the same Postgres-backed store the (separate, previously
-#     UI-unused) sf-api report pipeline already had. Covers both scan-level and workspace-level reports; GUI delete added. See PR #393 and
-#     the fork's README for full detail. Independently verified the same commit on the Docker side (stack-spiderfoot-docker.yml) the same day.
-#   2.1.0 (2026-09-12) - BREAKING CHANGE
+#   2.4.0 (2026-09-17) 
+#     - New known-good build: 6.1.0-gb05e98c3.
+#       6.1.0-g4b0231b2 (2.2.0's known-good build) has a real bug: 
+#       ReportStore's read-only methods (get, list_reports, count in spiderfoot/reporting/report_storage.py) never called conn.commit() or
+#       rollback() after a SELECT. Since that connection is explicitly non-autocommit, every plain read left its transaction open
+#       indefinitely - confirmed live: a single stuck read held a lock for 9+ minutes, blocking every later attempt to touch the reports table
+#       (including the schema-check any fresh ReportStore init runs), and kept recurring within minutes of manually clearing it. From the frontend
+#       this looked exactly like AI report generation "just spinning" - the report itself, and the LLM call, had already completed successfully;
+#       an unrelated stuck read was blocking everything downstream of it.
+#       Also added SF_REPORT_MAX_EVENTS_PER_SCAN=2000 to sf-agents - the configurable cap added for the same reason (see 2.2.0's changelog
+#       entry, and PR #393) was never actually set anywhere, so it kept silently defaulting back to 500 regardless.
+#   2.3.0 (2026-09-16) 
+#     - BREAKING CHANGE: sf-qdrant v1.12.4 -> v1.19.1.
+#       Verified via Qdrant's own upgrade documentation that a single-node deployment cannot skip minor versions with existing data on disk -
+#       On that basis, fixed by stopping sf-qdrant, wiping /srv/spiderfoot/qdrant entirely, and starting clean on v1.19.1
+#   2.2.0 (2026-09-13) 
+#     - New known-good build: 6.1.0-g4b0231b2. Superseded by 2.4.0 below - this build has a real Postgres connection-leak bug, see that entry.
+#       Fixed on the fork side and verified live on this deployment: AI reports generated via sf-agents' /report endpoint (the only path the
+#       frontend actually calls) were never persisted server-side - only ever reached the requesting browser's own localStorage, invisible
+#       from any other browser/device, no server-side audit trail. Now persisted via the same Postgres-backed store the (separate, previously
+#       UI-unused) sf-api report pipeline already had. Covers both scan-level and workspace-level reports; GUI delete added. See PR #393 and
+#       the fork's README for full detail. Independently verified the same commit on the Docker side (stack-spiderfoot-docker.yml) the same day.
+#   2.1.0 (2026-09-12) 
+#     - BREAKING CHANGE
 #     - sf-agents: SF_EMBEDDING_PROVIDER sentence_transformer -> fastembed.
 #     - drop torch and everything associated with it and switch the sentence_transformer.
 #     - Shrunk the size of of two images considerably as a result and performance via CPU still seems very good
@@ -179,7 +183,7 @@ name: spiderfoot
 
 services:
   sf-postgres:
-    image: public.ecr.aws/docker/library/postgres:15-alpine
+    image: docker.io/library/postgres:15-alpine
     container_name: sf-postgres
     hostname: sf-postgres
     restart: always
@@ -202,7 +206,7 @@ services:
       - spiderfoot-net
 
   sf-redis:
-    image: public.ecr.aws/docker/library/redis:7-alpine
+    image: docker.io/library/redis:7-alpine
     container_name: sf-redis
     hostname: sf-redis
     restart: always
