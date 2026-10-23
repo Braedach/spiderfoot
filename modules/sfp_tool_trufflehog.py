@@ -6,7 +6,7 @@ from __future__ import annotations
 # -------------------------------------------------------------------------------
 # Name:        sfp_tool_trufflehog
 # Purpose:     SpiderFoot plug-in for using the trufflehog tool.
-#              Tool: https://github.com/trufflesecurity/truffleHog
+#              Tool: https://github.com/trufflesecurity/trufflehog (v3)
 #
 # Author:      <steve@binarypool.com>
 #
@@ -45,14 +45,16 @@ class sfp_tool_trufflehog(SpiderFootAsyncPlugin):
     }
 
     opts = {
-        'entropy': False,
+        'verify': False,
         'allrepos': False,
         'trufflehog_path': ''
     }
 
     optdescs = {
-        'trufflehog_path': "Path to your trufflehog binary. Must be set.",
-        'entropy': "Enable entropy checks? If disabled, TruffleHog will solely rely on high-signal regular expressions to identify secrets.",
+        'trufflehog_path': "Path to your trufflehog binary (v3). Must be set.",
+        'verify': "Let TruffleHog verify each secret it finds by trying it against the issuing service's API? "
+                  "OFF by default: verification sends the discovered credential to a third party (GitHub, AWS, Slack...) "
+                  "as a live login attempt, which an assessment may not be authorised to do.",
         'allrepos': "Search all code repositories found. By default TruffleHog only searches those linked from the target website."
     }
 
@@ -130,18 +132,11 @@ class sfp_tool_trufflehog(SpiderFootAsyncPlugin):
 
         self.results[url] = True
 
-        args = [
-            exe,
-            '--json',
-            '--regex',
-        ]
-
-        if not self.opts['entropy']:
-            args.append("--entropy=False")
-        else:
-            args.append("--entropy=True")
-
-        args.append(url)
+        # TruffleHog v3 CLI. (v2 took `--json --regex --entropy=... <url>`; the
+        # v2 tool is abandoned and none of those flags exist in v3.)
+        args = [exe, 'git', url, '--json', '--no-update']
+        if not self.opts['verify']:
+            args.append('--no-verification')
         try:
             p = Popen(args, stdout=PIPE, stderr=PIPE)
             out, _ = p.communicate(input=None, timeout=600)
@@ -166,15 +161,33 @@ class sfp_tool_trufflehog(SpiderFootAsyncPlugin):
             try:
                 rowjson = json.loads(row)
             except Exception as e:
-                self.error(
-                    f"Could not parse trufflehog output as JSON: {row}\nException: {e}")
+                # Do not log the row itself: it may contain the secret in clear text.
+                self.error(f"Could not parse a line of trufflehog output as JSON: {e}")
                 continue
 
-            descr = "\n".join(
-                f"{k}: {rowjson[k]}"
-                for k in rowjson
-                if k not in ["diff", "printDiff"]
-            )
+            if not isinstance(rowjson, dict):
+                continue
+
+            # Build the event text from an ALLOWLIST, never the whole row: v3 puts
+            # the secret in clear text in Raw, RawV2 and SecretParts (and Redacted
+            # is empty for many detectors), so a denylist would leak it into the
+            # scan database and logs. The secret is shown masked - enough to
+            # identify it in the repository, not enough to use it.
+            git = (rowjson.get('SourceMetadata') or {}).get('Data', {}).get('Git', {})
+            secret = str(rowjson.get('Raw') or '')
+            masked = f"{secret[:4]}{'*' * 8} ({len(secret)} characters)" if secret else "n/a"
+            fields = [
+                ('Detector', rowjson.get('DetectorName')),
+                ('Verified', rowjson.get('Verified')),
+                ('Secret', masked),
+                ('Repository', git.get('repository')),
+                ('File', git.get('file')),
+                ('Line', git.get('line')),
+                ('Commit', git.get('commit')),
+                ('Author', git.get('email')),
+                ('Timestamp', git.get('timestamp')),
+            ]
+            descr = "\n".join(f"{k}: {v}" for k, v in fields if v not in (None, ''))
             evt = SpiderFootEvent('PASSWORD_COMPROMISED',
                                   descr, self.__name__, event)
             self.notifyListeners(evt)

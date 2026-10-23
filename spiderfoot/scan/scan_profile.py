@@ -435,7 +435,7 @@ class ProfileManager:
                 "Run all external recon tools against the target. "
                 "Includes both pre-installed tools (nmap, nuclei, "
                 "testssl.sh, whatweb, dnstwist, etc.) and active "
-                "scan tools (httpx, subfinder, amass, dnsx, naabu, "
+                "scan tools (httpx, subfinder, dnsx, naabu, "
                 "gobuster, katana, nikto, gitleaks, and more). "
                 "Requires the active scan worker container."
             ),
@@ -443,13 +443,11 @@ class ProfileManager:
             include_flags=["tool"],
             include_modules=[
                 # ── Pre-installed base-image tools ──
-                "sfp_tool_cmseek",
                 "sfp_tool_dnstwist",
                 "sfp_tool_gobuster",
                 "sfp_tool_nbtscan",
                 "sfp_tool_onesixtyone",
                 "sfp_tool_phoneinfoga",
-                "sfp_tool_retirejs",
                 "sfp_tool_snallygaster",
                 "sfp_tool_testsslsh",
                 "sfp_tool_trufflehog",
@@ -461,14 +459,10 @@ class ProfileManager:
                 "sfp_nuclei",
                 "sfp_subfinder",
                 # ── Active worker DNS & subdomain tools ──
-                "sfp_tool_amass",
                 "sfp_tool_dnsx",
                 "sfp_tool_massdns",
                 # ── Active worker URL / crawling tools ──
                 "sfp_tool_gau",
-                "sfp_tool_waybackurls",
-                "sfp_tool_gospider",
-                "sfp_tool_hakrawler",
                 "sfp_tool_katana",
                 # ── Active worker fuzzing / parameter tools ──
                 "sfp_tool_ffuf",
@@ -478,9 +472,8 @@ class ProfileManager:
                 # ── Active worker vulnerability scanning ──
                 "sfp_tool_nikto",
                 "sfp_tool_dalfox",
-                # ── Active worker secret/JS analysis ──
+                # ── Active worker secret analysis ──
                 "sfp_tool_gitleaks",
-                "sfp_tool_linkfinder",
                 # ── Active worker port scanning ──
                 "sfp_tool_naabu",
                 "sfp_tool_masscan",

@@ -113,7 +113,7 @@ class sfp_tool_dalfox(SpiderFootAsyncPlugin):
 
         binary = self._find_binary()
         if not binary:
-            self.error("dalfox not found. Install: go install github.com/hahwul/dalfox/v2@latest")
+            self.error("dalfox not found. Install a v3 release from https://github.com/hahwul/dalfox/releases")
             self.errorState = True
             return
 
@@ -122,8 +122,8 @@ class sfp_tool_dalfox(SpiderFootAsyncPlugin):
         cmd = [
             binary, "url", data,
             "-o", output_path,
-            "--format", "json",
-            "-w", str(self.opts["worker"]),
+            "--format", "jsonl",
+            "--workers", str(self.opts["worker"]),
             "--timeout", str(self.opts["timeout"]),
         ]
 
@@ -150,7 +150,9 @@ class sfp_tool_dalfox(SpiderFootAsyncPlugin):
                     content = f.read().strip()
 
                 if content:
-                    # Dalfox JSON output: one JSON object per line
+                    # Dalfox v3 --format jsonl: one JSON object per line. The first line
+                    # is a {"meta": ...} summary, the rest are findings. (--format json is
+                    # ONE document, {"findings": [...], "meta": ...}, which a line parser misses.)
                     for line in content.splitlines():
                         if self.checkForStop():
                             return
@@ -162,8 +164,11 @@ class sfp_tool_dalfox(SpiderFootAsyncPlugin):
                         except json.JSONDecodeError:
                             continue
 
+                        if not isinstance(result, dict) or "meta" in result:
+                            continue
+
                         vuln_type = result.get("type", "")
-                        poc_url = result.get("proof_of_concept", result.get("poc", ""))
+                        poc_url = result.get("data", result.get("proof_of_concept", result.get("poc", "")))
                         param = result.get("param", "")
                         inject_type = result.get("inject_type", "")
                         severity = result.get("severity", "").lower()

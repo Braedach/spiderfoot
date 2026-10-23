@@ -151,7 +151,8 @@ class sfp_tool_sslyze(SpiderFootAsyncPlugin):
                     if self.checkForStop():
                         return
 
-                    scan_result = server_result.get("scan_result", {})
+                    # scan_result is null (not missing) when sslyze could not connect to the server
+                    scan_result = server_result.get("scan_result") or {}
 
                     # Certificate info
                     certinfo = scan_result.get("certificate_info", {}).get("result", {})

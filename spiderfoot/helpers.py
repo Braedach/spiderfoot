@@ -402,9 +402,22 @@ class SpiderFootHelpers():
         return '/'.join(stack)
 
     @staticmethod
-    def sanitiseInput(input_str: str) -> bool:
-        """Sanitise input string."""
+    def sanitiseInput(input_str: str, extra: typing.list[str] | None = None) -> bool:
+        """Sanitise input string.
+
+        Args:
+            input_str (str): input to check
+            extra (list[str]): further characters or substrings that make the input invalid
+                (callers such as nbtscan, onesixtyone and testssl.sh pass ['/'] to refuse
+                anything but a plain host name or address)
+
+        Returns:
+            bool: False if the input is rejected, otherwise the HTML-escaped input
+        """
         if not isinstance(input_str, str):
+            return False
+
+        if extra and any(c in input_str for c in extra):
             return False
 
         # Check for invalid patterns

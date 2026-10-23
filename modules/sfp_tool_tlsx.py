@@ -135,9 +135,17 @@ class sfp_tool_tlsx(SpiderFootAsyncPlugin):
             "-o", output_path,
             "-silent",
             "-timeout", str(self.opts["timeout"]),
-            "-ce",  # Certificate info
-            "-ci",  # Cipher info
-            "-ve",  # Version enum
+            # tlsx v1.4: -ce is cipher ENUMERATION and -ci takes an argument (the old
+            # "-ce -ci -ve" swallowed -ve as -ci's value and produced no output at all).
+            "-cert",    # certificate (PEM) in the JSON
+            "-tv",      # negotiated TLS version
+            "-cipher",  # negotiated cipher
+            # (-san/-cn/-so are display-only modes tlsx refuses to combine with other probes;
+            # the JSON already carries subject_cn / subject_an / issuer_*)
+            "-ex", "-ss", "-mm",    # expired / self-signed / mismatched flags
+            # No -ve (version enumeration): nothing here reads it, and with this module's
+            # 60 s connection timeout each unsupported version waits the full 60 s, so one
+            # host took two minutes and was killed by the 90 s run limit, losing all output.
         ]
 
         if self.opts["scan_mode"] != "auto":

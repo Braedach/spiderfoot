@@ -124,6 +124,12 @@ class TestSpiderFootHelpersEnhanced:
         assert SpiderFootHelpers.urlRelativeToAbsolute("../test") == "test"
         assert SpiderFootHelpers.urlRelativeToAbsolute("./test") == "test"
 
+    def test_sanitiseInput_extra_rejects_additional_characters(self):
+        """Callers pass extra=['/'] to refuse anything but a plain host or address."""
+        assert SpiderFootHelpers.sanitiseInput("10.0.0.0/24")
+        assert SpiderFootHelpers.sanitiseInput("10.0.0.0/24", extra=['/']) is False
+        assert SpiderFootHelpers.sanitiseInput("10.0.0.1", extra=['/'])
+
     def test_sanitiseInput_edge_cases(self):
         """Test sanitiseInput with various edge cases."""
         # Test None input - returns False

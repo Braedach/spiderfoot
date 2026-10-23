@@ -47,7 +47,7 @@ class sfp_tool_wafw00f(SpiderFootAsyncPlugin):
     }
 
     optdescs = {
-        'python_path': "Path to Python 3 interpreter to use for wafw00f. If just 'python3' then it must be in your $PATH.",
+        'python_path': "Path to the Python 3 interpreter to run wafw00f with, used only if the wafw00f path is not an executable script. If just 'python3' then it must be in your $PATH.",
         'wafw00f_path': "Path to the wafw00f executable file. Must be set."
     }
 
@@ -106,8 +106,10 @@ class sfp_tool_wafw00f(SpiderFootAsyncPlugin):
             self.error("Invalid input, refusing to run.")
             return
 
-        args = [
-            self.opts['python_path'],
+        # Run an executable script directly: its shebang selects the interpreter that has
+        # wafw00f installed (the image keeps the tools in their own venv, apart from the
+        # application's). python_path is only for an exe that is not itself executable.
+        args = ([] if os.access(exe, os.X_OK) else [self.opts['python_path']]) + [
             exe,
             '-a',
             '-o-',

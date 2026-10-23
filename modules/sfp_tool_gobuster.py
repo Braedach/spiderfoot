@@ -16,6 +16,7 @@ from __future__ import annotations
 # -------------------------------------------------------------------------------
 
 import json
+import re
 import os.path
 import shutil
 import subprocess
@@ -111,6 +112,37 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
         """Return the list of events this module produces."""
         return ["URL_DIRECTORY", "URL_FILE"]
 
+    @staticmethod
+    def _parse_output(output: str) -> dict:
+        """Parse gobuster dir output into {"results": [{"path", "status"}]}.
+
+        gobuster 3.8 prints one line per hit, e.g.
+            admin                (Status: 200) [Size: 43]
+            docs                 (Status: 301) [Size: 0] [--> http://host/docs/]
+        A redirect to a trailing-slash URL marks a directory. JSON (older/other builds) is
+        accepted too.
+        """
+        try:
+            parsed = json.loads(output)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+
+        results = []
+        for line in output.splitlines():
+            m = re.match(r"^\s*(\S+)\s+\(Status:\s*(\d+)\)(.*)$", line)
+            if not m:
+                continue
+            path = m.group(1)
+            if not path.startswith("/"):
+                path = "/" + path
+            redirect = re.search(r"\[-->\s*(\S+?)\]", m.group(3))
+            if redirect and redirect.group(1).endswith("/") and not path.endswith("/"):
+                path += "/"
+            results.append({"path": path, "status": int(m.group(2))})
+        return {"results": results}
+
     def execute_command(self, cmd: list[str]):
         """Execute an external command safely (no shell) and return the output file path."""
         self.debug(f"Executing command: {cmd}")
@@ -162,7 +194,7 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
         if not (host and user and tool_path and wordlist):
             self.error("Remote execution enabled but host/user/tool_path/wordlist not set.")
             return None
-        cmd = f'{tool_path} dir -q -u "{target_url}" -w "{wordlist}" -t {threads} -s {status_codes} -to {timeout}s -j'
+        cmd = f'{tool_path} dir -q -u "{target_url}" -w "{wordlist}" -t {threads} -s {status_codes} --timeout {timeout}s --no-progress --no-error -b ""'
         if follow_redirects:
             cmd += ' -r'
         if extensions:
@@ -192,11 +224,7 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
             if err:
                 self.error(f"Remote tool error: {err}")
                 return None
-            try:
-                return json.loads(output)
-            except Exception as e:
-                self.error(f"Error parsing remote tool output: {e}")
-                return None
+            return self._parse_output(output)
         except Exception as e:
             self.error(f"SSH connection or execution failed: {e}")
             return None
@@ -279,9 +307,14 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
             str(self.opts["threads"]),
             "-s",
             self.opts["status_codes"],
-            "-to",
+            "--timeout",
             str(self.opts["timeout"]) + "s",
-            "-j",  # JSON output format
+            # gobuster 3.8 has no JSON output mode; the plain-text lines are parsed instead
+            "--no-progress",
+            "--no-error",
+            # 3.8 blacklists 404 by default, which conflicts with an explicit -s allow-list
+            "-b",
+            "",
         ]
 
         if self.opts["follow_redirects"]:
@@ -310,11 +343,7 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
                 with io.open(output_file, "r", encoding="utf-8", errors="replace") as file:
                     output = file.read()
 
-            try:
-                results = json.loads(output)
-            except Exception as e:
-                self.error(f"Could not parse gobuster output as JSON: {output}")
-                results = {"results": []}
+            results = self._parse_output(output)
 
             # Debug: Log parsed results
             self.debug(f"Parsed gobuster results: {results}")
