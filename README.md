@@ -8,6 +8,12 @@ This is a fork of [poppopjmp/spiderfoot](https://github.com/poppopjmp/spiderfoot
 
 ## ✅ Known good build
 
+> **Tagging changed (2026-10-23).** The `<version>-g<sha>` scheme below is retired.
+> Images are now published by `deploy/publish.sh` as `v<base>-bd.<N>` (release) or
+> `v<base>-bd.<N>-rc.<M>` (test build), e.g. `v6.1.0-bd.1`. No `-bd` build has been
+> verified known-good yet; the entry below is the last one under the old scheme and
+> is kept for the incident history. See `deploy/README.md`.
+
 **`6.1.0-g95d573f9`** (commit `95d573f9`), **2026-09-22**.
 
 **Important correction:** `6.1.0-gb05e98c3` (this section's previous entry,
@@ -54,8 +60,9 @@ scanner/active-scanner queue split confirmed correct on the Docker side
 after a real bug was found and fixed there (a stale locally-cached base
 image had silently been feeding 10-day-old code to three services despite
 every build reporting success with zero errors). Tested via this fork's
-own `Dev/spiderfoot-dev` stack files (`stack-spiderfoot-podman.yml` on
-Podman, `stack-spiderfoot-docker.yml` on Docker) — the connection-leak bug
+own stack files (at the time `stack-spiderfoot-podman.yml` on
+Podman and `stack-spiderfoot-docker.yml` on Docker; now `deploy/stack-podman.yml`
+and `deploy/stack-docker.yml`) — the connection-leak bug
 above was only found afterward, live on production, once real usage
 actually exercised the code path.
 
@@ -89,10 +96,29 @@ See the PR for full detail on each.
 
 ## Deploying this fork
 
-Three reference compose files, covering different use cases:
+Two layers, deliberately separate:
 
-- **`docker-compose.yml`** (+ `docker/compose/*.yml`) — builds every image from source locally, Traefik-fronted, feature-profiled (`--profile full` for everything, or pick individual profiles: `ai`, `scan`, `storage`, `monitor`, `scheduler`, `sso`). Build the base image first (`docker compose build base`), then everything else — see that file's own header comment for why.
-- **`stack-spiderfoot-podman.yml`** — the maintainer's own production Podman deployment. Pulls this fork's own pre-built, pushed images (`ghcr.io/braedach/spiderfoot-*`) instead of building anything locally. No Traefik, no profiles — just the core services needed to run scans and generate AI reports. Genuinely Podman-compatible (standard Compose syntax throughout). Copy `stack-spiderfoot-podman.env.example` to a real env file and `litellm-config-podman.yaml` alongside it — see the compose file's own header comment for the full deployment sequence.
-- **`stack-spiderfoot-docker.yml`** — builds every image from source via plain `docker compose`, no Traefik, no profiles, one flat file — useful for local dev/repro without the generic reference deployment's Traefik/profile setup. Copy `stack-spiderfoot-docker.env.example` to a real env file — see the compose file's own header comment for the full build/deploy sequence, including why the base image must be built first explicitly.
+- **Upstream's own deployment** — `docker-compose.yml` + `docker/compose/*.yml`
+  build every image from source, Traefik-fronted and feature-profiled (`--profile full`
+  for everything, or pick `ai`, `scan`, `storage`, `monitor`, `scheduler`, `sso`). Build
+  the base image first (`docker compose build base`), then everything else — see that
+  file's own header comment for why. This fork patches some of these files with its
+  fixes but otherwise leaves them alone.
+- **`deploy/`** — this fork's own build and deployment tooling, kept in its own
+  subfolder so pulling upstream never conflicts with it:
+  - **`deploy/publish.sh`** builds the 5 images from an explicit release tag on a
+    build host, pushes `ghcr.io/braedach/spiderfoot-<service>:<tag>`, and creates a
+    GitHub Release. Replaces the old untracked build script.
+  - **`deploy/stack-podman.yml`** — the maintainer's production Podman deployment.
+    Pulls the published images; builds nothing. No Traefik, no profiles: just the 9
+    services needed to run scans and generate AI reports.
+  - **`deploy/stack-docker.yml`** — the Docker development/sandbox mirror of the
+    same stack, where branch builds are tested as `-rc` tags before release.
+  - Work happens on a branch and is tested as a release candidate before it is
+    merged; nothing is pushed to `master`. Both stacks require an exact
+    `SPIDERFOOT_TAG` and never follow `:latest`.
 
-All three default local embeddings to `fastembed` — no API key, no GPU needed, though GPU passthrough is supported (see each file's comments) if you have it.
+See **`deploy/README.md`** for the build, test and release flow, the tag scheme,
+and how each secret is generated. All stacks default local embeddings to
+`fastembed` — no API key, no GPU needed, though GPU passthrough is supported if
+you have it.
