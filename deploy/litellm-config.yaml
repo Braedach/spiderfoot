@@ -1,14 +1,29 @@
 # =============================================================================
-# LiteLLM proxy config — spiderfoot-dev (local repro stack)
+# LiteLLM proxy config - spiderfoot deployment
+# Version: 1.1.0
+# Created: 2026-08-06
+# Updated: 2026-10-23
 #
-# Same aliasing trick as the prod config.yml on baden: report_generator.py
-# hardcodes model="gemma3-27b" in its own source (ReportGeneratorAgent.create())
-# regardless of SF_LLM_MODEL, so "gemma3-27b" has to exist as a model_name here
-# even though it's actually routed to Claude. "spiderfoot-llm" covers every
-# other agent, which does respect SF_LLM_MODEL.
+# Used by BOTH deployments (stack-podman.yml on baden, stack-docker.yml on
+# claude). Was litellm-config-podman.yaml plus a near-identical
+# litellm-config.yaml for Docker (differed only by True/true); merged in
+# 1.1.0 so the two cannot drift.
 #
-# Tracked in git (no secrets — ANTHROPIC_API_KEY is read from the environment
-# via os.environ/ syntax, supplied by stack-spiderfoot-dev.env at runtime).
+# Fronts Anthropic Claude Sonnet 5 for spiderfoot's AI report generation -
+# matches the pattern n8n already uses on baden, not a local Ollama instance. Two aliases route to the same backend:
+# spiderfoot-llm covers most agents; gemma3-27b is what report_generator
+# specifically requests (its own hardcoded model choice in source, never
+# actually pulled/configured) - aliased here rather than chased upstream.
+#
+# ANTHROPIC_API_KEY is read from the environment at runtime (os.environ/
+# syntax, LiteLLM's own convention) - never written here as a literal
+# value. Supplied through the stack's environment (Dockhand) at deploy time.
+#
+# drop_params: some Claude models reject sampling params they don't
+# support (Opus 5 only accepted temperature=1) rather than silently
+# ignoring them - spiderfoot's agents send temperature=0.3, a normal
+# default for most models. Kept as cheap insurance after switching to
+# Sonnet 5, even though Sonnet 5 itself hasn't shown this behaviour.
 # =============================================================================
 
 model_list:
@@ -22,4 +37,4 @@ model_list:
       api_key: os.environ/ANTHROPIC_API_KEY
 
 litellm_settings:
-  drop_params: true
+  drop_params: True
