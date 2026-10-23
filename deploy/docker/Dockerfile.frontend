@@ -1,0 +1,99 @@
+# =============================================================================
+# deploy/docker/Dockerfile.frontend
+# Version: 1.0.1
+# Created: 2026-10-23
+#
+# Fork-owned replacement for frontend/Dockerfile (upstream's file is left
+# untouched, so upstream merges never conflict with this). Built by
+# deploy/publish.sh with the frontend/ directory as the build context.
+# Revisit if upstream resumes committing (it had not since 2026-06-02).
+#
+# Same behaviour as upstream's: Node builds the Vite SPA, nginx serves it and
+# reverse-proxies /api/* via envsubst'd runtime variables. What changed, and why:
+#
+#   - nginx 1.27 -> 1.30 stable. 1.27 reached end of life on 2025-06-24 and
+#     this is the network-facing image; the baseline scan of the image it
+#     replaces found 2 critical and 57 high findings, all with fixes available,
+#     on Alpine 3.21.3.
+#   - Node 20 -> 24 (Active LTS). Node 20 reached end of life on 2026-04-30.
+#   - Both base images are pinned by DIGEST. A tag is a moving target; a digest
+#     is the exact image that was scanned. Refresh them on purpose (below).
+#   - `npm ci` now FAILS if package-lock.json and package.json disagree.
+#     Upstream's `npm ci 2>/dev/null || npm install` silently dropped the
+#     lockfile and hid the error, so a broken lock produced an unlocked build.
+#   - Removes curl and apk from the final image (see the hardening block).
+#   - Dropped `apk add gettext`: the official nginx image already ships
+#     envsubst (gettext-envsubst + libintl), so it was a redundant package and
+#     an unpinned network fetch at build time.
+#
+# Refreshing the pins (do it deliberately, then rebuild and scan):
+#   docker pull node:24-alpine && docker image inspect node:24-alpine --format '{{index .RepoDigests 0}}'
+#   docker pull nginx:1.30-alpine && docker image inspect nginx:1.30-alpine --format '{{index .RepoDigests 0}}'
+#   Official OS base images are rebuilt every day or two as security patches
+#   land, so (unlike individually maintained tools) they are NOT subject to the
+#   14-day release cool-down: an older build is a less patched build. The scan
+#   gate in publish.sh is the control for them.
+#
+# Pinned 2026-10-23: node 24.22.1 + nginx 1.30.6, both on Alpine 3.24.3.
+#
+# Build:
+#   docker build -f deploy/docker/Dockerfile.frontend -t spiderfoot-frontend:test frontend/
+# =============================================================================
+
+# ---------- Stage 1: Build ----------
+FROM node:24-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS builder
+
+WORKDIR /app
+
+# Install deps first (layer caching). The lockfile is REQUIRED - no globs.
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+# Copy source & build
+COPY . .
+
+# Override the outDir so Vite builds into /app/dist (not ../spiderfoot/static/react)
+RUN npx vite build --outDir dist
+
+# ---------- Stage 2: Serve ----------
+FROM nginx:1.30-alpine@sha256:47928bf67eb62a1863cb08d9ecb52d3e704304ba614eaee17884204677702951
+
+# Remove default site
+RUN rm -rf /usr/share/nginx/html/* /etc/nginx/conf.d/default.conf
+
+# Copy built assets
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Copy Nginx config template (uses $SF_API_URL placeholder)
+COPY nginx.conf /etc/nginx/templates/default.conf.template
+
+# Runtime env defaults - injected into Nginx config via envsubst
+ENV SF_API_URL=http://api:8001
+ENV SF_WS_URL=http://api:8001
+ENV SF_AGENTS_URL=http://sf-agents:8100
+
+# -- Security hardening ------------------------------------------------------
+# Remove what the running container never uses: curl (the stack's healthcheck
+# uses busybox wget, and Grype flagged curl 8.22.0 with a HIGH finding that has
+# no fix yet - an unfixable CVE in an unused binary is best removed, not
+# waited on) and apk, to prevent in-container installs.
+RUN apk --no-cache del curl apk-tools
+
+# Create non-root nginx user directories and fix ownership
+RUN mkdir -p /var/cache/nginx /var/run /var/log/nginx && \
+    chown -R nginx:nginx /var/cache/nginx /var/run /var/log/nginx && \
+    chown -R nginx:nginx /usr/share/nginx/html && \
+    chown -R nginx:nginx /etc/nginx/conf.d && \
+    chown -R nginx:nginx /etc/nginx/templates
+
+# NOTE: We intentionally do NOT set USER nginx here.
+# The nginx Docker entrypoint must run as root to do envsubst template
+# processing. Nginx itself drops worker processes to the nginx user via
+# the `user nginx;` directive in nginx.conf.
+# With read_only: true + tmpfs mounts, running USER nginx breaks envsubst.
+
+EXPOSE 80
+
+# Nginx (PID 1) - template processing happens automatically via
+# nginx docker image's entrypoint (20-envsubst-on-templates.sh)
+CMD ["nginx", "-g", "daemon off;"]

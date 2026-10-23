@@ -269,7 +269,7 @@ build_service() {   # $1 = service
       dockerfile="docker/Dockerfile.${svc}"; ctx="$REPO_ROOT"
       extra+=(--build-arg "BASE_IMAGE=spiderfoot-base:${TAG}") ;;
     frontend)
-      dockerfile="frontend/Dockerfile"; ctx="$REPO_ROOT/frontend" ;;
+      dockerfile="deploy/docker/Dockerfile.frontend"; ctx="$REPO_ROOT/frontend" ;;
     *) error "Unknown service ${svc}"; exit 1 ;;
   esac
   info "Building ${svc} (${local_ref})..."
