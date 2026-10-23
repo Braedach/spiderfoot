@@ -1,0 +1,13 @@
+# deploy/requirements-tools.in - input for requirements-tools.lock: the Python recon
+# tools the active-scanner image runs, kept in their OWN virtualenv (/opt/venv-tools)
+# so their dependency trees can never conflict with SpiderFoot's application venv.
+#
+# Dropped from the old list, deliberately (see deploy/README.md "Active-scanner tools"):
+#   trufflehog - PyPI's `trufflehog` is the abandoned 2021 v2.1.13; the maintained v3 is
+#                a Go binary, installed from a checksummed release instead.
+#   linkfinder - no release in 2.5 years; katana (-jc) does JavaScript endpoint discovery.
+dnstwist
+snallygaster
+wafw00f
+arjun
+sslyze

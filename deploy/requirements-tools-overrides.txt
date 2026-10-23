@@ -1,0 +1,9 @@
+# deploy/requirements-tools-overrides.txt - forces versions past a transitive cap.
+#
+# cryptography: sslyze 6.3.1 declares cryptography<47, which holds the tools venv at 46.0.7
+# (three HIGH findings, fixed only in 48-50). sslyze runs its TLS handshakes through its own
+# bundled OpenSSL (nassl) and uses cryptography only to parse certificates, so the cap is
+# overridden to the version the application venv already uses. Verified by running sslyze
+# against a local TLS server in the built image (see deploy/README.md). Revisit, and delete
+# this file, once sslyze lifts the cap.
+cryptography>=50.0.2,<51.0.0
