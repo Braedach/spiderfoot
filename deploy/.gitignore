@@ -1,0 +1,8 @@
+# deploy/.gitignore - fork-owned, so upstream's root .gitignore stays untouched.
+# Upstream's root .gitignore has no *.env rule (ARTEX's does), so without this
+# a real stack env file copied next to its .example could be committed to a
+# PUBLIC repo. Only the *.env.example templates are tracked.
+*.env
+.env
+# publish.sh state: log, cached GHCR token, image digest lists
+/build/
