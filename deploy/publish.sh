@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Script: deploy/publish.sh
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-23
 #
 # Summary:
@@ -39,11 +39,15 @@
 #   Prerequisites (build host only needs these three - the Python, Node, Go
 #   and C toolchains all run inside the Dockerfiles' own build stages):
 #     - git, docker, and the gh CLI (github.com/cli/cli)
-#     - a classic GitHub PAT, write:packages + repo scope, scoped to this
-#       one repo. NOT a fine-grained token - GHCR push does not work
-#       reliably with those regardless of the scopes granted. Prompted for
-#       on first run, cached at deploy/build/.ghcr-token (chmod 600,
-#       gitignored). Never pass it as an argument or env var.
+#     - a classic GitHub PAT, write:packages + repo scope. NOT a fine-grained
+#       token - GHCR push does not work reliably with those regardless of the
+#       scopes granted. SCOPE WARNING: a classic PAT with `repo` is NOT limited
+#       to one repository - it can read and write every repo the account can
+#       reach, private ones included. Use a token created only for this, kept
+#       only on the build host, and rotate it. See deploy/README.md "Token
+#       scope". Prompted for on first run, cached beside the clone at
+#       ../.spiderfoot-publish/.ghcr-token (chmod 600, OUTSIDE the repo).
+#       Never pass it as an argument or env var.
 #     - the tag must already exist on origin (create it on the commit you
 #       mean to ship: the tip of the tested branch for -rc, the merged
 #       commit for a release).
@@ -72,6 +76,10 @@
 #       disabled in the fork's Actions settings.
 #
 # Changelog:
+#   1.0.1 (2026-10-23) - State dir (incl. the cached GitHub token) moved out of
+#     the repo to ../.spiderfoot-publish, with a hard refusal if it is ever
+#     inside the clone. Corrected the token-scope wording: a classic PAT cannot
+#     be limited to one repo, contrary to what 1.0.0 claimed.
 #   1.0.0 (2026-10-23) - Initial version. Replaces build-spiderfoot.sh
 #     v3.7.0: explicit tags instead of a tracked branch, fork tag scheme
 #     with -rc builds that never move :latest, no build-time source
@@ -84,9 +92,20 @@ set -euo pipefail
 
 # ---- configuration ----------------------------------------------------------
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-STATE_ROOT="${PUBLISH_STATE_ROOT:-${REPO_ROOT}/deploy/build}"
+# State (log, cached GitHub token, digests) lives BESIDE the clone, never inside
+# it: the clone is the Docker build context, and this directory holds a token
+# that can write to this account's repositories. Nothing in the Dockerfiles
+# copies the whole context today (checked 2026-10-23), but one future
+# `COPY . .` would bake the token into a PUBLIC image.
+STATE_ROOT="${PUBLISH_STATE_ROOT:-$(dirname "$REPO_ROOT")/.spiderfoot-publish}"
+case "$(realpath -m "$STATE_ROOT")/" in
+  "$(realpath -m "$REPO_ROOT")/"*)
+    echo "[ERROR] STATE_ROOT (${STATE_ROOT}) is inside the repo / Docker build context (${REPO_ROOT})." >&2
+    echo "[ERROR] It holds the GitHub token; refusing to run. Set PUBLISH_STATE_ROOT outside the clone." >&2
+    exit 1 ;;
+esac
 LOG_FILE="${STATE_ROOT}/publish.log"
-GHCR_TOKEN_FILE="${STATE_ROOT}/.ghcr-token"   # chmod 600, gitignored
+GHCR_TOKEN_FILE="${STATE_ROOT}/.ghcr-token"   # chmod 600, outside the repo
 STATE_FILE="${STATE_ROOT}/.publish-state"
 
 GHCR_REGISTRY="ghcr.io"
@@ -107,7 +126,7 @@ warn()  { echo -e "${COL_YELLOW}[WARN]${COL_RESET} $*" | tee -a "$LOG_FILE" >&2;
 error() { echo -e "${COL_RED}[ERROR]${COL_RESET} $*"  | tee -a "$LOG_FILE" >&2; }
 ok()    { echo -e "${COL_GREEN}[OK]${COL_RESET} $*"   | tee -a "$LOG_FILE"; }
 
-mkdir -p "$STATE_ROOT"
+( umask 077; mkdir -p "$STATE_ROOT" )
 
 # ---- args -------------------------------------------------------------------
 FORCE=0
