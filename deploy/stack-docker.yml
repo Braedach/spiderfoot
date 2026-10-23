@@ -338,12 +338,12 @@ services:
     user: "0:0"
     entrypoint: ["/usr/local/bin/docker-entrypoint.sh"]
     command: ["python", "-m", "spiderfoot.agents.service"]
-    # No GPU device here, deliberately. The base image is built with
-    # GPU_ACCEL=0 (CPU fastembed) so a GPU buys nothing today. The
-    # Podman CDI device in stack-podman.yml (nvidia.com/gpu=all) is Podman
-    # syntax; Docker would use deploy.resources.reservations.devices
-    # instead, and read_only must come off for it - add it only alongside a
-    # GPU_ACCEL=1 build.
+    # No GPU device here, deliberately. The fork-owned base image is CPU-only
+    # (fastembed, no GPU variant), so a GPU buys nothing today. The Podman CDI
+    # device in stack-podman.yml (nvidia.com/gpu=all) is Podman syntax; Docker
+    # would use deploy.resources.reservations.devices instead, and read_only
+    # must come off for it - add it only alongside a GPU-capable base image
+    # (which needs its own dependency lock; see deploy/docker/Dockerfile.base).
     labels:
       - com.docker.compose.project=spiderfoot
       - com.docker.compose.service=sf-agents

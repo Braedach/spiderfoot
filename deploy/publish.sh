@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Script: deploy/publish.sh
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-10-23
 #
 # Summary:
@@ -32,9 +32,7 @@
 #     ./deploy/publish.sh v6.1.0-bd.1               # build+push a release
 #     ./deploy/publish.sh v6.1.0-bd.1 --force       # rebuild even if published
 #     ./deploy/publish.sh v6.1.0-bd.1 --check       # report status, do nothing
-#     GPU_ACCEL=1 ./deploy/publish.sh <tag>         # base installs
-#       fastembed-gpu instead of fastembed (default 0 = CPU). Only useful
-#       for a deployment that really has GPU passthrough configured.
+#     (no GPU option: the fork-owned base is CPU-only, see Dockerfile.base)
 #
 #   Prerequisites (build host only needs these three - the Python, Node, Go
 #   and C toolchains all run inside the Dockerfiles' own build stages):
@@ -76,6 +74,10 @@
 #       disabled in the fork's Actions settings.
 #
 # Changelog:
+#   1.1.0 (2026-10-23) - Scan gate: every image is scanned (Trivy gates, Grype
+#     cross-checks) before ANY push, and a CycloneDX SBOM per image is attached to
+#     the Release. base and frontend now build from the fork-owned, hardened
+#     Dockerfiles in deploy/docker/. GPU_ACCEL removed (the new base is CPU-only).
 #   1.0.1 (2026-10-23) - State dir (incl. the cached GitHub token) moved out of
 #     the repo to ../.spiderfoot-publish, with a hard refusal if it is ever
 #     inside the clone. Corrected the token-scope wording: a classic PAT cannot
@@ -111,7 +113,6 @@ STATE_FILE="${STATE_ROOT}/.publish-state"
 GHCR_REGISTRY="ghcr.io"
 GHCR_NAMESPACE="braedach"
 GH_REPO_SLUG="Braedach/spiderfoot"
-GPU_ACCEL="${GPU_ACCEL:-0}"
 
 # Order matters: base first, the rest are built FROM it. Mirrors docker/build.sh.
 SERVICES=(base api scanner active-scanner frontend)
@@ -263,8 +264,7 @@ build_service() {   # $1 = service
   )
   case "$svc" in
     base)
-      dockerfile="docker/Dockerfile.base"; ctx="$REPO_ROOT"
-      extra+=(--build-arg "GPU_ACCEL=${GPU_ACCEL}") ;;
+      dockerfile="deploy/docker/Dockerfile.base"; ctx="$REPO_ROOT" ;;
     api|scanner|active-scanner)
       dockerfile="docker/Dockerfile.${svc}"; ctx="$REPO_ROOT"
       extra+=(--build-arg "BASE_IMAGE=spiderfoot-base:${TAG}") ;;
@@ -294,6 +294,24 @@ for svc in "${SERVICES[@]}"; do
   fi
 done
 ok "All 5 images carry revision ${SHA}"
+
+# ---- scan gate: nothing is pushed unless EVERY image passes ------------------
+# Fails on any fixable CRITICAL/HIGH vulnerability or unallowed secret (see
+# deploy/scan-gate.sh). Runs for all 5 before stopping, so one run lists every
+# failure. Also writes a CycloneDX SBOM per image, attached to the Release.
+SCAN_DIR="${STATE_ROOT}/scan-${TAG}"
+rm -rf "$SCAN_DIR"; mkdir -p "$SCAN_DIR"
+FAILED_SCANS=()
+for svc in "${SERVICES[@]}"; do
+  if ! "${REPO_ROOT}/deploy/scan-gate.sh" "spiderfoot-${svc}:${TAG}" "$svc" "$SCAN_DIR" 2>&1 | tee -a "$LOG_FILE"; then
+    FAILED_SCANS+=("$svc")
+  fi
+done
+if [[ ${#FAILED_SCANS[@]} -gt 0 ]]; then
+  error "Scan gate FAILED for: ${FAILED_SCANS[*]}. Nothing was pushed. Reports: ${SCAN_DIR}"
+  exit 1
+fi
+ok "Scan gate passed for all 5 images"
 
 # ---- push to GHCR: version tag, plus :latest for non-rc only -----------------
 DIGEST_FILE="${STATE_ROOT}/images-${TAG}.txt"
@@ -328,12 +346,16 @@ fi
 # ---- GitHub Release ---------------------------------------------------------
 REL_FLAGS=()
 [[ "$IS_RC" -eq 1 ]] && REL_FLAGS+=(--prerelease)
+RELEASE_ASSETS=("$DIGEST_FILE#Image digests")
+for sbom in "$SCAN_DIR"/sbom-*.cdx.json; do
+  [[ -s "$sbom" ]] && RELEASE_ASSETS+=("${sbom}#SBOM $(basename "$sbom" .cdx.json | sed 's/^sbom-//') (CycloneDX)")
+done
 if GH_TOKEN="$GH_PAT" gh release view "$TAG" --repo "$GH_REPO_SLUG" >/dev/null 2>&1; then
   info "Release ${TAG} exists - refreshing its image list"
-  GH_TOKEN="$GH_PAT" gh release upload "$TAG" "$DIGEST_FILE#Image digests" --repo "$GH_REPO_SLUG" --clobber
+  GH_TOKEN="$GH_PAT" gh release upload "$TAG" "${RELEASE_ASSETS[@]}" --repo "$GH_REPO_SLUG" --clobber
 else
   info "Creating GitHub Release ${TAG} on ${GH_REPO_SLUG}..."
-  GH_TOKEN="$GH_PAT" gh release create "$TAG" "$DIGEST_FILE#Image digests" \
+  GH_TOKEN="$GH_PAT" gh release create "$TAG" "${RELEASE_ASSETS[@]}" \
     --repo "$GH_REPO_SLUG" --title "SpiderFoot ${TAG}" --generate-notes ${REL_FLAGS[@]+"${REL_FLAGS[@]}"}
 fi
 ok "Release: https://github.com/${GH_REPO_SLUG}/releases/tag/${TAG}"
@@ -342,7 +364,6 @@ ok "Release: https://github.com/${GH_REPO_SLUG}/releases/tag/${TAG}"
 {
   echo "tag=${TAG}"
   echo "sha=${SHA}"
-  echo "gpu_accel=${GPU_ACCEL}"
   echo "published=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "---"
 } >> "$STATE_FILE"

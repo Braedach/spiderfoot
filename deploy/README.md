@@ -86,7 +86,6 @@ required and has no default.
 ./deploy/publish.sh v6.1.0-bd.1-rc.1      # test build
 ./deploy/publish.sh v6.1.0-bd.1           # release
 ./deploy/publish.sh v6.1.0-bd.1 --check   # status only
-GPU_ACCEL=1 ./deploy/publish.sh <tag>     # fastembed-gpu base (default 0 = CPU)
 ```
 
 Builds the 5 images (`base`, `api`, `scanner`, `active-scanner`, `frontend`),
@@ -127,6 +126,52 @@ rotate it.
   `release.yml`) **disabled** in the fork's Actions settings. `publish.sh` is
   the only supported publisher; a tag push would otherwise trigger upstream's
   own publish jobs.
+
+## Supply-chain policy
+
+Written after a baseline scan (2026-10-23) of the images production was running
+found the active-scanner at 42 critical / 985 high findings, the frontend at 2 /
+57, and secrets-scanning noise from a bundled exploit repository. The causes
+were structural, so the fixes are rules, not one-off patches:
+
+- **The tag pins SpiderFoot's source, nothing else.** The old Dockerfiles pulled
+  16 Go tools at `@latest`, six repositories at branch HEAD, unpinned pip and npm
+  packages and wordlists from moving branches, so rebuilding the same tag
+  tomorrow gave a different image. Everything the fork-owned Dockerfiles install
+  is now pinned: base images by digest, Python by exact version **and hash**
+  (`deploy/requirements.lock`, `pip install --require-hashes`), tools by version.
+- **A 14-day cool-down applies to individually maintained software.** Do not
+  adopt a release younger than 14 days: a hijacked maintainer account is caught
+  within days, not hours (the March 2026 Trivy compromise lasted about three
+  hours; its malicious container images about ten). Lock compilation enforces it
+  (`--exclude-newer`).
+- **...except for a published security fix, as a named, written exception.**
+  `certifi` and Pillow 13 were adopted inside the window because the versions the
+  stack ran had a critical CA-trust finding and four critical image-decoding
+  findings. Each exception is listed with its reason in `requirements.lock`'s
+  inputs and must also pass the scan gate.
+- **...and official OS base images are exempt.** `node`, `nginx`, `python`,
+  `debian` are rebuilt every day or two as patches land, so an old build is a
+  *less* patched build. They are pinned by digest and refreshed deliberately; the
+  scan gate is their control.
+- **Nothing is pushed unless every image passes the scan gate**
+  (`deploy/scan-gate.sh`): no fixable critical/high vulnerability and no unallowed
+  secret, by Trivy; Grype cross-checks and is reported. Accepted findings live in
+  `deploy/trivyignore.txt`, each with a written justification. The scanners are
+  themselves pinned by digest.
+- **An unfixable CVE in an unused binary is removed, not waited on** (e.g. curl in
+  the frontend image).
+- **Images must be scannable.** Upstream's base deleted the package database, so
+  its OS packages were invisible to scanners and "0 findings" meant "can't see".
+  The fork-owned base keeps the read-only package list and removes the package
+  managers.
+- **Rebuild on a schedule, not only on commits.** Upstream has had no commit since
+  2026-06-02, yet OS packages and dependencies keep acquiring CVEs. A release
+  number (`-bd.N`) is a *build* number: cut a new one at least monthly.
+
+Known remaining dependency override: Pillow is forced to 13 although fastembed
+declares `<13` (`deploy/requirements-overrides.txt`). `pip check` will say so;
+that is expected, and is tested.
 
 ## Deploy
 
