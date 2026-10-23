@@ -20,8 +20,8 @@ deploy/
 ├── stack-podman.env.example    # tracked template — names only, no real values
 ├── stack-docker.yml            # DEVELOPMENT / sandbox deployment (Docker host)
 ├── stack-docker.env.example    # tracked template — names only, no real values
+├── bootstrap-spiderfoot-env.sh # generates the real env file (secrets) once per deployment
 ├── litellm-config.yaml         # shared by both stacks
-└── build/                      # publish.sh state: log, cached token (gitignored)
 ```
 
 Both stacks run the same 9 services and only ever **pull** images. They never
@@ -70,17 +70,27 @@ verifies each image's revision label equals the commit being shipped, pushes
 - `git`, `docker` and the `gh` CLI on the build host — nothing else. The
   Python, Node, Go and C toolchains all run inside the Dockerfiles' own
   build stages.
-- a **classic** GitHub PAT, `write:packages` + `repo` scope, scoped to this
-  one repo (GHCR push does not work reliably with a fine-grained PAT,
-  regardless of the scopes granted)
+- a **classic** GitHub PAT, `write:packages` + `repo` scope (GHCR push does
+  not work reliably with a fine-grained PAT, regardless of the scopes
+  granted). It is **not** limited to this repository — see "Token scope"
+  below
 - the tag already pushed to `origin`
 - a clean clone dedicated to publishing — it checks the tag out in place
 - roughly 30GB free disk and 6GB RAM: `active-scanner` compiles Go and C tools
   from source, and a cache-cold build can take over 20 minutes
 
 The token is prompted for the first time, or read from
-`deploy/build/.ghcr-token` (chmod 600, gitignored). Never pass it as an
-argument or env var, and never commit it.
+`../.spiderfoot-publish/.ghcr-token` — a directory **beside** the clone, never
+inside it (chmod 600). `publish.sh` refuses to run if that state directory is
+inside the repo. Never pass the token as an argument or env var, and never
+commit it.
+
+**Token scope.** A classic PAT with `repo` can read and write *every*
+repository the account can reach, private ones included; it cannot be narrowed
+to one repo (only fine-grained tokens can, and those do not work for GHCR
+pushes). Whatever host holds it therefore holds that access. Use a token
+created only for this, keep it only on the build host, give it an expiry, and
+rotate it.
 
 **One-time GitHub setup:**
 - A brand-new image name is created **private** on GHCR; flip it to Public
@@ -99,8 +109,8 @@ sequence. In short:
 ```bash
 mkdir -p /srv/spiderfoot/{postgres,redis,litellm,qdrant,embeddings-cache}
 cp deploy/litellm-config.yaml /srv/spiderfoot/litellm/config.yaml
-cp deploy/stack-<podman|docker>.env.example /srv/spiderfoot/stack-spiderfoot-env.env
-# edit it: replace every CHANGE_ME, set SPIDERFOOT_TAG, then deploy the stack
+./deploy/bootstrap-spiderfoot-env.sh    # see "Generating the secrets" below
+# then set SPIDERFOOT_TAG and ANTHROPIC_API_KEY in the file it wrote, and deploy the stack
 ```
 
 State is bind-mounted at an absolute `/srv/spiderfoot/<service>` path, not a
@@ -110,22 +120,23 @@ directory ownership is set on the host (postgres data dir: uid 70).
 
 ### Generating the secrets
 
-Generate each once, with a **different** set per deployment (the development
-host must never hold production credentials). Use hex, not base64, for the
-database password — it is embedded in `SF_DATABASE_URL`, where `/` and `+`
-would need URL-encoding.
+```bash
+./deploy/bootstrap-spiderfoot-env.sh
+```
 
-| Variable | Generate with |
-|---|---|
-| `POSTGRES_PASSWORD` | `openssl rand -hex 24` (use the same value inside `SF_DATABASE_URL`) |
-| `SF_JWT_SECRET_KEY` | `openssl rand -hex 32` |
-| `SF_ADMIN_PASSWORD` | `openssl rand -base64 18` |
-| `SF_LLM_API_KEY` | `echo "sk-$(openssl rand -hex 32)"` (LiteLLM expects master keys to begin `sk-`) |
-| `ANTHROPIC_API_KEY` | from your Anthropic console; never written to a file in this repo |
+Run it **on the host that runs the stack** (never the build host), once per
+deployment. Each deployment gets its own secrets: the development host must
+never hold production credentials. It writes
+`/srv/spiderfoot/stack-spiderfoot-env.env` (chmod 600) and prints the generated
+secrets **once** — copy them into your password manager then. Re-running it is
+always safe: it never overwrites or rotates an existing file. It leaves two
+things for you: set `SPIDERFOOT_TAG` to an exact published tag, and replace
+`ANTHROPIC_API_KEY` (it cannot be generated). Rotating a generated secret later
+has consequences, listed in `stack-podman.env.example`.
 
-`bootstrap-spiderfoot-env.sh`, which earlier documentation told you to run, no
-longer exists anywhere; this table replaces it. The consequences of rotating
-these on a running deployment are described in `stack-podman.env.example`.
+The script was recovered from this project's earlier history (it had been
+deleted and was referenced by documentation but existed nowhere); see its own
+changelog.
 
 ## Syncing with upstream
 

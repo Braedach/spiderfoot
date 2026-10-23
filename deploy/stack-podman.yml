@@ -52,11 +52,12 @@
 #     Reverse proxy will require configuration along with appropriate CNAMES
 #
 #     FULL DEPLOYMENT SEQUENCE, from nothing, on baden:
-#       1. Create the runtime secrets file (one time only, ever) at /srv/spiderfoot/stack-spiderfoot-env.env,
-#          starting from stack-podman.env.example (same directory). Every CHANGE_ME must be replaced; the
-#          generation commands are in deploy/README.md. The old bootstrap-spiderfoot-env.sh no longer exists anywhere
-#          (not in this repo, not on baden) - do not look for it. If the secrets are lost later, read the file:
-#             - cat /srv/spiderfoot/stack-spiderfoot-env.env
+#       1. Generate the runtime secrets (one time only, ever), on the host that runs the stack:
+#             - ./deploy/bootstrap-spiderfoot-env.sh
+#             - This writes /srv/spiderfoot/stack-spiderfoot-env.env (chmod 600) and prints the secrets ONCE.
+#               Then set SPIDERFOOT_TAG and ANTHROPIC_API_KEY in it by hand (it writes them blank / CHANGE_ME).
+#             - Re-running it is always safe and never rotates anything. If the secrets are lost later, read the file:
+#               cat /srv/spiderfoot/stack-spiderfoot-env.env
 #       2. Create the data directories, and stage litellm's config:
 #             - mkdir -p /srv/spiderfoot/{postgres,redis,litellm,qdrant,embeddings-cache}
 #          Copy litellm-config.yaml (in this same directory) to
@@ -109,8 +110,9 @@
 #       (${SPIDERFOOT_TAG:?...}) with no default, so nothing can drift silently and a test build cannot reach this stack.
 #     - Removed stale references: Portainer (retired 2 Oct 2026, replaced by Dockhand), Watchtower labels on 5 services
 #       (purged 30 Sep 2026; updates are deliberate), Pulse (dropped), and the ineffective ":U" mount flags (Dockhand's
-#       Compose drops them; ownership is set on the host - see Usage step 2). Documented that bootstrap-spiderfoot-env.sh
-#       does not exist anywhere; secret generation is described in deploy/README.md instead.
+#       Compose drops them; ownership is set on the host - see Usage step 2).
+#     - bootstrap-spiderfoot-env.sh recovered from Braedach/Code's history (deleted in 18922aa, 2026-09-22) into
+#       deploy/ as v1.2.0; it had been referenced here but existed nowhere. See the script's own changelog.
 #     - litellm-config-podman.yaml and the near-identical Docker litellm-config.yaml merged into one deploy/litellm-config.yaml
 #       shared with stack-docker.yml. Re-copy it to /srv/spiderfoot/litellm/config.yaml if you want the new comments; the
 #       effective config is unchanged.

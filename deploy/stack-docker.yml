@@ -22,10 +22,10 @@
 #     upstream's own docker-compose.yml, which this fork does not modify.
 #
 #   Usage:
+#     ./deploy/bootstrap-spiderfoot-env.sh      # once: generates the secrets file
+#     # then edit /srv/spiderfoot/stack-spiderfoot-env.env: set SPIDERFOOT_TAG and ANTHROPIC_API_KEY
 #     mkdir -p /srv/spiderfoot/{postgres,redis,litellm,qdrant,embeddings-cache}
 #     cp litellm-config.yaml /srv/spiderfoot/litellm/config.yaml
-#     cp stack-docker.env.example /srv/spiderfoot/stack-spiderfoot-env.env
-#     # edit it: replace every CHANGE_ME, and set SPIDERFOOT_TAG
 #     docker compose -f stack-docker.yml --env-file /srv/spiderfoot/stack-spiderfoot-env.env up -d
 #
 #     Test a branch: publish an -rc tag on davros, set SPIDERFOOT_TAG to it,
