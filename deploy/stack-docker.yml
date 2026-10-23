@@ -59,8 +59,14 @@
 # Changelog:
 #   2.0.0 (2026-10-23) - Rewritten from scratch as a pull-only mirror of
 #     stack-podman.yml 2.8.0 (see its changelog for the shared history).
-#     Previous 1.x versions were a different design (build from source,
-#     MinIO, Tika, named volumes) and are in git history.
+#     Previous 1.x versions were a different design and are in git history.
+#     WHY it was replaced rather than patched: it built from source on the
+#     deploy host (the pattern is build elsewhere, pull here); it ran 11
+#     services against production's 9 (MinIO + init job and Tika, which
+#     production does not run); it used named volumes and its own env layout
+#     where production bind-mounts /srv/spiderfoot; and it had drifted behind
+#     production's fixes. A dev stack that does not mirror production cannot
+#     say whether a change is safe to release. Full reasoning: deploy/README.md.
 #
 # =============================================================================
 
