@@ -1,6 +1,6 @@
 # =============================================================================
 # deploy/stack-podman.yml  (was stack-spiderfoot-podman.yml in the repo root until 2.8.0)
-# Version: 2.8.0
+# Version: 2.9.0
 # Created: 2026-08-06
 # Updated: 2026-10-23
 #
@@ -102,6 +102,10 @@
 #     - IDS/IPS systems may go ballistic
 #
 # Changelog:
+#   2.9.0 (2026-10-23) - sf-celery-worker-active: tmpfs over /home/spiderfoot/.config, .cache and .pdcp (mode 1777). The active-scanner
+#     image now sets HOME=/home/spiderfoot (uid 1000 has no passwd entry, so HOME was "/", read-only). katana, nuclei and the other
+#     ProjectDiscovery tools write their config under $HOME at start-up and exit without scanning if they cannot. Found by running
+#     every tool module against the image with this stack's exact container settings.
 #   2.8.0 (2026-10-23) - Brought into line with the ARTEX fork pattern (Design-Reference s24.3). Moved from the repo root into
 #     deploy/ (stack-spiderfoot-podman.yml -> deploy/stack-podman.yml) so upstream merges never touch it.
 #     - Images are now built and pushed by deploy/publish.sh on davros, not by GitHub Actions or the old untracked
@@ -347,6 +351,9 @@ services:
     tmpfs:
       - /home/spiderfoot/cache:mode=1777
       - /home/spiderfoot/logs:mode=1777
+      - /home/spiderfoot/.config:mode=1777
+      - /home/spiderfoot/.cache:mode=1777
+      - /home/spiderfoot/.pdcp:mode=1777
       - /tmp
     environment:
       - TZ=${TZ}

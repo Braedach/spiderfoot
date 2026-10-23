@@ -265,8 +265,11 @@ build_service() {   # $1 = service
   case "$svc" in
     base)
       dockerfile="deploy/docker/Dockerfile.base"; ctx="$REPO_ROOT" ;;
-    api|scanner|active-scanner)
+    api|scanner)
       dockerfile="docker/Dockerfile.${svc}"; ctx="$REPO_ROOT"
+      extra+=(--build-arg "BASE_IMAGE=spiderfoot-base:${TAG}") ;;
+    active-scanner)
+      dockerfile="deploy/docker/Dockerfile.active-scanner"; ctx="$REPO_ROOT"
       extra+=(--build-arg "BASE_IMAGE=spiderfoot-base:${TAG}") ;;
     frontend)
       dockerfile="deploy/docker/Dockerfile.frontend"; ctx="$REPO_ROOT/frontend" ;;

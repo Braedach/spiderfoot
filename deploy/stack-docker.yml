@@ -1,6 +1,6 @@
 # =============================================================================
 # deploy/stack-docker.yml
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-10-23
 # Updated: 2026-10-23
 #
@@ -57,6 +57,7 @@
 #       isolated for testing.
 #
 # Changelog:
+#   2.1.0 (2026-10-23) - Mirrors stack-podman.yml 2.9.0: tmpfs over /home/spiderfoot/.config, .cache and .pdcp on sf-celery-worker-active.
 #   2.0.0 (2026-10-23) - Rewritten from scratch as a pull-only mirror of
 #     stack-podman.yml 2.8.0 (see its changelog for the shared history).
 #     Previous 1.x versions were a different design and are in git history.
@@ -211,6 +212,9 @@ services:
     tmpfs:
       - /home/spiderfoot/cache:mode=1777
       - /home/spiderfoot/logs:mode=1777
+      - /home/spiderfoot/.config:mode=1777
+      - /home/spiderfoot/.cache:mode=1777
+      - /home/spiderfoot/.pdcp:mode=1777
       - /tmp
     environment:
       - TZ=${TZ}
