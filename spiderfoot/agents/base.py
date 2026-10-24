@@ -68,8 +68,9 @@ class AgentConfig:
     """Configuration for an agent instance."""
 
     name: str
-    llm_endpoint: str = "http://litellm:4000"
+    llm_endpoint: str = ""
     llm_api_key: str = ""
+    llm_provider: str = "openai"  # "anthropic" calls Claude directly through the official SDK
     llm_model: str = "gpt-4o-mini"
     max_concurrent: int = 5
     batch_size: int = 10
@@ -104,8 +105,12 @@ class AgentConfig:
             name=name,
             llm_endpoint=os.environ.get(
                 f"{prefix}LLM_ENDPOINT",
-                os.environ.get("SF_LLM_API_BASE", "http://litellm:4000"),
+                os.environ.get("SF_LLM_API_BASE", ""),
             ),
+            llm_provider=os.environ.get(
+                f"{prefix}LLM_PROVIDER",
+                os.environ.get("SF_LLM_PROVIDER", "openai"),
+            ).strip().lower(),
             llm_api_key=os.environ.get(
                 f"{prefix}LLM_API_KEY",
                 os.environ.get("SF_LLM_API_KEY", ""),
@@ -154,6 +159,7 @@ class BaseAgent(ABC):
         self._total_processing_time = 0.0
         self._last_error: Optional[str] = None
         self._llm_session = None
+        self._anthropic_client = None
         self.logger = logging.getLogger(f"sf.agents.{config.name}")
 
     @property
@@ -269,6 +275,9 @@ class BaseAgent(ABC):
         if self._llm_session is not None:
             await self._llm_session.close()
             self._llm_session = None
+        if self._anthropic_client is not None:
+            await self._anthropic_client.close()
+            self._anthropic_client = None
 
     async def call_llm(
         self,
@@ -279,7 +288,8 @@ class BaseAgent(ABC):
         response_format: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
-        Call LLM via LiteLLM proxy (OpenAI-compatible API).
+        Call the LLM: Claude directly (``llm_provider == "anthropic"``) or any
+        OpenAI-compatible endpoint.
 
         Args:
             messages: Chat messages in OpenAI format
@@ -292,9 +302,12 @@ class BaseAgent(ABC):
         Returns:
             LLM response text
         """
+        model = model or self.config.llm_model
+        if self.config.llm_provider == "anthropic":
+            return await self._call_anthropic(messages, model, max_tokens, response_format)
+
         import aiohttp
 
-        model = model or self.config.llm_model
         urls = self._chat_completion_urls()
         headers = {
             "Content-Type": "application/json",
@@ -362,6 +375,40 @@ class BaseAgent(ABC):
                     break
 
         raise RuntimeError(f"LLM call failed after retries: {last_error}") from last_error
+
+    async def _call_anthropic(
+        self,
+        messages: List[Dict[str, str]],
+        model: str,
+        max_tokens: int,
+        response_format: Optional[Dict[str, Any]],
+    ) -> str:
+        """Call Claude through the official SDK; ``temperature`` is not sent (rejected by current models)."""
+        import anthropic
+
+        from spiderfoot.ai import anthropic_chat
+
+        if self._anthropic_client is None:
+            self._anthropic_client = anthropic.AsyncAnthropic(
+                api_key=self.config.llm_api_key or None,  # None -> ANTHROPIC_API_KEY
+                timeout=self.config.timeout_seconds,
+                max_retries=self.config.llm_max_retries,  # SDK backs off on 429/5xx/connection errors
+            )
+
+        request = anthropic_chat.build_request(messages, model, max_tokens, response_format)
+        try:
+            try:
+                message = await self._anthropic_client.messages.create(**request)
+            except anthropic.BadRequestError:
+                if "format" not in request.get("output_config", {}):
+                    raise
+                self.logger.warning("Claude rejected the response schema; retrying without it")
+                message = await self._anthropic_client.messages.create(
+                    **anthropic_chat.without_schema(request)
+                )
+            return anthropic_chat.response_text(message)
+        except anthropic.APIError as exc:
+            raise RuntimeError(f"LLM call failed: {exc}") from exc
 
     async def _get_llm_session(self):
         """Return a persistent aiohttp session for LLM requests."""
