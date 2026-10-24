@@ -753,12 +753,14 @@ class LLMClient:
 
         try:
             try:
-                message = client.messages.create(**request)
+                message = anthropic_chat.messages_api(client).create(**request, **anthropic_chat.fallback_kwargs())
             except anthropic.BadRequestError:
                 if "format" not in request.get("output_config", {}):
                     raise
                 log.warning("Claude rejected the response schema; retrying without it")
-                message = client.messages.create(**anthropic_chat.without_schema(request))
+                message = anthropic_chat.messages_api(client).create(
+                    **anthropic_chat.without_schema(request), **anthropic_chat.fallback_kwargs()
+                )
             content = anthropic_chat.response_text(message)
         except anthropic.AuthenticationError as e:
             raise LLMAuthError(str(e), 401) from e

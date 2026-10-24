@@ -14,7 +14,8 @@ API facts this relies on (Claude Sonnet 5 / 5.5):
   * Structured output is ``output_config.format`` with a ``json_schema``.
   * Thinking tokens count against ``max_tokens``, so a small cap can return no
     text at all; ``MIN_MAX_TOKENS`` keeps room for the answer.
-  * A request can end with ``stop_reason == "refusal"``.
+  * A request can end with ``stop_reason == "refusal"``; ``fallback_kwargs`` asks the API
+    to retry it on another model.
 """
 
 from __future__ import annotations
@@ -75,6 +76,29 @@ def build_request(
         request["output_config"] = output_config
 
     return request
+
+
+FALLBACK_BETA = "server-side-fallback-2026-07-01"
+
+
+def fallback_kwargs() -> dict[str, Any]:
+    """Extra arguments that make the API retry a declined request on another model.
+
+    Sonnet 5.5's safeguards decline some security-flavoured input (``cyber``). With
+    ``fallbacks="default"`` the API re-runs a declined request on a fallback model
+    inside the same call (tested 2026-10-24: a report prompt declined by 5.5 was
+    answered by ``claude-sonnet-5``). It needs the beta messages endpoint and is
+    Claude API only; set ``SF_LLM_FALLBACK`` empty to turn it off.
+    """
+    mode = os.environ.get("SF_LLM_FALLBACK", "default").strip()
+    if not mode:
+        return {}
+    return {"betas": [FALLBACK_BETA], "fallbacks": mode}
+
+
+def messages_api(client: Any) -> Any:
+    """The messages resource to call: the beta one when fallbacks are on."""
+    return client.beta.messages if fallback_kwargs() else client.messages
 
 
 def without_schema(request: dict[str, Any]) -> dict[str, Any]:

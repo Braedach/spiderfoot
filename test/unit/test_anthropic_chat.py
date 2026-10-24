@@ -13,6 +13,12 @@ from spiderfoot.ai import anthropic_chat
 from spiderfoot.ai.llm_client import LLMClient, LLMConfig, LLMError, LLMProvider
 
 
+@pytest.fixture(autouse=True)
+def _no_fallback_by_default(monkeypatch):
+    """Existing tests exercise the plain endpoint; the fallback tests opt in."""
+    monkeypatch.setenv("SF_LLM_FALLBACK", "")
+
+
 def _reply(text="ok", stop_reason="end_turn"):
     return SimpleNamespace(
         content=[SimpleNamespace(type="text", text=text)],
@@ -145,3 +151,38 @@ def test_agent_config_reads_provider_from_env(monkeypatch):
     monkeypatch.delenv("SF_LLM_API_BASE", raising=False)
     cfg = AgentConfig.from_env("x")
     assert cfg.llm_provider == "anthropic" and cfg.llm_endpoint == ""
+
+
+class TestFallback:
+    def test_default_asks_the_api_to_retry_a_refusal_on_another_model(self, monkeypatch):
+        monkeypatch.delenv("SF_LLM_FALLBACK", raising=False)
+        assert anthropic_chat.fallback_kwargs() == {
+            "betas": [anthropic_chat.FALLBACK_BETA], "fallbacks": "default"}
+
+    def test_can_be_turned_off(self, monkeypatch):
+        monkeypatch.setenv("SF_LLM_FALLBACK", "")
+        assert anthropic_chat.fallback_kwargs() == {}
+
+    def test_sync_client_uses_the_beta_endpoint_when_on(self, monkeypatch):
+        monkeypatch.delenv("SF_LLM_FALLBACK", raising=False)
+        with patch("anthropic.Anthropic") as sdk:
+            beta_create = sdk.return_value.beta.messages.create
+            beta_create.return_value = _reply("rescued")
+            resp = LLMClient(LLMConfig(model="claude-sonnet-5-5", provider=LLMProvider.ANTHROPIC,
+                                       max_retries=1)).chat_messages([{"role": "user", "content": "x"}])
+        assert resp.content == "rescued"
+        sent = beta_create.call_args.kwargs
+        assert sent["fallbacks"] == "default" and sent["betas"] == [anthropic_chat.FALLBACK_BETA]
+        sdk.return_value.messages.create.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_agent_uses_the_beta_endpoint_when_on(self, monkeypatch):
+        monkeypatch.delenv("SF_LLM_FALLBACK", raising=False)
+        agent = _Agent(AgentConfig(name="t", llm_provider="anthropic", llm_model="claude-sonnet-5-5"))
+        client = MagicMock()
+        client.beta.messages.create = AsyncMock(return_value=_reply("rescued"))
+        client.close = AsyncMock()
+        with patch("anthropic.AsyncAnthropic", return_value=client):
+            assert await agent.call_llm([{"role": "user", "content": "q"}]) == "rescued"
+        assert client.beta.messages.create.call_args.kwargs["fallbacks"] == "default"
+        await agent.close()

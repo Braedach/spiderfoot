@@ -398,13 +398,15 @@ class BaseAgent(ABC):
         request = anthropic_chat.build_request(messages, model, max_tokens, response_format)
         try:
             try:
-                message = await self._anthropic_client.messages.create(**request)
+                message = await anthropic_chat.messages_api(self._anthropic_client).create(
+                    **request, **anthropic_chat.fallback_kwargs()
+                )
             except anthropic.BadRequestError:
                 if "format" not in request.get("output_config", {}):
                     raise
                 self.logger.warning("Claude rejected the response schema; retrying without it")
-                message = await self._anthropic_client.messages.create(
-                    **anthropic_chat.without_schema(request)
+                message = await anthropic_chat.messages_api(self._anthropic_client).create(
+                    **anthropic_chat.without_schema(request), **anthropic_chat.fallback_kwargs()
                 )
             return anthropic_chat.response_text(message)
         except anthropic.APIError as exc:

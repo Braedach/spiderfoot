@@ -212,13 +212,17 @@ and checksum-verified; Python tools live in their own hash-locked venv.
 
 ### AI model
 
-`sf-agents` uses `claude-sonnet-5-5` (`SF_LLM_MODEL`). Anthropic's safeguards on it can
-decline a request (HTTP 200, `stop_reason: refusal`, category `cyber`, `bio`,
-`frontier_llm`, `reasoning_extraction` or `general_harms`), and this tool feeds it
-exploit, vulnerability and leaked-secret text, so refusals are a likely failure: a
-report fails with "Claude declined the request (category: ...)" or comes back thin.
-Nothing retries on another model yet. If it bites: `SF_LLM_MODEL=claude-sonnet-5`, or
-add the server-side `fallbacks` option. Not yet run against the live API.
+`sf-agents` uses `claude-sonnet-5-5` (`SF_LLM_MODEL`). Anthropic's safeguards on it can decline a request
+(HTTP 200, `stop_reason: refusal`, category `cyber`, `bio`, `frontier_llm`, `reasoning_extraction` or
+`general_harms`), and this tool feeds it exploit, vulnerability and leaked-secret text. **Tested live on 2026-10-24:**
+a realistic OSINT report prompt (open database port, `.git` exposure, an outdated plugin with a CVE id) was declined
+by 5.5 with `cyber`, answered by `claude-sonnet-5`, and a milder wording passed on 5.5.
+
+So refusals are handled by the API: `SF_LLM_FALLBACK=default` (the default) sends each request with the server-side
+fallback option, and a declined one is re-run on a fallback model inside the same call. It uses the beta endpoint and
+works on the Claude API only; set `SF_LLM_FALLBACK=` (empty) to turn it off, or set `SF_LLM_MODEL=claude-sonnet-5` to
+skip 5.5 altogether. If a request is declined and the fallback declines too, the call raises "Claude declined the
+request (category: ...)".
 
 ### Bumping pins
 
