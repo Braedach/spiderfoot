@@ -350,7 +350,7 @@ services:
       - SF_REDIS_URL=${SF_REDIS_URL}
       # Claude is called directly through the official SDK (the LiteLLM proxy this replaced is gone).
       - SF_LLM_PROVIDER=anthropic
-      - SF_LLM_MODEL=${SF_LLM_MODEL:-claude-sonnet-5}
+      - SF_LLM_MODEL=${SF_LLM_MODEL:-claude-sonnet-5-5}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY}
       - SF_QDRANT_BACKEND=http
       - SF_QDRANT_HOST=qdrant

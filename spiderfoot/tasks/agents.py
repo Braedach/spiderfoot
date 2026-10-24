@@ -76,7 +76,7 @@ def execute_agent_task(
         if os.environ.get("SF_LLM_PROVIDER", "").strip().lower() == "anthropic":
             provider = LLMProvider.ANTHROPIC
             api_base = ""
-            model_name = model or os.environ.get("SF_AGENT_MODEL") or os.environ.get("SF_LLM_MODEL", "claude-sonnet-5")
+            model_name = model or os.environ.get("SF_AGENT_MODEL") or os.environ.get("SF_LLM_MODEL", "claude-sonnet-5-5")
         else:
             provider = LLMProvider.OPENAI
             api_base = os.environ.get("SF_LLM_API_BASE", "").rstrip("/")

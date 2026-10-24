@@ -210,6 +210,16 @@ and checksum-verified; Python tools live in their own hash-locked venv.
   packages in Qdrant's SBOM file: neither is ours to patch; revisit when the
   maintainers ship. Grype's openssl findings are Debian-backport false positives.
 
+### AI model
+
+`sf-agents` uses `claude-sonnet-5-5` (`SF_LLM_MODEL`). Anthropic's safeguards on it can
+decline a request (HTTP 200, `stop_reason: refusal`, category `cyber`, `bio`,
+`frontier_llm`, `reasoning_extraction` or `general_harms`), and this tool feeds it
+exploit, vulnerability and leaked-secret text, so refusals are a likely failure: a
+report fails with "Claude declined the request (category: ...)" or comes back thin.
+Nothing retries on another model yet. If it bites: `SF_LLM_MODEL=claude-sonnet-5`, or
+add the server-side `fallbacks` option. Not yet run against the live API.
+
 ### Bumping pins
 
 ```bash
@@ -281,7 +291,7 @@ fork's own.
 - The stacks apply `no-new-privileges`, `cap_drop`, `read_only` and tmpfs
   where the services tolerate it (found by trial — see `stack-podman.yml`'s
   Warnings). `pids_limit`/`mem_limit` are not set yet.
-- AI features call Anthropic directly (`sf-agents`; `SF_LLM_PROVIDER=anthropic`,
+- AI features call Anthropic directly (Claude Sonnet 5.5, see "AI model") (`sf-agents`; `SF_LLM_PROVIDER=anthropic`,
   `ANTHROPIC_API_KEY`). There is no LLM proxy: the LiteLLM gateway was removed
   after its supply-chain breach, and it had only relayed to Anthropic anyway.
 - This runs 300+ OSINT modules, including active recon tools that make

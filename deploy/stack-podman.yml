@@ -101,7 +101,7 @@
 #
 # Changelog:
 #   2.10.0 (2026-10-24) - sf-litellm removed. Its only job was relaying sf-agents' chat calls to Anthropic; sf-agents now calls Claude
-#     directly (SF_LLM_PROVIDER=anthropic, SF_LLM_MODEL=claude-sonnet-5, ANTHROPIC_API_KEY now required there). The old service ran
+#     directly (SF_LLM_PROVIDER=anthropic, SF_LLM_MODEL=claude-sonnet-5-5, ANTHROPIC_API_KEY now required there). The old service ran
 #     ghcr.io/berriai/litellm:main-latest, a floating tag, which is the wrong way to run a package that has had a supply-chain breach.
 #     /srv/spiderfoot/litellm and the database named litellm, if any, can be deleted after the cutover (kept as the rollback).
 #   2.9.0 (2026-10-23) - sf-celery-worker-active: tmpfs over /home/spiderfoot/.config, .cache and .pdcp (mode 1777). The active-scanner
@@ -497,7 +497,7 @@ services:
       - SF_REDIS_URL=${SF_REDIS_URL}
       # Claude is called directly through the official SDK (the LiteLLM proxy this replaced is gone).
       - SF_LLM_PROVIDER=anthropic
-      - SF_LLM_MODEL=${SF_LLM_MODEL:-claude-sonnet-5}
+      - SF_LLM_MODEL=${SF_LLM_MODEL:-claude-sonnet-5-5}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY}
       - SF_QDRANT_BACKEND=http
       - SF_QDRANT_HOST=qdrant

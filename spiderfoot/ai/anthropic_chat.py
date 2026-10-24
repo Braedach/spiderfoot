@@ -7,6 +7,8 @@ text, so the callers can talk to Claude directly instead of through a proxy
 (the LiteLLM gateway this replaces).
 
 API facts this relies on (Claude Sonnet 5 / 5.5):
+  * Sonnet 5.5's safeguards can decline security-flavoured input (``cyber`` and
+    four other categories); see ``response_text`` and deploy/README.md.
   * ``temperature``, ``top_p`` and ``top_k`` are rejected (HTTP 400), so none is
     sent.
   * Structured output is ``output_config.format`` with a ``json_schema``.
@@ -38,7 +40,7 @@ def build_request(
     Args:
         messages: OpenAI-style chat messages; ``system`` messages are lifted
             into the top-level ``system`` field.
-        model: Claude model id, e.g. ``claude-sonnet-5``.
+        model: Claude model id, e.g. ``claude-sonnet-5-5``.
         max_tokens: requested output cap (raised to ``MIN_MAX_TOKENS``).
         response_format: OpenAI-style ``{"type": "json_schema", ...}`` or
             ``{"type": "json_object"}``.
