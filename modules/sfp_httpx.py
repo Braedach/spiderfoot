@@ -89,6 +89,11 @@ class sfp_httpx(SpiderFootAsyncPlugin):
             "DOMAIN_NAME",
             "IP_ADDRESS",
             "LINKED_URL_INTERNAL",
+            # A port a scanner (naabu, masscan...) actually found open. Probed on that
+            # exact port regardless of the fixed "ports" option below - otherwise a web
+            # app on anything other than 80/443/8080/8443 (found live: OWASP Juice Shop
+            # on 3000) is invisible to every tool downstream of httpx.
+            "TCP_PORT_OPEN",
         ]
 
     def producedEvents(self):
@@ -122,8 +127,18 @@ class sfp_httpx(SpiderFootAsyncPlugin):
 
         return None
 
-    def _build_cmd(self, httpx_path: str, input_file: str, output_file: str) -> list[str]:
-        """Build httpx command line."""
+    def _build_cmd(
+        self, httpx_path: str, input_file: str, output_file: str, explicit_port: bool = False
+    ) -> list[str]:
+        """Build httpx command line.
+
+        Args:
+            explicit_port: the input line is already "host:port" (a TCP_PORT_OPEN
+                event). -ports is omitted in that case: passing it makes httpx use
+                that fixed list INSTEAD of the port already named in the input line
+                (confirmed live - with -ports set, an explicit host:port in -l is not
+                probed at all).
+        """
         cmd = [
             httpx_path,
             "-l", input_file,
@@ -136,7 +151,7 @@ class sfp_httpx(SpiderFootAsyncPlugin):
             "-method", self.opts["method"],
         ]
 
-        if self.opts["ports"]:
+        if self.opts["ports"] and not explicit_port:
             cmd.extend(["-ports", self.opts["ports"]])
         if self.opts["follow_redirects"]:
             cmd.append("-follow-redirects")
@@ -267,7 +282,10 @@ class sfp_httpx(SpiderFootAsyncPlugin):
         output_path = input_path + ".json"
 
         try:
-            cmd = self._build_cmd(httpx_path, input_path, output_path)
+            cmd = self._build_cmd(
+                httpx_path, input_path, output_path,
+                explicit_port=(event.eventType == "TCP_PORT_OPEN"),
+            )
             self.debug(f"Running: {' '.join(cmd)}")
 
             proc = subprocess.run(
