@@ -21,10 +21,12 @@ deploy/
 ├── stack-docker.yml            # DEVELOPMENT / sandbox deployment (Docker host)
 ├── stack-docker.env.example    # tracked template — names only, no real values
 ├── bootstrap-spiderfoot-env.sh # generates the real env file (secrets) once per deployment
-├── litellm-config.yaml         # shared by both stacks
+├── scan-gate.sh                # Trivy + Grype gate publish.sh runs on every image
+├── docker/                     # fork-owned Dockerfiles (base, frontend, active-scanner, go-build.sh)
+└── requirements*.in / .lock    # hash-locked Python: the app, and the active scanner's tools
 ```
 
-Both stacks run the same 9 services and only ever **pull** images. They never
+Both stacks run the same 8 services (7, plus the active-scan worker under the `scan` profile) and only ever **pull** images. They never
 build anything. The development stack mirrors production on purpose: what is
 tested there is what runs here.
 
@@ -146,10 +148,11 @@ were structural, so the fixes are rules, not one-off patches:
   hours; its malicious container images about ten). Lock compilation enforces it
   (`--exclude-newer`).
 - **...except for a published security fix, as a named, written exception.**
-  `certifi` and Pillow 13 were adopted inside the window because the versions the
-  stack ran had a critical CA-trust finding and four critical image-decoding
-  findings. Each exception is listed with its reason in `requirements.lock`'s
-  inputs and must also pass the scan gate.
+  Taken so far: `certifi` and Pillow 13 (critical CA-trust and image-decoding
+  findings), and on 2026-10-24 `brotli` 1.2.1 (critical), `filelock` 4.2.1 and
+  `pypdf` 6.21.2 (high), plus the `cryptography` override in the tools lock. Each is
+  an `--exclude-newer-package` date in the compile command below, and must pass the
+  scan gate. Move them back under the 14-day rule at the next rebuild.
 - **...and official OS base images are exempt.** `node`, `nginx`, `python`,
   `debian` are rebuilt every day or two as patches land, so an old build is a
   *less* patched build. They are pinned by digest and refreshed deliberately; the
@@ -169,9 +172,56 @@ were structural, so the fixes are rules, not one-off patches:
   2026-06-02, yet OS packages and dependencies keep acquiring CVEs. A release
   number (`-bd.N`) is a *build* number: cut a new one at least monthly.
 
-Known remaining dependency override: Pillow is forced to 13 although fastembed
-declares `<13` (`deploy/requirements-overrides.txt`). `pip check` will say so;
-that is expected, and is tested.
+Known dependency overrides (`pip check` will say so; expected, and tested): Pillow 13
+although fastembed declares `<13` (`requirements-overrides.txt`), and `cryptography` 50
+for sslyze (`requirements-tools-overrides.txt`).
+
+### Active scanner
+
+`docker/Dockerfile.active-scanner` replaces upstream's. Everything is pinned
+and checksum-verified; Python tools live in their own hash-locked venv.
+
+- **Go tools** are built by `docker/go-build.sh` with their vulnerable
+  dependencies raised to the floor list in the Dockerfile (`GO_FLOORS`), and
+  nuclei is built from source on the current Go. The first scan found 2 critical /
+  112 high, all inside binaries' embedded dependencies. When the gate reports a new
+  one, raise the floor to the first fixed release (at least 14 days old, or a named
+  exception). gowitness is built from a checkout (its `go.mod` has `replace`
+  directives); gau is pinned to a commit.
+- **Removed:** amass (own dependencies carry 2 critical / 48 high; v5 is a different
+  architecture; subfinder + dnsx cover it), gospider and hakrawler (katana),
+  waybackurls (gau), LinkFinder (katana `-jc`), CMSeeK (whatweb, httpx), retire.js
+  (never worked). **Replaced:** PyPI `trufflehog` (abandoned v2) by TruffleHog v3.
+  Their modules still exist and report "binary not found".
+- **Runtime needs** (set in the stacks): `HOME=/home/spiderfoot` (the stacks run it
+  as uid 1000, which has no passwd entry) and tmpfs over `.config`, `.cache` and
+  `.pdcp`, or katana and nuclei exit without scanning. `cap_add: NET_RAW` and
+  `no-new-privileges: false` for this worker only: nmap, naabu and masscan carry
+  `cap_net_raw` as a file capability, which the kernel ignores for a non-root
+  process while no-new-privileges is on (tested). massdns needs none.
+- **Module paths:** the older tool modules need their `*_path` option set per scan
+  (e.g. `/tools/testssl.sh/testssl.sh`); tools are on `PATH` otherwise.
+- **Testing an image:** run each tool module against a local server with the
+  stack's exact container flags (`--read-only`, `--user 1000:1000`,
+  `--cap-drop ALL --cap-add NET_RAW`, the tmpfs mounts). That found a dozen
+  modules written for old command lines (dalfox, gowitness, gobuster, tlsx,
+  arjun, TruffleHog) and the HOME / capability problems above.
+- **Accepted, not fixed:** gosu (Go 1.24.6) in every Postgres image and Node
+  packages in Qdrant's SBOM file: neither is ours to patch; revisit when the
+  maintainers ship. Grype's openssl findings are Debian-backport false positives.
+
+### Bumping pins
+
+```bash
+cd deploy && uv pip compile requirements.in -o requirements.lock --generate-hashes \
+  --python-version 3.12 --no-header --exclude-newer <today-14d>T00:00:00Z \
+  --exclude-newer-package <pkg>=<day after its fixed release> \
+  --override requirements-overrides.txt --allow-unsafe
+```
+
+Delete the old lock first (otherwise uv keeps its pins). Re-compile the tools
+lock the same way from `requirements-tools.in`. Then `publish.sh` rebuilds and
+gates; nothing is pushed on a failure.
 
 ## Deploy
 
@@ -180,8 +230,7 @@ Production (Podman, `stack-podman.yml`) and development (Docker,
 sequence. In short:
 
 ```bash
-mkdir -p /srv/spiderfoot/{postgres,redis,litellm,qdrant,embeddings-cache}
-cp deploy/litellm-config.yaml /srv/spiderfoot/litellm/config.yaml
+mkdir -p /srv/spiderfoot/{postgres,redis,qdrant,embeddings-cache}
 ./deploy/bootstrap-spiderfoot-env.sh    # see "Generating the secrets" below
 # then set SPIDERFOOT_TAG and ANTHROPIC_API_KEY in the file it wrote, and deploy the stack
 ```
@@ -232,6 +281,9 @@ fork's own.
 - The stacks apply `no-new-privileges`, `cap_drop`, `read_only` and tmpfs
   where the services tolerate it (found by trial — see `stack-podman.yml`'s
   Warnings). `pids_limit`/`mem_limit` are not set yet.
+- AI features call Anthropic directly (`sf-agents`; `SF_LLM_PROVIDER=anthropic`,
+  `ANTHROPIC_API_KEY`). There is no LLM proxy: the LiteLLM gateway was removed
+  after its supply-chain breach, and it had only relayed to Anthropic anyway.
 - This runs 300+ OSINT modules, including active recon tools that make
   outbound requests to third parties. Only scan targets you are authorised to
   investigate.

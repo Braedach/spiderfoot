@@ -1,6 +1,6 @@
 # =============================================================================
 # deploy/stack-podman.yml  (was stack-spiderfoot-podman.yml in the repo root until 2.8.0)
-# Version: 2.9.0
+# Version: 2.10.0
 # Created: 2026-08-06
 # Updated: 2026-10-23
 #
@@ -13,8 +13,8 @@
 #     images deploy/publish.sh builds and pushes - it never builds anything.
 #     See deploy/README.md for the build -> test -> release flow.
 #
-#     AI report generation (sf-agents + sf-litellm) uses Anthropic's API (Claude Sonnet 5) rather than local Ollama.
-#     Matches the pattern n8n already uses on baden. No dependency on Ollama LLM.
+#     AI report generation (sf-agents) calls Anthropic's API (Claude Sonnet 5) directly through the official SDK.
+#     No proxy and no local Ollama. Needs ANTHROPIC_API_KEY.
 #     Single network for isolation
 #
 #     110 of SpiderFoot's 310 modules need an API key; 80 of those are free (sign up, generate a key)
@@ -58,10 +58,8 @@
 #               Then set SPIDERFOOT_TAG and ANTHROPIC_API_KEY in it by hand (it writes them blank / CHANGE_ME).
 #             - Re-running it is always safe and never rotates anything. If the secrets are lost later, read the file:
 #               cat /srv/spiderfoot/stack-spiderfoot-env.env
-#       2. Create the data directories, and stage litellm's config:
-#             - mkdir -p /srv/spiderfoot/{postgres,redis,litellm,qdrant,embeddings-cache}
-#          Copy litellm-config.yaml (in this same directory) to
-#             - /srv/spiderfoot/litellm/config.yaml
+#       2. Create the data directories:
+#             - mkdir -p /srv/spiderfoot/{postgres,redis,qdrant,embeddings-cache}
 #          Dockhand deploys with Docker Compose, which silently drops Podman-only volume flags (":U" etc.), so ownership is
 #          NOT applied automatically: set it on the host (postgres data dir owned by uid 70, the postgres:alpine user).
 #       3. In Dockhand, create the stack on the baden environment:
@@ -69,7 +67,7 @@
 #          - Supply the values from /srv/spiderfoot/stack-spiderfoot-env.env as the stack's environment, and set
 #            SPIDERFOOT_TAG to an exact published tag (see Builds above). The stack refuses to start without it.
 #          - Deploy
-#       4. Confirm all 9 containers report healthy, then log in at the UI above with the admin password from step 1.
+#       4. Confirm all 7 containers report healthy (8 with the `scan` profile), then log in at the UI above with the admin password from step 1.
 #
 #       5. To upgrade: change SPIDERFOOT_TAG to the new exact tag and redeploy. Updates are deliberate, never automatic
 #          (Watchtower was purged 30 Sep 2026).
@@ -102,6 +100,10 @@
 #     - IDS/IPS systems may go ballistic
 #
 # Changelog:
+#   2.10.0 (2026-10-24) - sf-litellm removed. Its only job was relaying sf-agents' chat calls to Anthropic; sf-agents now calls Claude
+#     directly (SF_LLM_PROVIDER=anthropic, SF_LLM_MODEL=claude-sonnet-5, ANTHROPIC_API_KEY now required there). The old service ran
+#     ghcr.io/berriai/litellm:main-latest, a floating tag, which is the wrong way to run a package that has had a supply-chain breach.
+#     /srv/spiderfoot/litellm and the database named litellm, if any, can be deleted after the cutover (kept as the rollback).
 #   2.9.0 (2026-10-23) - sf-celery-worker-active: tmpfs over /home/spiderfoot/.config, .cache and .pdcp (mode 1777). The active-scanner
 #     image now sets HOME=/home/spiderfoot (uid 1000 has no passwd entry, so HOME was "/", read-only). katana, nuclei and the other
 #     ProjectDiscovery tools write their config under $HOME at start-up and exit without scanning if they cannot. Found by running
@@ -430,35 +432,6 @@ services:
     networks:
       - spiderfoot-net
 
-  sf-litellm:
-    image: ghcr.io/berriai/litellm:main-latest
-    container_name: sf-litellm
-    hostname: sf-litellm
-    restart: always
-    labels:
-      - com.docker.compose.project=spiderfoot
-      - com.docker.compose.service=sf-litellm
-    volumes:
-      - /srv/spiderfoot/litellm/config.yaml:/app/config.yaml:ro
-    environment:
-      - LITELLM_MASTER_KEY=${SF_LLM_API_KEY}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')\" || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    networks:
-      spiderfoot-net:
-        aliases:
-          - litellm
-
   sf-qdrant:
     image: qdrant/qdrant:v1.19.1
     container_name: sf-qdrant
@@ -522,10 +495,10 @@ services:
       - SF_AGENTS_PORT=8100
       - SF_POSTGRES_DSN=${SF_DATABASE_URL}
       - SF_REDIS_URL=${SF_REDIS_URL}
-      - SF_LLM_PROVIDER=openai
-      - SF_LLM_API_BASE=http://litellm:4000
-      - SF_LLM_API_KEY=${SF_LLM_API_KEY}
-      - SF_LLM_MODEL=spiderfoot-llm
+      # Claude is called directly through the official SDK (the LiteLLM proxy this replaced is gone).
+      - SF_LLM_PROVIDER=anthropic
+      - SF_LLM_MODEL=${SF_LLM_MODEL:-claude-sonnet-5}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY}
       - SF_QDRANT_BACKEND=http
       - SF_QDRANT_HOST=qdrant
       - SF_QDRANT_PORT=6333
@@ -551,7 +524,6 @@ services:
     depends_on:
       - sf-postgres
       - sf-redis
-      - sf-litellm
       - sf-qdrant
     healthcheck:
       test: ["CMD", "python3", "-c", "__import__('urllib.request').request.urlopen('http://127.0.0.1:8100/health')"]
