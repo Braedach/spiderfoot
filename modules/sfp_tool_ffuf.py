@@ -53,6 +53,7 @@ class sfp_tool_ffuf(SpiderFootAsyncPlugin):
         "extensions": "",
         "max_targets": 50,
         "run_timeout": 300,
+        "auto_calibrate": True,
     }
 
     optdescs = {
@@ -69,6 +70,10 @@ class sfp_tool_ffuf(SpiderFootAsyncPlugin):
         "extensions": "File extensions to fuzz (e.g. php,asp,html).",
         "max_targets": "Maximum number of targets to fuzz.",
         "run_timeout": "Total run timeout per target in seconds.",
+        "auto_calibrate": "Auto-calibrate (ffuf -ac) to filter a site's own false-positive responses "
+        "before matching. Without it, a single-page app that serves its index page for any path "
+        "(Angular/React/Vue client-side routing) makes EVERY wordlist entry match -mc 200 - confirmed "
+        "live against OWASP Juice Shop: 4,740 false hits without -ac, 9 real ones with it.",
     }
 
     results = None
@@ -144,6 +149,8 @@ class sfp_tool_ffuf(SpiderFootAsyncPlugin):
 
         if self.opts["match_codes"]:
             cmd.extend(["-mc", self.opts["match_codes"]])
+        if self.opts.get("auto_calibrate", True):
+            cmd.append("-ac")
         if self.opts["filter_codes"]:
             cmd.extend(["-fc", self.opts["filter_codes"]])
         if self.opts["filter_size"]:
