@@ -13,7 +13,7 @@
 #     images deploy/publish.sh builds and pushes - it never builds anything.
 #     See deploy/README.md for the build -> test -> release flow.
 #
-#     AI report generation (sf-agents) calls Anthropic's API (Claude Sonnet 5) directly through the official SDK.
+#     AI report generation (sf-agents) calls Anthropic's API (Claude Sonnet 5.5) directly through the official SDK.
 #     No proxy and no local Ollama. Needs ANTHROPIC_API_KEY.
 #     Single network for isolation
 #

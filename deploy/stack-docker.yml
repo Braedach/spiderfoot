@@ -35,7 +35,7 @@
 #     - /srv/spiderfoot/* exist. Docker has no ":U" flag, so ownership is set
 #       on the host: postgres data dir owned by uid 70 (the postgres:alpine
 #       user). Docker will create missing directories root-owned on first up.
-#     - ANTHROPIC_API_KEY in the env file (sf-agents calls Claude Sonnet 5 directly)
+#     - ANTHROPIC_API_KEY in the env file (sf-agents calls Claude Sonnet 5.5 directly)
 #
 #   Warnings:
 #     - SPIDERFOOT_TAG is REQUIRED and has no default; -rc tags never move
