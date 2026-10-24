@@ -106,6 +106,8 @@
 #     image now sets HOME=/home/spiderfoot (uid 1000 has no passwd entry, so HOME was "/", read-only). katana, nuclei and the other
 #     ProjectDiscovery tools write their config under $HOME at start-up and exit without scanning if they cannot. Found by running
 #     every tool module against the image with this stack's exact container settings.
+#     - Same worker: cap_add NET_RAW, no-new-privileges OFF, NMAP_PRIVILEGED=1. nmap, naabu, masscan and massdns could not start at all
+#       (file capabilities beyond the dropped set -> exit 126); the image now grants cap_net_raw only. See the comment on the service.
 #   2.8.0 (2026-10-23) - Brought into line with the ARTEX fork pattern (Design-Reference s24.3). Moved from the repo root into
 #     deploy/ (stack-spiderfoot-podman.yml -> deploy/stack-podman.yml) so upstream merges never touch it.
 #     - Images are now built and pushed by deploy/publish.sh on davros, not by GitHub Actions or the old untracked
@@ -365,13 +367,24 @@ services:
       # sf-celery-worker above (reverted 2026-09-11, kept for later).
       - SF_EVENTBUS_BACKEND=redis
       - SF_EVENTBUS_REDIS_URL=${SF_REDIS_URL}
+      - NMAP_PRIVILEGED=1
     depends_on:
       - sf-postgres
       - sf-redis
+    # Raw-socket scanning (nmap -sS, naabu SYN, masscan) needs CAP_NET_RAW and nothing else. The
+    # image gives those binaries cap_net_raw as a FILE capability, and the kernel ignores file
+    # capabilities for a non-root process while no-new-privileges is set - so this one worker
+    # runs with it off (verified: with it on, raw scans fail "Operation not permitted" even
+    # with NET_RAW granted). Everything else stays dropped, the image has no setuid binaries,
+    # and the root filesystem is read-only. The alternative that keeps no-new-privileges is
+    # user "0:0" with cap_drop ALL + this cap_add; it was judged worse (uid 0 inside).
+    # NMAP_PRIVILEGED tells nmap to trust that capability instead of demanding euid 0.
     security_opt:
-      - no-new-privileges:true
+      - no-new-privileges:false
     cap_drop:
       - ALL
+    cap_add:
+      - NET_RAW
     networks:
       - spiderfoot-net
 

@@ -57,7 +57,8 @@
 #       isolated for testing.
 #
 # Changelog:
-#   2.1.0 (2026-10-23) - Mirrors stack-podman.yml 2.9.0: tmpfs over /home/spiderfoot/.config, .cache and .pdcp on sf-celery-worker-active.
+#   2.1.0 (2026-10-23) - Mirrors stack-podman.yml 2.9.0: tmpfs over /home/spiderfoot/.config, .cache and .pdcp on sf-celery-worker-active,
+#     plus cap_add NET_RAW, no-new-privileges off and NMAP_PRIVILEGED=1 (see the comment on the service).
 #   2.0.0 (2026-10-23) - Rewritten from scratch as a pull-only mirror of
 #     stack-podman.yml 2.8.0 (see its changelog for the shared history).
 #     Previous 1.x versions were a different design and are in git history.
@@ -226,13 +227,24 @@ services:
       # sf-celery-worker above (reverted 2026-09-11, kept for later).
       - SF_EVENTBUS_BACKEND=redis
       - SF_EVENTBUS_REDIS_URL=${SF_REDIS_URL}
+      - NMAP_PRIVILEGED=1
     depends_on:
       - sf-postgres
       - sf-redis
+    # Raw-socket scanning (nmap -sS, naabu SYN, masscan) needs CAP_NET_RAW and nothing else. The
+    # image gives those binaries cap_net_raw as a FILE capability, and the kernel ignores file
+    # capabilities for a non-root process while no-new-privileges is set - so this one worker
+    # runs with it off (verified: with it on, raw scans fail "Operation not permitted" even
+    # with NET_RAW granted). Everything else stays dropped, the image has no setuid binaries,
+    # and the root filesystem is read-only. The alternative that keeps no-new-privileges is
+    # user "0:0" with cap_drop ALL + this cap_add; it was judged worse (uid 0 inside).
+    # NMAP_PRIVILEGED tells nmap to trust that capability instead of demanding euid 0.
     security_opt:
-      - no-new-privileges:true
+      - no-new-privileges:false
     cap_drop:
       - ALL
+    cap_add:
+      - NET_RAW
     networks:
       - spiderfoot-net
 

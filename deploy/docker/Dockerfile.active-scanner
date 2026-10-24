@@ -222,11 +222,19 @@ WORKDIR /home/spiderfoot
 RUN ln -sf /tools/nikto/program/nikto.pl /usr/local/bin/nikto && \
     chmod +x /tools/nikto/program/nikto.pl && chmod +x /tools/bin/*
 
-# Raw-socket capabilities for network scanners
-RUN setcap cap_net_raw,cap_net_admin=eip /usr/bin/nmap      2>/dev/null || true && \
-    setcap cap_net_raw,cap_net_admin=eip /tools/bin/naabu   2>/dev/null || true && \
-    setcap cap_net_raw,cap_net_admin=eip /tools/bin/massdns 2>/dev/null || true && \
-    setcap cap_net_raw,cap_net_admin=eip /tools/bin/masscan 2>/dev/null || true
+# Raw-socket capability for the network scanners that need it - CAP_NET_RAW and nothing else.
+# (Upstream granted cap_net_admin too, which none of them use; and massdns only opens UDP
+# sockets, so it needs no capability at all.) A file capability only takes effect if the
+# container's bounding set contains it, so the stack must `cap_add: NET_RAW` for the worker;
+# without it these binaries refuse to start (exit 126) rather than run unprivileged.
+# Fails the build if setcap fails or the result is not what is expected.
+RUN setcap cap_net_raw=eip /usr/bin/nmap && \
+    setcap cap_net_raw=eip /tools/bin/naabu && \
+    setcap cap_net_raw=eip /tools/bin/masscan && \
+    for b in /usr/bin/nmap /tools/bin/naabu /tools/bin/masscan; do \
+        getcap "$b" | grep -q 'cap_net_raw=eip$' || { echo "setcap check failed: $b"; exit 1; }; \
+    done && \
+    test -z "$(getcap /tools/bin/massdns)"
 
 # Hardening: no package installers in the running container (apt, dpkg, and the base image's
 # own pip), but KEEP /var/lib/dpkg/status so the image can be scanned (see Dockerfile.base).
