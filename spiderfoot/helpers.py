@@ -337,9 +337,16 @@ class SpiderFootHelpers():
 
     @staticmethod
     def urlBaseUrl(url: str) -> str:
-        """Extract the scheme and domain from a URL.
+        """Extract the scheme and domain (including an explicit port, if any) from a URL.
 
         Note: Does not return the trailing slash! So you can do .endswith() checks.
+
+        Fixed 2026-10-24: the previous regex treated a port's ':' as the same kind of
+        stop character as the path '/' or query '?', so "http://host:3000/path"
+        returned "http://host" - the port silently dropped. A caller building a
+        relative link against that base (e.g. sfp_spider resolving "/script.js")
+        then pointed it at the default port instead of the one actually in the URL.
+        Found live scanning a target on a non-default port (OWASP Juice Shop, 3000).
 
         Args:
             url (str): URL
@@ -354,9 +361,9 @@ class SpiderFootHelpers():
             return None
 
         if '://' in url:
-            bits = re.match(r'(\w+://.[^/:\?]*)[:/\?].*', url)
+            bits = re.match(r'(\w+://[^/\?]+)(?:[/\?].*)?$', url)
         else:
-            bits = re.match(r'(.[^/:\?]*)[:/\?]', url)
+            bits = re.match(r'([^/\?]+)(?:[/\?].*)?$', url)
 
         if bits is None:
             return url.lower()
@@ -379,19 +386,35 @@ class SpiderFootHelpers():
 
     @staticmethod
     def urlRelativeToAbsolute(url: str) -> str:
-        """Convert relative URL paths to absolute.
+        """Resolve '.' and '..' path segments in a URL, leaving its scheme and
+        authority ("scheme://host[:port]") untouched.
+
+        Fixed 2026-10-24: the previous version split the WHOLE url (scheme and
+        authority included) on '/' and dropped every empty segment, which also
+        dropped the empty segment between the two slashes of "scheme://"
+        ("http://host/x" -> "http:/host/x", corrupting every absolute URL this
+        touched) and let enough leading ".." eat into the authority itself
+        (the domain name) rather than stopping at the path's own root - found
+        live, every link a crawl discovers is passed through this function.
 
         Args:
-            url: URL that may contain relative paths
+            url: URL that may contain relative path components
 
         Returns:
-            Absolute URL
+            Absolute URL, with '.' and '..' path segments resolved
         """
         if not url:
             return url
 
-        # Handle relative path components like ../
-        parts = url.split('/')
+        prefix = ''
+        path = url
+        m = re.match(r'(\w+://[^/\?]*)(.*)$', url)
+        if m:
+            prefix, path = m.group(1), m.group(2)
+
+        # Handle relative path components like ../ - confined to the path, so a
+        # run of ".." longer than the path is deep can never pop into prefix.
+        parts = path.split('/')
         stack = []
         for part in parts:
             if part == '..':
@@ -399,7 +422,13 @@ class SpiderFootHelpers():
                     stack.pop()
             elif part and part != '.':
                 stack.append(part)
-        return '/'.join(stack)
+        resolved = '/'.join(stack)
+
+        if not prefix:
+            return resolved
+        if resolved or path.startswith('/'):
+            return f"{prefix}/{resolved}"
+        return prefix
 
     @staticmethod
     def sanitiseInput(input_str: str, extra: typing.list[str] | None = None) -> bool:

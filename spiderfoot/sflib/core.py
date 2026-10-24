@@ -435,7 +435,13 @@ class SpiderFoot:
         ]
 
     def urlFQDN(self, url: str) -> str:
-        """Extract the fully qualified domain name from a URL."""
+        """Extract the fully qualified domain name from a URL (no port).
+
+        Fixed 2026-10-24: this used to rely on urlBaseUrl() dropping an explicit
+        port as a side effect to produce a bare FQDN. Now that urlBaseUrl() keeps
+        the port (it was silently corrupting every link resolved against it - see
+        its own docstring), the port has to be stripped here explicitly instead.
+        """
         if not url:
             self.error(f"Invalid URL: {url}")
             return None
@@ -445,7 +451,10 @@ class SpiderFoot:
             count = 2
         else:
             count = 0
-        return baseurl.split('/')[count].lower()
+        fqdn = baseurl.split('/')[count].lower()
+        if ':' in fqdn:
+            fqdn = fqdn.split(':')[0]
+        return fqdn
 
     def googleIterate(self, searchString: str, opts: dict | None = None) -> dict:
         """Request search results from the Google API.

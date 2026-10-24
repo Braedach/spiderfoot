@@ -115,10 +115,12 @@ class TestSpiderFootHelpersEnhanced:
         # Test empty URL
         assert SpiderFootHelpers.urlRelativeToAbsolute("") == ""
         
-        # Test already absolute URLs - this function removes double slashes
+        # Test already absolute URLs - preserved as-is (see test_urlRelativeToAbsolute
+        # in test_spiderfoothelpers.py for the exact scheme/slash expectations)
         abs_url = "https://example.com/path"
         result = SpiderFootHelpers.urlRelativeToAbsolute(abs_url)
         assert "example.com" in result
+        assert result == "https://example.com/path"
         
         # Test relative paths
         assert SpiderFootHelpers.urlRelativeToAbsolute("../test") == "test"
