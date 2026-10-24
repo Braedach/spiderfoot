@@ -229,6 +229,22 @@ and checksum-verified; Python tools live in their own hash-locked venv.
   assert the bug's own output as correct instead of the bug being fixed;
   both are fixed now, with tests asserting the correct result. See
   `spiderfoot/helpers.py`.
+- **A single-page app's catch-all 200 made every path-fuzzer wordlist entry a
+  false hit.** Juice Shop, like most Angular/React/Vue apps, serves its index
+  page with HTTP 200 for any path at all (client-side routing fallback) -
+  confirmed by requesting a random nonexistent path directly. `gobuster`'s and
+  `ffuf`'s own status-code filters can't tell that from a real hit, so nearly
+  every entry in a ~4,750-word wordlist "hit", each spawning its own
+  downstream crawl/probe - a scan that should take minutes ran for 16+ hours.
+  `ffuf` has auto-calibration built in (`-ac`, now on by default); `gobuster`
+  doesn't, so it gets a probe-one-random-path-first check instead
+  (`soft_404_detection`, default on), passed to its own `--exclude-length`.
+  Checked the same class of bug in every other wordlist-driven tool module:
+  `arjun` (parameter discovery) correctly found nothing on the same target,
+  by design - its own response-diffing isn't fooled by an identical response
+  regardless of parameter; `sfp_tool_massdns` has no wildcard-DNS defence of
+  its own, but nothing in the current `tools-only` profile feeds it a bulk
+  candidate list, so this is a flagged, currently-dormant risk, not fixed.
 - **Accepted, not fixed:** gosu (Go 1.24.6) in every Postgres image and Node
   packages in Qdrant's SBOM file: neither is ours to patch; revisit when the
   maintainers ship. Grype's openssl findings are Debian-backport false positives.
