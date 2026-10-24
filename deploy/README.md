@@ -206,6 +206,29 @@ and checksum-verified; Python tools live in their own hash-locked venv.
   `--cap-drop ALL --cap-add NET_RAW`, the tmpfs mounts). That found a dozen
   modules written for old command lines (dalfox, gowitness, gobuster, tlsx,
   arjun, TruffleHog) and the HOME / capability problems above.
+- **Internal targets need their own DNS and port handling.** Found by a real
+  end-to-end scan against `sf-juiceshop` (below): `naabu` and `dnsx` ship their
+  own bundled resolvers and cannot see a Docker/Podman compose hostname at
+  all (`naabu`: `-system-resolver` added, a pure fallback; `dnsx`: pointed at
+  the container's own resolver via `-r`, since its flag replaces rather than
+  falls back). Separately, `httpx` and `sfp_spider` only ever probed/crawled
+  their fixed default ports (`80,443,8080,8443` for httpx; the implicit
+  default for the spider) and never acted on a port a scanner actually found
+  open, so a web app on anything else (Juice Shop: 3000) was invisible to
+  every tool downstream of them; both now also watch `TCP_PORT_OPEN` and act
+  on exactly that port (4 events on the first scan -> 9 with the tool fixes
+  alone -> full crawl with `sfp_spider` fixed too).
+- **Two core URL helpers were corrupting every link a crawl discovered**,
+  independent of port: `SpiderFootHelpers.urlBaseUrl()` dropped an explicit
+  port entirely (so a link resolved against it pointed at the wrong port),
+  and `urlRelativeToAbsolute()` split the *whole* URL - scheme included - on
+  `/` and dropped empty segments, which also dropped the empty segment
+  between the two slashes of `scheme://` (`"http://host/x"` ->
+  `"http:/host/x"`) and let a long enough run of `../` eat into the domain
+  itself once it ran out of path to pop. One test file had been updated to
+  assert the bug's own output as correct instead of the bug being fixed;
+  both are fixed now, with tests asserting the correct result. See
+  `spiderfoot/helpers.py`.
 - **Accepted, not fixed:** gosu (Go 1.24.6) in every Postgres image and Node
   packages in Qdrant's SBOM file: neither is ours to patch; revisit when the
   maintainers ship. Grype's openssl findings are Debian-backport false positives.
