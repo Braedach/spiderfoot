@@ -22,7 +22,7 @@ class sfp_tool_waybackurls(SpiderFootAsyncPlugin):
     meta = {
         "name": "Tool - waybackurls",
         "summary": "Fetch historical URLs from the Wayback Machine.",
-        "flags": ["tool"],
+        "flags": ["deprecated", "tool"],
         "useCases": ["Investigate", "Footprint", "Passive"],
         "categories": ["Search Engines"],
         "toolDetails": {

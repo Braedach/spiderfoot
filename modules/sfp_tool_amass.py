@@ -24,7 +24,7 @@ class sfp_tool_amass(SpiderFootAsyncPlugin):
     meta = {
         "name": "Tool - Amass",
         "summary": "Comprehensive attack surface mapping using OWASP Amass.",
-        "flags": ["tool", "slow"],
+        "flags": ["deprecated", "tool", "slow"],
         "useCases": ["Investigate", "Footprint", "Passive"],
         "categories": ["Passive DNS"],
         "toolDetails": {

@@ -23,7 +23,7 @@ class sfp_tool_gospider(SpiderFootAsyncPlugin):
     meta = {
         "name": "Tool - gospider",
         "summary": "Fast web spidering for links, JS files, and subdomains.",
-        "flags": ["tool", "slow", "invasive"],
+        "flags": ["deprecated", "tool", "slow", "invasive"],
         "useCases": ["Investigate", "Footprint"],
         "categories": ["Crawling and Scanning"],
         "toolDetails": {

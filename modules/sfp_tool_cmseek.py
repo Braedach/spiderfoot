@@ -32,7 +32,7 @@ class sfp_tool_cmseek(SpiderFootAsyncPlugin):
     meta = {
         'name': "Tool - CMSeeK",
         'summary': "Identify what Content Management System (CMS) might be used.",
-        'flags': ["tool"],
+        'flags': ["deprecated", "tool"],
         'useCases': ["Footprint", "Investigate"],
         'categories': ["Content Analysis"],
         'toolDetails': {
