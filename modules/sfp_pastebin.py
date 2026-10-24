@@ -131,8 +131,13 @@ class sfp_pastebin(SpiderFootAsyncPlugin):
             for link in new_links:
                 self.results[link] = True
 
+            # urlFQDN(), not urlBaseUrl(): the latter now keeps an explicit port (fixed
+            # 2026-10-24 - it used to drop one, which happened to make .endswith(target)
+            # work by accident but also silently corrupted every link resolved against
+            # it elsewhere), and target is a bare domain with no port to match against.
             relevant_links = [
-                link for link in new_links if SpiderFootHelpers.urlBaseUrl(link).endswith(target)
+                link for link in new_links
+                if (self.sf.urlFQDN(link) or "").endswith(target)
             ]
 
             for link in relevant_links:

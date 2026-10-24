@@ -90,7 +90,12 @@ class sfp_spider(SpiderFootAsyncPlugin):
     # Search engines and DNS lookups provide INTERNET_NAME.
     def watchedEvents(self) -> list:
         """Return the list of events this module watches."""
-        return ["LINKED_URL_INTERNAL", "INTERNET_NAME"]
+        # TCP_PORT_OPEN (a port a scanner actually found open, e.g. naabu) is tried the
+        # same way as INTERNET_NAME below - the event data is already "host:port", so
+        # http(s)://<data> probes that exact port instead of the implicit 80/443 a bare
+        # hostname gets. Without it a web app on any other port (found live: OWASP Juice
+        # Shop on 3000) is never spidered at all ("No reply from <host>, aborting").
+        return ["LINKED_URL_INTERNAL", "INTERNET_NAME", "TCP_PORT_OPEN"]
 
     # What events this module produces
     def producedEvents(self) -> list:
@@ -337,8 +342,11 @@ class sfp_spider(SpiderFootAsyncPlugin):
 
         self.urlEvents[eventData] = event
 
-        # Determine where to start spidering from if it's a INTERNET_NAME event
-        if eventName == "INTERNET_NAME":
+        # Determine where to start spidering from if it's an INTERNET_NAME or
+        # TCP_PORT_OPEN event. eventData is "host" for the former, "host:port" for the
+        # latter - prefix + eventData gives http(s)://host or http(s)://host:port either
+        # way, so the same probe loop handles both.
+        if eventName in ("INTERNET_NAME", "TCP_PORT_OPEN"):
             for prefix in self.opts['start']:
                 res = self.fetch_url(
                     prefix + eventData,
