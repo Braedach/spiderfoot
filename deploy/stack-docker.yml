@@ -1,8 +1,8 @@
 # =============================================================================
 # deploy/stack-docker.yml
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2026-10-23
-# Updated: 2026-10-23
+# Updated: 2026-10-24
 #
 # Summary:
 #   Purpose:
@@ -45,7 +45,8 @@
 #       inherited from stack-podman.yml - read its header and changelog for
 #       the history and the reasons. Keep the two files in step: a change
 #       made in one that is not made in the other defeats the point of a
-#       dev stack.
+#       dev stack. The one deliberate exception is sf-juiceshop (below): a
+#       vulnerable-by-design scan target belongs only in the dev stack.
 #     - The embedding provider is fastembed (CPU). sentence_transformer
 #       silently degrades to mock embeddings on current images - see
 #       stack-podman.yml Changelog 2.1.0.
@@ -56,6 +57,9 @@
 #       isolated for testing.
 #
 # Changelog:
+#   2.3.0 (2026-10-24) - Adds sf-juiceshop (OWASP Juice Shop), profile "testing", DELIBERATELY NOT mirrored to
+#     stack-podman.yml: a vulnerable-by-design scan target has no place in production. Off by default
+#     (COMPOSE_PROFILES must include "testing"); published on this host only, never through Zoraxy.
 #   2.2.0 (2026-10-24) - Mirrors stack-podman.yml 2.10.0: sf-litellm removed, sf-agents calls Claude directly.
 #   2.1.0 (2026-10-23) - Mirrors stack-podman.yml 2.9.0: tmpfs over /home/spiderfoot/.config, .cache and .pdcp on sf-celery-worker-active,
 #     plus cap_add NET_RAW, no-new-privileges off and NMAP_PRIVILEGED=1 (see the comment on the service).
@@ -384,6 +388,31 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - spiderfoot-net
+
+  # Deliberately vulnerable scan target for exercising the scanner end-to-end
+  # (OWASP Juice Shop). DEV STACK ONLY - never add this to stack-podman.yml.
+  # Off by default: needs COMPOSE_PROFILES to include "testing". Published
+  # to the host so a human can browse it, but never through Zoraxy and never
+  # on a LAN-reachable address by default - bind it to 127.0.0.1 in a local
+  # override if this host itself is not sandboxed (see deploy/README.md).
+  sf-juiceshop:
+    image: bkimminich/juice-shop
+    container_name: sf-juiceshop
+    hostname: sf-juiceshop
+    restart: always
+    profiles:
+      - testing
+    labels:
+      - com.docker.compose.project=spiderfoot
+      - com.docker.compose.service=sf-juiceshop
+    ports:
+      - 5002:3000
     security_opt:
       - no-new-privileges:true
     cap_drop:

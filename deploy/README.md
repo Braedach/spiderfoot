@@ -254,6 +254,15 @@ relative one and not a named volume, so it is visible and backupable as plain
 files. Compose silently drops Podman-only mount flags such as `:U`, so
 directory ownership is set on the host (postgres data dir: uid 70).
 
+### Testing against a safe target
+
+`stack-docker.yml` (dev only) has an opt-in `sf-juiceshop` service (OWASP Juice
+Shop), a deliberately vulnerable app for exercising the scanner end-to-end
+without an authorisation question. `COMPOSE_PROFILES` must include `testing`
+to start it; it is never in `stack-podman.yml`. It publishes host port 5002 -
+on a host that is not itself sandboxed, bind it to `127.0.0.1` with a local
+compose override rather than editing the tracked file.
+
 ### Generating the secrets
 
 ```bash
