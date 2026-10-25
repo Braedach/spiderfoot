@@ -35,6 +35,23 @@ export function moduleHasCredential(opts: Record<string, unknown> | undefined): 
   return Object.keys(opts).some(isCredentialOption);
 }
 
+/**
+ * Credential status for a module: 'none' (no credential option at all),
+ * 'configured' (every credential option has a value) or 'missing' (at
+ * least one is blank). Modules/NewScan use this for the lock/unlock badge
+ * instead of each re-deriving their own (previously inconsistent) check.
+ */
+export function moduleCredentialStatus(opts: Record<string, unknown> | undefined): 'none' | 'configured' | 'missing' {
+  if (!opts) return 'none';
+  const credKeys = Object.keys(opts).filter(isCredentialOption);
+  if (credKeys.length === 0) return 'none';
+  const allSet = credKeys.every((k) => {
+    const v = opts[k];
+    return v !== '' && v !== null && v !== undefined;
+  });
+  return allSet ? 'configured' : 'missing';
+}
+
 // ── Global option grouping ──────────────────────────────────────
 
 export interface GlobalKeyMeta {

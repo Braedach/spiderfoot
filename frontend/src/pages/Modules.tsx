@@ -1,83 +1,41 @@
 import { useState, useMemo } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { dataApi, type Module } from '../lib/api';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import {
-  Cpu, Lock, Unlock, ToggleLeft, ToggleRight,
+  Cpu, Lock, Unlock, KeyRound,
   ChevronDown, ChevronRight, Shield,
 } from 'lucide-react';
 import {
   PageHeader, SearchInput, StatCard, EmptyState, TableSkeleton,
-  Toast,
-  type ToastType,
 } from '../components/ui';
+import { moduleHasCredential, moduleCredentialStatus, isCredentialOption } from '../lib/settingsMeta';
 
-type FilterKey = 'all' | 'enabled' | 'disabled' | 'api_key';
+type FilterKey = 'all' | 'needs_credential' | 'credential_missing';
 
 export default function ModulesPage() {
   useDocumentTitle('Modules');
-  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterKey>('all');
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ type: ToastType; message: string } | null>(null);
 
   const { data: modulesData, isLoading } = useQuery({
     queryKey: ['modules', { page: 1, page_size: 500 }],
     queryFn: ({ signal }) => dataApi.modules({ page: 1, page_size: 500 }, signal),
   });
 
-  const { data: statusData } = useQuery({
-    queryKey: ['modules-status'],
-    queryFn: ({ signal }) => dataApi.modulesStatus(signal),
-  });
-
-  const { data: catData } = useQuery({
-    queryKey: ['module-categories'],
-    queryFn: ({ signal }) => dataApi.moduleCategories(signal),
-  });
-
   const modules: Module[] = modulesData?.items ?? [];
-  const statusMap = useMemo(() => {
-    const map = new Map<string, boolean>();
-    statusData?.modules?.forEach((m: { module: string; enabled: boolean }) => map.set(m.module, m.enabled));
-    return map;
-  }, [statusData]);
 
-  const categories = catData?.module_categories ?? [];
-
-  const enableMut = useMutation({
-    mutationFn: (name: string) => dataApi.enableModule(name),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['modules-status'] });
-      setToast({ type: 'success', message: 'Module enabled' });
-    },
-    onError: () => {
-      setToast({ type: 'error', message: 'Failed to enable module' });
-    },
-  });
-  const disableMut = useMutation({
-    mutationFn: (name: string) => dataApi.disableModule(name),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['modules-status'] });
-      setToast({ type: 'success', message: 'Module disabled' });
-    },
-    onError: () => {
-      setToast({ type: 'error', message: 'Failed to disable module' });
-    },
-  });
-
-  const hasApiKeyField = (m: Module) =>
-    m.opts && Object.keys(m.opts).some((k) => k.toLowerCase().includes('api_key') || k.toLowerCase().includes('apikey'));
-
-  const hasApiKeyConfigured = (m: Module) => {
-    if (!m.opts) return true;
-    const apiKeys = Object.entries(m.opts).filter(
-      ([k]) => k.toLowerCase().includes('api_key') || k.toLowerCase().includes('apikey'),
-    );
-    if (apiKeys.length === 0) return true;
-    return apiKeys.every(([, v]) => v !== '' && v !== null && v !== undefined);
-  };
+  // Derived from the modules themselves, not GET /api/data/module-categories —
+  // that endpoint reliably returns an empty list live (confirmed 2026-10-25)
+  // despite every module carrying real category data.
+  const moduleCategory = (m: Module) =>
+    (Array.isArray(m.cats) && m.cats[0]) || (Array.isArray(m.group) ? m.group[0] : m.group) || m.category || 'Other';
+  const categories = useMemo(
+    () => [...new Set(modules.map(moduleCategory))],
+    [modules],
+  );
 
   /* Filter & search */
   const filteredModules = useMemo(() => {
@@ -92,45 +50,36 @@ export default function ModulesPage() {
           (Array.isArray(m.cats) ? m.cats.join(' ') : '').toLowerCase().includes(q),
       );
     }
-    if (filter === 'enabled') list = list.filter((m) => statusMap.get(m.name) !== false);
-    if (filter === 'disabled') list = list.filter((m) => statusMap.get(m.name) === false);
-    if (filter === 'api_key') list = list.filter((m) => hasApiKeyField(m));
+    if (filter === 'needs_credential') list = list.filter((m) => moduleHasCredential(m.opts));
+    if (filter === 'credential_missing') list = list.filter((m) => moduleCredentialStatus(m.opts) === 'missing');
     return list;
-  }, [modules, search, filter, statusMap]);
+  }, [modules, search, filter]);
 
   /* Group by category */
   const grouped = useMemo(() => {
     const map = new Map<string, Module[]>();
     filteredModules.forEach((m) => {
-      const cat = (Array.isArray(m.cats) && m.cats[0]) || (Array.isArray(m.group) ? m.group[0] : m.group) || m.category || 'Other';
+      const cat = moduleCategory(m);
       if (!map.has(cat)) map.set(cat, []);
       map.get(cat)!.push(m);
     });
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [filteredModules]);
 
-  /* Derive counts from the per-module status map so they update
-   * immediately after an enable/disable toggle (the server aggregate
-   * fields may lag behind the invalidated query).                  */
-  const totalEnabled = useMemo(
-    () => modules.filter((m) => statusMap.get(m.name) !== false).length,
-    [modules, statusMap],
-  );
-  const totalDisabled = useMemo(
-    () => modules.filter((m) => statusMap.get(m.name) === false).length,
-    [modules, statusMap],
+  const needsCredentialCount = useMemo(
+    () => modules.filter((m) => moduleHasCredential(m.opts)).length,
+    [modules],
   );
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Modules" subtitle={`${modules.length} data collection modules`} />
+      <PageHeader title="Modules" subtitle={`${modules.length} data collection modules — reference only; enable/disable and credentials are managed elsewhere`} />
 
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
         <StatCard label="Total" value={modules.length} icon={Cpu} color="text-spider-400" loading={isLoading} delay={0} />
-        <StatCard label="Enabled" value={totalEnabled} icon={ToggleRight} color="text-green-400" loading={isLoading} delay={60} />
-        <StatCard label="Disabled" value={totalDisabled} icon={ToggleLeft} color="text-dark-400" loading={isLoading} delay={120} />
-        <StatCard label="Categories" value={categories.length} icon={Shield} color="text-blue-400" loading={isLoading} delay={180} />
+        <StatCard label="Categories" value={categories.length} icon={Shield} color="text-blue-400" loading={isLoading} delay={60} />
+        <StatCard label="Need an API Key" value={needsCredentialCount} icon={KeyRound} color="text-yellow-400" loading={isLoading} delay={120} />
       </div>
 
       {/* Toolbar */}
@@ -142,13 +91,17 @@ export default function ModulesPage() {
           className="flex-1 max-w-md"
         />
         <div className="flex gap-2">
-          {(['all', 'enabled', 'disabled', 'api_key'] as FilterKey[]).map((f) => (
+          {([
+            ['all', 'All'],
+            ['needs_credential', 'Needs API Key'],
+            ['credential_missing', 'Key Missing'],
+          ] as [FilterKey, string][]).map(([f, label]) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
               className={filter === f ? 'tab-button-active text-xs' : 'tab-button text-xs'}
             >
-              {f === 'all' ? 'All' : f === 'enabled' ? 'Enabled' : f === 'disabled' ? 'Disabled' : 'API Key'}
+              {label}
             </button>
           ))}
         </div>
@@ -167,35 +120,22 @@ export default function ModulesPage() {
               </h3>
               <div className="space-y-1">
                 {mods.map((m) => {
-                  const isEnabled = statusMap.get(m.name) !== false;
-                  const apiOk = hasApiKeyConfigured(m);
-                  const hasApi = hasApiKeyField(m);
+                  const credStatus = moduleCredentialStatus(m.opts);
                   const isExpanded = expanded === m.name;
 
                   return (
                     <div key={m.name} className="card-hover p-0 overflow-hidden">
                       <div className="flex items-center gap-3 px-4 py-3">
-                        {/* Toggle */}
-                        <button
-                          onClick={() => isEnabled ? disableMut.mutate(m.name) : enableMut.mutate(m.name)}
-                          className={`flex-shrink-0 transition-colors ${
-                            isEnabled ? 'text-green-400 hover:text-green-300' : 'text-dark-600 hover:text-dark-400'
-                          }`}
-                          title={isEnabled ? 'Disable' : 'Enable'}
-                        >
-                          {isEnabled ? <ToggleRight className="h-5 w-5" /> : <ToggleLeft className="h-5 w-5" />}
-                        </button>
-
                         {/* Info */}
                         <div className="flex-1 min-w-0" onClick={() => setExpanded(isExpanded ? null : m.name)}>
                           <div className="flex items-center gap-2 cursor-pointer">
                             <span className="text-sm font-medium text-foreground">{m.name.replace('sfp_', '')}</span>
-                            {hasApi && !apiOk && (
-                              <span className="text-yellow-500" title="API key required but not configured">
+                            {credStatus === 'missing' && (
+                              <span className="text-yellow-500" title="Needs an API key — set it on Data Source Credentials">
                                 <Lock className="h-3 w-3" />
                               </span>
                             )}
-                            {hasApi && apiOk && (
+                            {credStatus === 'configured' && (
                               <span className="text-green-400" title="API key configured">
                                 <Unlock className="h-3 w-3" />
                               </span>
@@ -249,11 +189,24 @@ export default function ModulesPage() {
                                 </div>
                               </div>
                             )}
-                            {m.opts && Object.keys(m.opts).length > 0 && (
+                            {credStatus !== 'none' && (
                               <div className="sm:col-span-2">
-                                <p className="text-xs text-dark-500 mb-2">Options ({Object.keys(m.opts).length})</p>
+                                <Link
+                                  to="/credentials"
+                                  className="flex items-center gap-1.5 text-xs text-spider-400 hover:text-spider-300 transition-colors w-fit"
+                                >
+                                  <KeyRound className="h-3 w-3" />
+                                  This module needs an API key — set it on Data Source Credentials
+                                </Link>
+                              </div>
+                            )}
+                            {m.opts && Object.keys(m.opts).filter((k) => !isCredentialOption(k)).length > 0 && (
+                              <div className="sm:col-span-2">
+                                <p className="text-xs text-dark-500 mb-2">
+                                  Options ({Object.keys(m.opts).filter((k) => !isCredentialOption(k)).length})
+                                </p>
                                 <div className="space-y-1 max-h-40 overflow-y-auto">
-                                  {Object.entries(m.opts).map(([k, v]) => (
+                                  {Object.entries(m.opts).filter(([k]) => !isCredentialOption(k)).map(([k, v]) => (
                                     <div key={k} className="flex items-center justify-between text-xs">
                                       <span className="text-dark-400 font-mono">{k}</span>
                                       <span className="text-dark-500">{m.optdescs?.[k]?.slice(0, 60) || String(v ?? '')}</span>
@@ -281,8 +234,6 @@ export default function ModulesPage() {
           />
         </div>
       )}
-
-      {toast && <Toast type={toast.type} message={toast.message} onClose={() => setToast(null)} />}
     </div>
   );
 }

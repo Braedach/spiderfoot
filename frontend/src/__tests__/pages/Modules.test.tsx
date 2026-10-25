@@ -12,10 +12,7 @@ vi.mock('../../lib/api', async () => {
     ...actual,
     dataApi: {
       modules: vi.fn().mockResolvedValue([]),
-      modulesStatus: vi.fn().mockResolvedValue({}),
       moduleCategories: vi.fn().mockResolvedValue([]),
-      enableModule: vi.fn(),
-      disableModule: vi.fn(),
     },
   };
 });
