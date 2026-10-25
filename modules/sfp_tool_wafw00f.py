@@ -43,7 +43,7 @@ class sfp_tool_wafw00f(SpiderFootAsyncPlugin):
 
     opts = {
         'python_path': 'python3',
-        'wafw00f_path': ''
+        'wafw00f_path': '/opt/venv-tools/bin/wafw00f'
     }
 
     optdescs = {
