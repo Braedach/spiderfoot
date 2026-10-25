@@ -368,9 +368,29 @@ just `tsc`/`vitest`) and walking through the pages in the browser: the
 credentials module list, search, the configured/not-configured filter,
 editing and saving a credential against the real API, the grouped Settings
 sidebar, and a cold load of both previously-redirecting admin pages.
-Not yet done: a pass over `Modules.tsx` and the `NewScan` flow for the same
-"obsolete, broken, or needs addressing" review, which is still open per the
-plan to turn to the GUI once the backend validation looked solid.
+
+**2026-10-25: same review on `Modules.tsx` and `NewScan.tsx`.** Found the
+Modules page's Enable/Disable toggle looked functional and wasn't: the
+backend keeps "disabled" state in a plain in-memory Python `set` local to
+one API worker process (this deployment runs 4), nothing in the scan
+execution path reads it, and `NewScan`'s own module picker ignores it
+completely — toggling it changed nothing about what a scan actually runs.
+Removed rather than wired up (backend work, not today's scope). Also fixed:
+a real data leak where the expanded module view fell back to showing an
+option's raw value when it had no description — for an undocumented
+credential field, that was the literal API key in plain text to any
+authenticated user; the three separate, inconsistent credential-detection
+regexes across `Modules.tsx`/`NewScan.tsx` are now the one shared classifier
+from the Data Source Credentials work; the "Categories" stat was reading
+`GET /api/data/module-categories`, which reliably returns an empty list live
+despite every module carrying real category data, now derived from the
+modules already being fetched instead. And `NewScan`'s hardcoded Quick Scan
+module list had 3 of 20 names (`sfp_dnstxt`, `sfp_httpheaders`,
+`sfp_geoinfo`) that no longer exist — renamed or merged upstream at some
+point, silently shrinking it to 17 modules with nobody noticing — replaced
+with their real successors or dropped where redundant. Verified live:
+19/19 resolve now, confirmed by actually selecting Quick Scan in the
+browser and watching the module count.
 
 ## Deploy
 
