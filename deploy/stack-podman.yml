@@ -1,17 +1,20 @@
 # =============================================================================
-# stack-spiderfoot-podman.yml
-# Version: 2.7.1
+# deploy/stack-podman.yml  (was stack-spiderfoot-podman.yml in the repo root until 2.8.0)
+# Version: 2.10.0
 # Created: 2026-08-06
 # Updated: 2026-10-23
 #
 # Summary:
 #   Purpose:
-#     Self-hosted OSINT correlation platform (poppopjmp/spiderfoot v6.1.0, microservices fork). 
-#     Standalone manual investigation dashboard - separate from the osint stack's n8n automation pipeline. 
-#     This is the podman deployment.
+#     Self-hosted OSINT correlation platform (poppopjmp/spiderfoot v6.1.0, microservices fork).
+#     Standalone manual investigation dashboard - separate from the osint stack's n8n automation pipeline.
+#     This is the Podman PRODUCTION deployment (baden). The development/sandbox
+#     deployment on claude is deploy/stack-docker.yml. Only ever PULLS the
+#     images deploy/publish.sh builds and pushes - it never builds anything.
+#     See deploy/README.md for the build -> test -> release flow.
 #
-#     AI report generation (sf-agents + sf-litellm) uses Anthropic's API (Claude Sonnet 5) rather than local Ollama.
-#     Matches the pattern Pulse monitoring and n8n already use on baden. No dependency on Ollama LLM.
+#     AI report generation (sf-agents) calls Anthropic's API (Claude Sonnet 5.5) directly through the official SDK.
+#     No proxy and no local Ollama. Needs ANTHROPIC_API_KEY.
 #     Single network for isolation
 #
 #     110 of SpiderFoot's 310 modules need an API key; 80 of those are free (sign up, generate a key)
@@ -35,9 +38,13 @@
 #       connections pile up blocking the reports table. See Changelog 2.4.0.
 #     - 6.1.0-gb05e98c3 is NOT good - do not use. Despite its own changelog entry (2.4.0) claiming otherwise, the fix above never
 #       actually shipped in code - only in docs. See Changelog 2.6.0 for the full correction.
-#     - 6.1.0-g95d573f9 is the new known-good build (2026-09-22) - the ReportStore fix genuinely applied this time, plus the same
-#       missing-commit pattern fixed across 17 more spiderfoot/db/ methods. Verified live on baden via direct stress-test. See
-#       Changelog 2.6.0.
+#     - 6.1.0-g95d573f9 was the last known-good build under the OLD tagging scheme (2026-09-22) - the ReportStore fix genuinely
+#       applied this time, plus the same missing-commit pattern fixed across 17 more spiderfoot/db/ methods. Verified live on
+#       baden via direct stress-test. See Changelog 2.6.0.
+#     - TAGGING CHANGED in 2.8.0. The <VERSION>-g<sha> scheme is retired. Images are now tagged by deploy/publish.sh as
+#       v<upstream base>-bd.<N> (release) or v<upstream base>-bd.<N>-rc.<M> (test build), e.g. v6.1.0-bd.1. An -rc tag never
+#       moves :latest. SPIDERFOOT_TAG is REQUIRED and has no default: pin production to an exact release tag. No v*-bd.*
+#       build has been verified known-good yet - record the first one here once it has soaked on claude and then baden.
 #     - Remove other builds prior to starting major modifications
 #
 #   Usage:
@@ -45,28 +52,31 @@
 #     Reverse proxy will require configuration along with appropriate CNAMES
 #
 #     FULL DEPLOYMENT SEQUENCE, from nothing, on baden:
-#       1. Generate the runtime secrets (one time only, ever):
-#             - ./bootstrap-spiderfoot-env.sh
-#             - This writes /srv/spiderfoot/stack-spiderfoot-env.env and prints
-#             -  If you've lost them later, read the file directly instead:
-#             -  cat /srv/spiderfoot/stack-spiderfoot-env.env
-#       2. Create the data directories, and stage litellm's config:
-#             - mkdir -p /srv/spiderfoot/{postgres,redis,litellm,qdrant,embeddings-cache}
-#          Copy litellm-config-podman.yaml (in this same directory) to
-#             - /srv/spiderfoot/litellm/config.yaml
-#       3. In Portainer, create a new stack:
-#          - Paste or upload this file
-#          - Environment variables -> load the file into portainer
-#            point it at /srv/spiderfoot/stack-spiderfoot-env.env
+#       1. Generate the runtime secrets (one time only, ever), on the host that runs the stack:
+#             - ./deploy/bootstrap-spiderfoot-env.sh
+#             - This writes /srv/spiderfoot/stack-spiderfoot-env.env (chmod 600) and prints the secrets ONCE.
+#               Then set SPIDERFOOT_TAG and ANTHROPIC_API_KEY in it by hand (it writes them blank / CHANGE_ME).
+#             - Re-running it is always safe and never rotates anything. If the secrets are lost later, read the file:
+#               cat /srv/spiderfoot/stack-spiderfoot-env.env
+#       2. Create the data directories:
+#             - mkdir -p /srv/spiderfoot/{postgres,redis,qdrant,embeddings-cache}
+#          Dockhand deploys with Docker Compose, which silently drops Podman-only volume flags (":U" etc.), so ownership is
+#          NOT applied automatically: set it on the host (postgres data dir owned by uid 70, the postgres:alpine user).
+#       3. In Dockhand, create the stack on the baden environment:
+#          - Paste or sync this file
+#          - Supply the values from /srv/spiderfoot/stack-spiderfoot-env.env as the stack's environment, and set
+#            SPIDERFOOT_TAG to an exact published tag (see Builds above). The stack refuses to start without it.
 #          - Deploy
-#       4. Confirm all 9 containers report healthy, then log in at the UI above with the admin password from step 1.
+#       4. Confirm all 7 containers report healthy (8 with the `scan` profile), then log in at the UI above with the admin password from step 1.
 #
-#       5. Beware if the build tag changes you will need to adjust the env variable
+#       5. To upgrade: change SPIDERFOOT_TAG to the new exact tag and redeploy. Updates are deliberate, never automatic
+#          (Watchtower was purged 30 Sep 2026).
 #
 #   Prerequisites:
 #    - CNAME entries appropriate for you deployment
 #    - Working Podman managed LXC Debian
 #    - Reverse proxy system - network modification may be required due to your network structure
+#    - The tag you deploy has been published by deploy/publish.sh (see deploy/README.md)
 #
 #   Warnings:
 #     - BREAKING CHANGE (2.3.0, 2026-09-16): sf-qdrant jumped v1.12.4 -> v1.19.1, a 7-minor-version bump.
@@ -90,14 +100,39 @@
 #     - IDS/IPS systems may go ballistic
 #
 # Changelog:
+#   2.10.0 (2026-10-24) - sf-litellm removed. Its only job was relaying sf-agents' chat calls to Anthropic; sf-agents now calls Claude
+#     directly (SF_LLM_PROVIDER=anthropic, SF_LLM_MODEL=claude-sonnet-5-5, ANTHROPIC_API_KEY now required there). The old service ran
+#     ghcr.io/berriai/litellm:main-latest, a floating tag, which is the wrong way to run a package that has had a supply-chain breach.
+#     /srv/spiderfoot/litellm and the database named litellm, if any, can be deleted after the cutover (kept as the rollback).
+#   2.9.0 (2026-10-23) - sf-celery-worker-active: tmpfs over /home/spiderfoot/.config, .cache and .pdcp (mode 1777). The active-scanner
+#     image now sets HOME=/home/spiderfoot (uid 1000 has no passwd entry, so HOME was "/", read-only). katana, nuclei and the other
+#     ProjectDiscovery tools write their config under $HOME at start-up and exit without scanning if they cannot. Found by running
+#     every tool module against the image with this stack's exact container settings.
+#     - Same worker: cap_add NET_RAW, no-new-privileges OFF, NMAP_PRIVILEGED=1. nmap, naabu, masscan and massdns could not start at all
+#       (file capabilities beyond the dropped set -> exit 126); the image now grants cap_net_raw only. See the comment on the service.
+#   2.8.0 (2026-10-23) - Brought into line with the ARTEX fork pattern (Design-Reference s24.3). Moved from the repo root into
+#     deploy/ (stack-spiderfoot-podman.yml -> deploy/stack-podman.yml) so upstream merges never touch it.
+#     - Images are now built and pushed by deploy/publish.sh on davros, not by GitHub Actions or the old untracked
+#       /root/build-spiderfoot.sh. Flat names ghcr.io/braedach/spiderfoot-<service> are the single supported path.
+#     - New fork tag scheme v<base>-bd.<N>[-rc.<M>]; -rc builds never move :latest. SPIDERFOOT_TAG is now REQUIRED
+#       (${SPIDERFOOT_TAG:?...}) with no default, so nothing can drift silently and a test build cannot reach this stack.
+#     - Removed stale references: Portainer (retired 2 Oct 2026, replaced by Dockhand), Watchtower labels on 5 services
+#       (purged 30 Sep 2026; updates are deliberate), Pulse (dropped), and the ineffective ":U" mount flags (Dockhand's
+#       Compose drops them; ownership is set on the host - see Usage step 2).
+#     - bootstrap-spiderfoot-env.sh recovered from Braedach/Code's history (deleted in 18922aa, 2026-09-22) into
+#       deploy/ as v1.2.0; it had been referenced here but existed nowhere. See the script's own changelog.
+#     - litellm-config-podman.yaml and the near-identical Docker litellm-config.yaml merged into one deploy/litellm-config.yaml
+#       shared with stack-docker.yml. Re-copy it to /srv/spiderfoot/litellm/config.yaml if you want the new comments; the
+#       effective config is unchanged.
+#     - Corrected the 2.7.0 entry (see below).
 #   2.7.1 (2026-10-23)
 #     - Fixed the redis image and associated issues   
-#   2.7.0 (2026-09-24) 
-#     - Fixed all 5 spiderfoot-* image paths: 1.10.0 (below) set them to ghcr.io/braedach/spiderfoot/spiderfoot-<service>
-#       an extra path segment that never matched what actually gets published (ghcr.io/braedach/spiderfoot-<service>, no
-#       middle segment - confirmed against the live GHCR packages). Every pull would have 404'd. Also moved SPIDERFOOT_TAG to :latest 
-#       now that .github/workflows/docker.yml builds and pushes it automatically on every release - pairs with this stack's
-#       See stack-spiderfoot-podman.env.example.
+#   2.7.0 (2026-09-24) - Image paths changed from ghcr.io/braedach/spiderfoot/spiderfoot-<service> (repo-scoped, as published by the old
+#     davros script since its 3.3.0) to the flat ghcr.io/braedach/spiderfoot-<service>, because that is what GitHub Actions had begun
+#     publishing. Corrected in 2.8.0: an earlier version of this entry claimed the old paths "never matched what actually gets
+#     published" and that every pull would have 404'd. That was wrong - the old script published to the repo-scoped path
+#     deliberately. The flat path is only right because 2.8.0 makes it the single supported path (deploy/publish.sh).
+#     Also moved SPIDERFOOT_TAG to :latest on the assumption Watchtower would follow it - superseded by 2.8.0.
 #   2.6.0 (2026-09-22) 
 #     - New known-good build: 6.1.0-g95d573f9.
 #     - 6.1.0-gb05e98c3 (2.4.0's known-good build) was never actually good - the ReportStore connection-leak fix it claimed never shipped in code,
@@ -193,7 +228,7 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB}
     volumes:
-      - /srv/spiderfoot/postgres:/var/lib/postgresql/data:U
+      - /srv/spiderfoot/postgres:/var/lib/postgresql/data
       - /etc/localtime:/etc/localtime:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
@@ -213,7 +248,7 @@ services:
     environment:
       - TZ=${TZ}
     volumes:
-      - /srv/spiderfoot/redis:/data:U
+      - /srv/spiderfoot/redis:/data
       - /etc/localtime:/etc/localtime:ro
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -226,7 +261,7 @@ services:
       - spiderfoot-net
 
   sf-api:
-    image: ghcr.io/braedach/spiderfoot-api:${SPIDERFOOT_TAG}
+    image: ghcr.io/braedach/spiderfoot-api:${SPIDERFOOT_TAG:?set SPIDERFOOT_TAG to an exact published tag, e.g. v6.1.0-bd.1}
     container_name: sf-api
     hostname: sf-api
     restart: always
@@ -235,7 +270,6 @@ services:
     labels:
       - com.docker.compose.project=spiderfoot
       - com.docker.compose.service=sf-api
-      - com.centurylinklabs.watchtower.enable=true
     tmpfs:
       - /home/spiderfoot/cache:mode=1777
       - /home/spiderfoot/logs:mode=1777
@@ -266,7 +300,7 @@ services:
           - api
 
   sf-celery-worker:
-    image: ghcr.io/braedach/spiderfoot-scanner:${SPIDERFOOT_TAG}
+    image: ghcr.io/braedach/spiderfoot-scanner:${SPIDERFOOT_TAG:?set SPIDERFOOT_TAG to an exact published tag, e.g. v6.1.0-bd.1}
     container_name: sf-celery-worker
     hostname: sf-celery-worker
     restart: always
@@ -275,7 +309,6 @@ services:
     labels:
       - com.docker.compose.project=spiderfoot
       - com.docker.compose.service=sf-celery-worker
-      - com.centurylinklabs.watchtower.enable=true
     tmpfs:
       - /home/spiderfoot/cache:mode=1777
       - /home/spiderfoot/logs:mode=1777
@@ -308,7 +341,7 @@ services:
       - spiderfoot-net
 
   sf-celery-worker-active:
-    image: ghcr.io/braedach/spiderfoot-active-scanner:${SPIDERFOOT_TAG}
+    image: ghcr.io/braedach/spiderfoot-active-scanner:${SPIDERFOOT_TAG:?set SPIDERFOOT_TAG to an exact published tag, e.g. v6.1.0-bd.1}
     container_name: sf-celery-worker-active
     hostname: sf-celery-worker-active
     restart: always
@@ -319,10 +352,12 @@ services:
     labels:
       - com.docker.compose.project=spiderfoot
       - com.docker.compose.service=sf-celery-worker-active
-      - com.centurylinklabs.watchtower.enable=true
     tmpfs:
       - /home/spiderfoot/cache:mode=1777
       - /home/spiderfoot/logs:mode=1777
+      - /home/spiderfoot/.config:mode=1777
+      - /home/spiderfoot/.cache:mode=1777
+      - /home/spiderfoot/.pdcp:mode=1777
       - /tmp
     environment:
       - TZ=${TZ}
@@ -334,18 +369,29 @@ services:
       # sf-celery-worker above (reverted 2026-09-11, kept for later).
       - SF_EVENTBUS_BACKEND=redis
       - SF_EVENTBUS_REDIS_URL=${SF_REDIS_URL}
+      - NMAP_PRIVILEGED=1
     depends_on:
       - sf-postgres
       - sf-redis
+    # Raw-socket scanning (nmap -sS, naabu SYN, masscan) needs CAP_NET_RAW and nothing else. The
+    # image gives those binaries cap_net_raw as a FILE capability, and the kernel ignores file
+    # capabilities for a non-root process while no-new-privileges is set - so this one worker
+    # runs with it off (verified: with it on, raw scans fail "Operation not permitted" even
+    # with NET_RAW granted). Everything else stays dropped, the image has no setuid binaries,
+    # and the root filesystem is read-only. The alternative that keeps no-new-privileges is
+    # user "0:0" with cap_drop ALL + this cap_add; it was judged worse (uid 0 inside).
+    # NMAP_PRIVILEGED tells nmap to trust that capability instead of demanding euid 0.
     security_opt:
-      - no-new-privileges:true
+      - no-new-privileges:false
     cap_drop:
       - ALL
+    cap_add:
+      - NET_RAW
     networks:
       - spiderfoot-net
 
   sf-frontend-ui:
-    image: ghcr.io/braedach/spiderfoot-frontend:${SPIDERFOOT_TAG}
+    image: ghcr.io/braedach/spiderfoot-frontend:${SPIDERFOOT_TAG:?set SPIDERFOOT_TAG to an exact published tag, e.g. v6.1.0-bd.1}
     container_name: sf-frontend-ui
     hostname: sf-frontend-ui
     restart: always
@@ -386,36 +432,6 @@ services:
     networks:
       - spiderfoot-net
 
-  sf-litellm:
-    image: ghcr.io/berriai/litellm:main-latest
-    container_name: sf-litellm
-    hostname: sf-litellm
-    restart: always
-    labels:
-      - com.docker.compose.project=spiderfoot
-      - com.docker.compose.service=sf-litellm
-      - com.centurylinklabs.watchtower.enable=true
-    volumes:
-      - /srv/spiderfoot/litellm/config.yaml:/app/config.yaml:ro
-    environment:
-      - LITELLM_MASTER_KEY=${SF_LLM_API_KEY}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')\" || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    networks:
-      spiderfoot-net:
-        aliases:
-          - litellm
-
   sf-qdrant:
     image: qdrant/qdrant:v1.19.1
     container_name: sf-qdrant
@@ -426,7 +442,7 @@ services:
       - QDRANT__SERVICE__GRPC_PORT=6334
       - QDRANT__SERVICE__HTTP_PORT=6333
     volumes:
-      - /srv/spiderfoot/qdrant:/qdrant/storage:U
+      - /srv/spiderfoot/qdrant:/qdrant/storage
       - /etc/localtime:/etc/localtime:ro
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/6333'"]
@@ -441,7 +457,7 @@ services:
           - qdrant
 
   sf-agents:
-    image: ghcr.io/braedach/spiderfoot-base:${SPIDERFOOT_TAG}
+    image: ghcr.io/braedach/spiderfoot-base:${SPIDERFOOT_TAG:?set SPIDERFOOT_TAG to an exact published tag, e.g. v6.1.0-bd.1}
     container_name: sf-agents
     hostname: sf-agents
     restart: always
@@ -465,7 +481,6 @@ services:
     labels:
       - com.docker.compose.project=spiderfoot
       - com.docker.compose.service=sf-agents
-      - com.centurylinklabs.watchtower.enable=true
     tmpfs:
       - /home/spiderfoot/cache:mode=1777
       - /home/spiderfoot/logs:mode=1777
@@ -480,10 +495,10 @@ services:
       - SF_AGENTS_PORT=8100
       - SF_POSTGRES_DSN=${SF_DATABASE_URL}
       - SF_REDIS_URL=${SF_REDIS_URL}
-      - SF_LLM_PROVIDER=openai
-      - SF_LLM_API_BASE=http://litellm:4000
-      - SF_LLM_API_KEY=${SF_LLM_API_KEY}
-      - SF_LLM_MODEL=spiderfoot-llm
+      # Claude is called directly through the official SDK (the LiteLLM proxy this replaced is gone).
+      - SF_LLM_PROVIDER=anthropic
+      - SF_LLM_MODEL=${SF_LLM_MODEL:-claude-sonnet-5-5}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY}
       - SF_QDRANT_BACKEND=http
       - SF_QDRANT_HOST=qdrant
       - SF_QDRANT_PORT=6333
@@ -509,7 +524,6 @@ services:
     depends_on:
       - sf-postgres
       - sf-redis
-      - sf-litellm
       - sf-qdrant
     healthcheck:
       test: ["CMD", "python3", "-c", "__import__('urllib.request').request.urlopen('http://127.0.0.1:8100/health')"]

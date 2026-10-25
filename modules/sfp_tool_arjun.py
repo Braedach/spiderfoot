@@ -114,7 +114,7 @@ class sfp_tool_arjun(SpiderFootAsyncPlugin):
             binary,
             "-u", data,
             "-t", str(self.opts["threads"]),
-            "--timeout", str(self.opts["timeout"]),
+            "-T", str(self.opts["timeout"]),
             "-m", self.opts["method"],
             "-oJ", output_path,
         ]

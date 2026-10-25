@@ -114,24 +114,30 @@ class TestSpiderFootWorkspaceComprehensive:
         assert target['metadata'] == {}
 
     def test_add_scan_valid_corrected_mapping(self):
-        """Test adding a valid scan to workspace with corrected field mapping."""
+        """Test adding a valid scan to workspace with the current, correct field mapping.
+
+        Fixed 2026-10-24: this test was stale, written against some earlier version
+        of add_scan() that used different ('scan_name'/'scan_target') keys and a
+        shifted row mapping, and had never been updated to match the current,
+        correctly-documented one ("Row format: (name, seed_target, created, started,
+        ended, status)" in workspace.py). Not re-verified live tonight - this test
+        module needs a real Postgres (SF_POSTGRES_DSN) and none was available.
+        """
         workspace = SpiderFootWorkspace(self.config)
-        
-        # scanInstanceGet returns: [name, seed_target, created, started, ended, status]
-        # But workspace code incorrectly maps them as scan_info[1] -> scan_name, scan_info[2] -> scan_target
-        # So we test with the actual behavior, not the intended behavior
+
         scan_info = ["Test Scan", "example.com", 1234567890, 1234567891, 1234567892, "FINISHED"]
-        
+
         with patch.object(workspace.db, 'scanInstanceGet', return_value=scan_info):
             workspace.add_scan("test_scan_id", target_id="tgt_123")
-        
+
         assert len(workspace.scans) == 1
         scan = workspace.scans[0]
         assert scan['scan_id'] == "test_scan_id"
         assert scan['target_id'] == "tgt_123"
-        # Note: Due to workspace.py bug, scan_name gets seed_target and scan_target gets created timestamp
-        assert scan['scan_name'] == "example.com"  # This is scan_info[1] (seed_target)
-        assert scan['scan_target'] == 1234567890   # This is scan_info[2] (created timestamp)
+        assert scan['name'] == "Test Scan"      # scan_info[0]
+        assert scan['target'] == "example.com"  # scan_info[1] (seed_target)
+        assert scan['created'] == 1234567890    # scan_info[2]
+        assert scan['status'] == "FINISHED"     # scan_info[5]
 
     def test_add_scan_nonexistent(self):
         """Test adding non-existent scan raises error."""

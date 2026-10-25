@@ -1,10 +1,14 @@
 import { useState, useMemo, useRef, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   configApi, dataApi, type Module,
 } from '../lib/api';
 import {
-  Settings as SettingsIcon, Globe, Key, Upload, Download,
+  isCredentialOption, moduleHasCredential, metaForGlobalKey, GLOBAL_GROUPS,
+} from '../lib/settingsMeta';
+import {
+  Settings as SettingsIcon, Globe, KeyRound, Upload, Download,
   RotateCcw, Save, Eye, EyeOff, AlertTriangle,
   Loader2,
 } from 'lucide-react';
@@ -18,7 +22,7 @@ import { useDocumentTitle } from '../hooks/useDocumentTitle';
 export default function SettingsPage() {
   useDocumentTitle('Settings');
   const queryClient = useQueryClient();
-  const [activeSection, setActiveSection] = useState('__global__');
+  const [activeSection, setActiveSection] = useState('global:ai');
   const [search, setSearch] = useState('');
   const [toast, setToast] = useState<{ type: ToastType; message: string } | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -44,25 +48,37 @@ export default function SettingsPage() {
     return Object.entries(config).filter(([k]) => !k.startsWith('__'));
   }, [config]);
 
-  /* Sidebar sections: global + one per module that has opts */
+  /* Sidebar sections: one per non-empty global group, plus one per module
+     that has non-credential opts. Modules whose *only* opts are
+     credentials (API keys, tokens, passwords) don't appear here at all —
+     they live on the Data Source Credentials page instead. */
   const sections = useMemo(() => {
-    const items: { key: string; label: string; count: number; hasApiKey: boolean }[] = [
-      { key: '__global__', label: 'Global Settings', count: globalOptions.length, hasApiKey: false },
-    ];
-    const sortedModules = [...modules]
-      .filter((m) => m.opts && Object.keys(m.opts).length > 0)
-      .sort((a, b) => a.name.localeCompare(b.name));
+    const groupCounts = new Map<string, number>();
+    for (const [k] of globalOptions) {
+      const g = metaForGlobalKey(k).group;
+      groupCounts.set(g, (groupCounts.get(g) ?? 0) + 1);
+    }
+    const items: { key: string; label: string; count: number; isGlobal: boolean }[] = [];
+    for (const [groupId, meta] of Object.entries(GLOBAL_GROUPS).sort((a, b) => a[1].order - b[1].order)) {
+      const count = groupCounts.get(groupId) ?? 0;
+      if (count === 0) continue;
+      items.push({ key: `global:${groupId}`, label: meta.label, count, isGlobal: true });
+    }
 
-    for (const mod of sortedModules) {
-      const optKeys = Object.keys(mod.opts ?? {});
-      const hasApiKey = optKeys.some(
-        (k) => k.toLowerCase().includes('api_key') || k.toLowerCase().includes('apikey'),
-      );
+    const sortedModules = [...modules]
+      .map((m) => ({
+        mod: m,
+        nonCredCount: Object.keys(m.opts ?? {}).filter((k) => !isCredentialOption(k)).length,
+      }))
+      .filter((m) => m.nonCredCount > 0)
+      .sort((a, b) => a.mod.name.localeCompare(b.mod.name));
+
+    for (const { mod, nonCredCount } of sortedModules) {
       items.push({
         key: mod.name,
         label: (mod.meta?.['name'] as string) || mod.name.replace(/^sfp_/, ''),
-        count: optKeys.length,
-        hasApiKey,
+        count: nonCredCount,
+        isGlobal: false,
       });
     }
     if (search) {
@@ -72,21 +88,30 @@ export default function SettingsPage() {
     return items;
   }, [globalOptions, modules, search]);
 
-  const activeModule = modules.find((m) => m.name === activeSection);
+  const activeModule = activeSection.startsWith('global:') ? undefined : modules.find((m) => m.name === activeSection);
+  const activeGroup = activeSection.startsWith('global:') ? activeSection.slice(7) : null;
 
   /* Current section options */
   const currentOptions = useMemo(() => {
-    if (activeSection === '__global__') {
-      return globalOptions.map(([k, v]) => ({ key: k, value: v, description: '' }));
+    if (activeGroup) {
+      return globalOptions
+        .filter(([k]) => metaForGlobalKey(k).group === activeGroup)
+        .map(([k, v]) => {
+          const meta = metaForGlobalKey(k);
+          return { key: k, value: v, description: meta.description, label: meta.label };
+        });
     }
     if (!activeModule?.opts) return [];
     const descs = activeModule.optdescs ?? {};
-    return Object.entries(activeModule.opts).map(([k, v]) => ({
-      key: `${activeModule.name}:${k}`,
-      value: v,
-      description: descs[k] || '',
-    }));
-  }, [activeSection, globalOptions, activeModule]);
+    return Object.entries(activeModule.opts)
+      .filter(([k]) => !isCredentialOption(k))
+      .map(([k, v]) => ({
+        key: `${activeModule.name}:${k}`,
+        value: v,
+        description: descs[k] || '',
+        label: k,
+      }));
+  }, [activeGroup, globalOptions, activeModule]);
 
   /* Save — global options via PATCH /config, module opts via PATCH /modules/{name}/options */
   const saveMut = useMutation({
@@ -187,11 +212,6 @@ export default function SettingsPage() {
     setShowPasswords(next);
   };
 
-  const isApiKey = (key: string) => {
-    const k = key.toLowerCase();
-    return k.includes('api_key') || k.includes('apikey') || k.includes('password') || k.includes('secret');
-  };
-
   return (
     <div className="space-y-6">
       {/* Hidden file input for config import (ref-based to avoid orphan DOM nodes) */}
@@ -202,7 +222,7 @@ export default function SettingsPage() {
         className="hidden"
         onChange={onImportFileChange}
       />
-      <PageHeader title="Settings" subtitle="Configure SpiderFoot options and API keys">
+      <PageHeader title="Settings" subtitle="Platform configuration, grouped by subsystem. Module API keys live on Data Source Credentials.">
         <div className="flex gap-2">
           <button className="btn-secondary text-sm" onClick={handleImport}>
             <Upload className="h-3.5 w-3.5" /> Import
@@ -234,10 +254,8 @@ export default function SettingsPage() {
                 }`}
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  {s.key === '__global__' ? (
+                  {s.isGlobal ? (
                     <Globe className="h-3.5 w-3.5 flex-shrink-0 text-dark-500" />
-                  ) : s.hasApiKey ? (
-                    <Key className="h-3.5 w-3.5 flex-shrink-0 text-yellow-500" />
                   ) : (
                     <SettingsIcon className="h-3.5 w-3.5 flex-shrink-0 text-dark-600" />
                   )}
@@ -251,8 +269,16 @@ export default function SettingsPage() {
 
         {/* Options Panel */}
         <div className="lg:col-span-3 space-y-4">
+          {/* Global group header */}
+          {activeGroup && (
+            <div className="card animate-fade-in">
+              <h3 className="text-sm font-semibold text-foreground">{GLOBAL_GROUPS[activeGroup]?.label}</h3>
+              <p className="text-xs text-dark-400 mt-1">{GLOBAL_GROUPS[activeGroup]?.description}</p>
+            </div>
+          )}
+
           {/* Module info header */}
-          {activeSection !== '__global__' && activeModule && (
+          {activeModule && (
             <div className="card animate-fade-in">
               <h3 className="text-sm font-semibold text-foreground">{(activeModule.meta?.['name'] as string) || activeModule.name.replace(/^sfp_/, '')}</h3>
               <p className="text-xs text-dark-400 mt-1">
@@ -274,6 +300,15 @@ export default function SettingsPage() {
                     <span key={g} className="badge bg-dark-600 text-dark-200 text-[10px]">{g}</span>
                   ))}
                 </div>
+              )}
+              {moduleHasCredential(activeModule.opts) && (
+                <Link
+                  to="/credentials"
+                  className="mt-3 flex items-center gap-1.5 text-xs text-spider-400 hover:text-spider-300 transition-colors w-fit"
+                >
+                  <KeyRound className="h-3 w-3" />
+                  This module also needs an API key — set it on Data Source Credentials
+                </Link>
               )}
             </div>
           )}
@@ -298,7 +333,8 @@ export default function SettingsPage() {
                   const editedVal = editedValues[optKey];
                   const currentVal = editedVal ?? String(val ?? '');
                   const shortKey = optKey.includes(':') ? optKey.split(':').slice(1).join(':') : optKey;
-                  const isSensitive = isApiKey(shortKey);
+                  const displayLabel = opt.label || shortKey;
+                  const isSensitive = isCredentialOption(shortKey);
                   const isHidden = isSensitive && !showPasswords.has(optKey);
 
                   // Detect value type for appropriate control
@@ -310,7 +346,7 @@ export default function SettingsPage() {
                   return (
                     <div key={optKey}>
                       <div className="flex items-center gap-2 mb-1">
-                        <label className="text-sm text-dark-300 font-medium">{shortKey}</label>
+                        <label className="text-sm text-dark-300 font-medium">{displayLabel}</label>
                         {isSensitive && (
                           <button
                             onClick={() => togglePassword(optKey)}

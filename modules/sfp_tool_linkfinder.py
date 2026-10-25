@@ -22,7 +22,7 @@ class sfp_tool_linkfinder(SpiderFootAsyncPlugin):
     meta = {
         "name": "Tool - LinkFinder",
         "summary": "Extract API endpoints and paths from JavaScript files.",
-        "flags": ["tool"],
+        "flags": ["deprecated", "tool"],
         "useCases": ["Investigate", "Footprint"],
         "categories": ["Crawling and Scanning"],
         "toolDetails": {

@@ -206,6 +206,41 @@ class TestModuleToolGobuster(TestModuleBase):
         self.assertIsNone(result)
         module.error.assert_called()
 
+    def test_detect_soft_404_filters_a_single_page_app_catch_all(self):
+        """A target that returns the same 200 page for any path (Angular/React/Vue
+        client-side routing) must be recognised and filtered - otherwise every
+        wordlist entry "hits". Confirmed live: 16+ hours against OWASP Juice Shop,
+        resolved by a single random-path probe up front.
+        """
+        module = self.module_class()
+        module.fetch_url = MagicMock(return_value={
+            "code": "200", "content": "x" * 9984,
+        })
+        length = module._detect_soft_404("http://target")
+        self.assertEqual(length, 9984)
+
+    def test_detect_soft_404_leaves_a_real_404_alone(self):
+        """A target that correctly 404s a nonexistent path needs no filtering -
+        unchanged behaviour."""
+        module = self.module_class()
+        module.fetch_url = MagicMock(return_value={"code": "404", "content": "Not Found"})
+        self.assertIsNone(module._detect_soft_404("http://target"))
+
+    def test_detect_soft_404_can_be_disabled(self):
+        """soft_404_detection=False skips the probe entirely (no fetch_url call)."""
+        module = self.module_class()
+        module.opts["soft_404_detection"] = False
+        module.fetch_url = MagicMock()
+        self.assertIsNone(module._detect_soft_404("http://target"))
+        module.fetch_url.assert_not_called()
+
+    def test_detect_soft_404_survives_a_failed_probe(self):
+        """A network error on the probe itself must not block the real gobuster run -
+        falls back to unfiltered (current) behaviour."""
+        module = self.module_class()
+        module.fetch_url = MagicMock(side_effect=OSError("connection refused"))
+        self.assertIsNone(module._detect_soft_404("http://target"))
+
     def tearDown(self):
         """Clean up after each test."""
         super().tearDown()

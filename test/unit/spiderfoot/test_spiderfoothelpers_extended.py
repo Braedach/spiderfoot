@@ -115,14 +115,22 @@ class TestSpiderFootHelpersEnhanced:
         # Test empty URL
         assert SpiderFootHelpers.urlRelativeToAbsolute("") == ""
         
-        # Test already absolute URLs - this function removes double slashes
+        # Test already absolute URLs - preserved as-is (see test_urlRelativeToAbsolute
+        # in test_spiderfoothelpers.py for the exact scheme/slash expectations)
         abs_url = "https://example.com/path"
         result = SpiderFootHelpers.urlRelativeToAbsolute(abs_url)
         assert "example.com" in result
+        assert result == "https://example.com/path"
         
         # Test relative paths
         assert SpiderFootHelpers.urlRelativeToAbsolute("../test") == "test"
         assert SpiderFootHelpers.urlRelativeToAbsolute("./test") == "test"
+
+    def test_sanitiseInput_extra_rejects_additional_characters(self):
+        """Callers pass extra=['/'] to refuse anything but a plain host or address."""
+        assert SpiderFootHelpers.sanitiseInput("10.0.0.0/24")
+        assert SpiderFootHelpers.sanitiseInput("10.0.0.0/24", extra=['/']) is False
+        assert SpiderFootHelpers.sanitiseInput("10.0.0.1", extra=['/'])
 
     def test_sanitiseInput_edge_cases(self):
         """Test sanitiseInput with various edge cases."""

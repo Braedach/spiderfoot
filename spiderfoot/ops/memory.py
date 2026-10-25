@@ -451,16 +451,16 @@ class CachedHelpers:
 
     @staticmethod
     def _urlBaseUrl(url: str) -> str | None:
-        """Extract scheme + domain from URL (no trailing slash)."""
-        if not url or not isinstance(url, str):
-            return None
-        if '://' in url:
-            bits = re.match(r'(\w+://.[^/:\?]*)[:/\?].*', url)
-        else:
-            bits = re.match(r'(.[^/:\?]*)[:/\?]', url)
-        if bits is None:
-            return url.lower()
-        return bits.group(1).lower()
+        """Extract scheme + domain (including an explicit port, if any) from URL.
+
+        Delegates to the canonical SpiderFootHelpers.urlBaseUrl() instead of its
+        own copy of the same regex - this used to be an independent, divergent
+        copy that still had the bug fixed there on 2026-10-24 (a ":port" was
+        silently dropped, same as a '/' or '?' path separator). Caching only
+        matters if the cached result matches the real one.
+        """
+        from spiderfoot import SpiderFootHelpers
+        return SpiderFootHelpers.urlBaseUrl(url)
 
     @staticmethod
     def _urlBaseDir(url: str) -> str:

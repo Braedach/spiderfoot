@@ -117,6 +117,12 @@ class sfp_tool_naabu(SpiderFootAsyncPlugin):
             "-retries", str(self.opts["retries"]),
             "-warm-up-time", str(self.opts["warm_up_time"]),
             "-silent",
+            # naabu's own bundled resolvers can't see internal-only names (a Docker/Podman
+            # compose service, an internal corporate zone). -system-resolver falls back to
+            # the container's /etc/resolv.conf when they fail, with no effect on a target
+            # the bundled resolvers already handle. Found by a live scan against a compose
+            # hostname reporting "no valid ipv4 or ipv6 targets were found".
+            "-system-resolver",
         ]
 
         # Port specification

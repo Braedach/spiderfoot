@@ -1,0 +1,10 @@
+# deploy/requirements-overrides.txt - forces versions past a transitive cap.
+#
+# pillow: fastembed (>=0.8) declares pillow>=10.3.0,<13.0 on Python < 3.13, and
+# Pillow 13.0.0 is the ONLY release that fixes four CRITICAL findings in the
+# version the stack ran (12.3.0: CVE-2026-112393, -112403, -112900, -96639).
+# SpiderFoot uses fastembed's TextEmbedding only, never its image path, so the
+# cap protects nothing we run. Overridden deliberately; verified by importing
+# fastembed and running a text embedding in the built image, and by the scan
+# gate. Revisit (and delete this file) once fastembed lifts the cap.
+pillow>=13.0.0,<14.0.0

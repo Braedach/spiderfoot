@@ -49,6 +49,12 @@ interface AuthState {
   authRequired: boolean;
   ssoProviders: SSOProvider[];
   error: string | null;
+  // Two independent fetches resolve on mount (auth status, current user) and
+  // both set `isLoading`. Track each separately so a permission check can't
+  // fire on the gap between the fast one resolving and the slow one still
+  // being in flight — see `recomputeLoading`.
+  authStatusLoaded: boolean;
+  userLoaded: boolean;
 
   // Actions
   login: (username: string, password: string) => Promise<void>;
@@ -133,12 +139,23 @@ function loadTokens(): { access: string | null; refresh: string | null } {
 
 // ── Store ────────────────────────────────────────────────
 
+// isLoading stays true until auth status has loaded, and — only when there's
+// a token to resolve a user for — the current user has loaded too. A guard
+// that gates on `isLoading` must never see it go false while `user` is still
+// unresolved; that gap is exactly what let a real admin get redirected away
+// from an admin-only page before `fetchCurrentUser` had finished.
+function recomputeLoading(authStatusLoaded: boolean, userLoaded: boolean, accessToken: string | null): boolean {
+  return !authStatusLoaded || (!!accessToken && !userLoaded);
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   accessToken: loadTokens().access,
   refreshToken: loadTokens().refresh,
   isAuthenticated: !!loadTokens().access,
   isLoading: true,
+  authStatusLoaded: false,
+  userLoaded: false,
   authRequired: false,
   ssoProviders: [],
   error: null,
@@ -155,6 +172,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         refreshToken: refresh_token,
         isAuthenticated: true,
         isLoading: false,
+        authStatusLoaded: true,
+        userLoaded: true,
         error: null,
       });
     } catch (err: unknown) {
@@ -180,6 +199,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         refreshToken: refresh_token,
         isAuthenticated: true,
         isLoading: false,
+        authStatusLoaded: true,
+        userLoaded: true,
         error: null,
       });
     } catch (err: unknown) {
@@ -231,13 +252,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   fetchCurrentUser: async () => {
     try {
       const res = await api.get('/api/auth/me');
+      const { authStatusLoaded, accessToken } = get();
       set({
         user: res.data.user,
         isAuthenticated: res.data.authenticated,
-        isLoading: false,
+        userLoaded: true,
+        isLoading: recomputeLoading(authStatusLoaded, true, accessToken),
       });
     } catch {
-      set({ isLoading: false });
+      const { authStatusLoaded, accessToken } = get();
+      set({ userLoaded: true, isLoading: recomputeLoading(authStatusLoaded, true, accessToken) });
     }
   },
 
@@ -245,13 +269,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const res = await api.get('/api/auth/status');
       const status: AuthStatus = res.data;
+      const { userLoaded, accessToken } = get();
       set({
         authRequired: status.auth_required,
         ssoProviders: status.sso_providers || [],
-        isLoading: false,
+        authStatusLoaded: true,
+        isLoading: recomputeLoading(true, userLoaded, accessToken),
       });
     } catch {
-      set({ isLoading: false, authRequired: false });
+      const { userLoaded, accessToken } = get();
+      set({
+        isLoading: recomputeLoading(true, userLoaded, accessToken),
+        authStatusLoaded: true,
+        authRequired: false,
+      });
     }
   },
 

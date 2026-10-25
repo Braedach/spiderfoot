@@ -69,22 +69,26 @@ def execute_agent_task(
         system_prompt = _build_system_prompt()
         user_prompt = _build_user_prompt(instruction, target, context)
 
-        # Call LiteLLM proxy via the shared retrying OpenAI-compatible client.
-        litellm_url = os.environ.get(
-            "SF_LITELLM_URL",
-            os.environ.get("SF_LLM_API_BASE", "http://litellm:4000"),
-        ).rstrip("/")
-        if not litellm_url.endswith("/v1"):
-            litellm_url = f"{litellm_url}/v1"
-        model_name = model or os.environ.get("SF_AGENT_MODEL", "openrouter/google/gemini-2.0-flash-001")
-
+        # SF_LLM_PROVIDER=anthropic calls Claude directly through the official SDK; anything else
+        # goes to an OpenAI-compatible endpoint (SF_LLM_API_BASE).
         from spiderfoot.ai.llm_client import LLMClient, LLMConfig, LLMProvider
 
+        if os.environ.get("SF_LLM_PROVIDER", "").strip().lower() == "anthropic":
+            provider = LLMProvider.ANTHROPIC
+            api_base = ""
+            model_name = model or os.environ.get("SF_AGENT_MODEL") or os.environ.get("SF_LLM_MODEL", "claude-sonnet-5-5")
+        else:
+            provider = LLMProvider.OPENAI
+            api_base = os.environ.get("SF_LLM_API_BASE", "").rstrip("/")
+            if api_base and not api_base.endswith("/v1"):
+                api_base = f"{api_base}/v1"
+            model_name = model or os.environ.get("SF_AGENT_MODEL", "openrouter/google/gemini-2.0-flash-001")
+
         client = LLMClient(LLMConfig(
-            api_base=litellm_url,
+            api_base=api_base,
             api_key=os.environ.get("SF_LLM_API_KEY", ""),
             model=model_name,
-            provider=LLMProvider.OPENAI,
+            provider=provider,
             temperature=0.3,
             max_tokens=4096,
             timeout=120,

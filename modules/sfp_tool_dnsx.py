@@ -95,6 +95,24 @@ class sfp_tool_dnsx(SpiderFootAsyncPlugin):
                     return candidate
         return None
 
+    @staticmethod
+    def _system_resolvers():
+        """Return this container's own nameserver(s), read from /etc/resolv.conf, for -r.
+
+        Returns [] (dnsx keeps its own bundled defaults, unchanged behaviour) if the
+        file can't be read or has no nameserver line.
+        """
+        resolvers = []
+        try:
+            with open("/etc/resolv.conf", "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[0] == "nameserver":
+                        resolvers.append(parts[1])
+        except OSError:
+            return []
+        return resolvers
+
     def handleEvent(self, event):
         data = event.data
         if self.errorState:
@@ -127,6 +145,19 @@ class sfp_tool_dnsx(SpiderFootAsyncPlugin):
             "-retry", str(self.opts["retries"]),
             "-timeout", str(self.opts["timeout"]),
         ]
+
+        # dnsx's own bundled resolvers can't see internal-only names (a Docker/Podman
+        # compose service, an internal corporate zone) and -r REPLACES them rather than
+        # falling back, unlike naabu's -system-resolver. Use the container's own
+        # resolver(s) instead: it forwards anything it doesn't know internally to the
+        # real upstream DNS (confirmed: it alone resolves both a compose hostname and
+        # example.com), so there's no need to also list public resolvers - doing so only
+        # adds round-robin resolvers that can't see internal names, and a query that lands
+        # on one of those fails instead of falling back. Found by a live scan against a
+        # compose hostname silently returning zero results.
+        resolvers = self._system_resolvers()
+        if resolvers:
+            cmd.extend(["-r", ",".join(resolvers)])
 
         for rtype in self.opts["record_types"].split(","):
             rtype = rtype.strip().lower()

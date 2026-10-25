@@ -20,12 +20,17 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      '/api': {
+      // Anchored to the trailing slash so this only ever matches a real
+      // API call (/api/scans, /api/config, ...) — an unanchored '/api'
+      // prefix also matches the frontend route /api-keys and sends it to
+      // the backend instead of the SPA, a 401 JSON page where the UI
+      // should be.
+      '^/api/': {
         target: 'https://localhost',
         changeOrigin: true,
         secure: false,
       },
-      '/ws': {
+      '^/ws/': {
         target: 'wss://localhost',
         ws: true,
         secure: false,

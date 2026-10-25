@@ -18,7 +18,8 @@ import {
   Users,
   User,
   Shield,
-  Key,
+  KeyRound,
+  Fingerprint,
   Lock,
   Sun,
   Moon,
@@ -51,6 +52,7 @@ const navItems: NavItem[] = [
   { name: 'Workspaces', to: '/workspaces', icon: Briefcase },
   { name: 'Documentation', to: '/documentation', icon: BookOpen },
   { name: 'Settings', to: '/settings', icon: Settings },
+  { name: 'Data Source Credentials', to: '/credentials', icon: KeyRound },
 ];
 
 interface ServiceLink {
@@ -192,7 +194,8 @@ export default function Layout() {
             </NavLink>
           )}
 
-          {/* API Keys (all authenticated users) */}
+          {/* Access Tokens — SpiderFoot's own REST API auth tokens, not to be
+              confused with Data Source Credentials (third-party module keys) */}
           {isAuthenticated && (
             <NavLink
               to="/api-keys"
@@ -206,8 +209,8 @@ export default function Layout() {
                 )
               }
             >
-              <Key className="h-4 w-4 flex-shrink-0" />
-              API Keys
+              <Fingerprint className="h-4 w-4 flex-shrink-0" />
+              Access Tokens
             </NavLink>
           )}
         </nav>

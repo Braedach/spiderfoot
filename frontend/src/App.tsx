@@ -13,6 +13,7 @@ import LoginPage from './pages/Login';
 const ScanDetailPage = lazy(() => import('./pages/ScanDetail'));
 const NewScanPage = lazy(() => import('./pages/NewScan'));
 const SettingsPage = lazy(() => import('./pages/Settings'));
+const DataSourceCredentialsPage = lazy(() => import('./pages/DataSourceCredentials'));
 const WorkspacesPage = lazy(() => import('./pages/Workspaces'));
 const ModulesPage = lazy(() => import('./pages/Modules'));
 const DocumentationPage = lazy(() => import('./pages/Documentation'));
@@ -115,6 +116,9 @@ export default function App() {
         {/* Settings — matches CherryPy: /opts */}
         <Route path="settings" element={<Suspense fallback={<LazyFallback />}><SettingsPage /></Suspense>} />
 
+        {/* Data Source Credentials — third-party API keys/tokens for scan modules */}
+        <Route path="credentials" element={<Suspense fallback={<LazyFallback />}><DataSourceCredentialsPage /></Suspense>} />
+
         {/* Schedules — recurring scan management */}
         <Route path="schedules" element={<Suspense fallback={<LazyFallback />}><SchedulesPage /></Suspense>} />
 
@@ -127,7 +131,7 @@ export default function App() {
         {/* SSO Settings (admin only) */}
         <Route path="sso-settings" element={<RequirePermission permission="system:admin"><Suspense fallback={<LazyFallback />}><SSOSettingsPage /></Suspense></RequirePermission>} />
 
-        {/* API Keys (admin only) */}
+        {/* Access Tokens — SpiderFoot's own REST API auth, not module credentials (admin only) */}
         <Route path="api-keys" element={<RequirePermission permission="system:admin"><Suspense fallback={<LazyFallback />}><ApiKeysPage /></Suspense></RequirePermission>} />
 
         {/* CherryPy URL redirects for backward compatibility */}

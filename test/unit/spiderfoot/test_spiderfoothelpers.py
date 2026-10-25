@@ -145,16 +145,21 @@ class TestSpiderFootHelpers(TestModuleBase):
         self.assertIsNone(SpiderFootHelpers.targetTypeFromString('-invalid'))  # Starts with hyphen
 
     def test_urlRelativeToAbsolute(self):
-        # Note: Current implementation has a bug where it removes '//' from URLs
-        # Fix the expected results based on actual behavior
+        # Fixed 2026-10-24: this used to assert the bug's own output (a dropped '//'
+        # after the scheme, and ".." eating into the domain once it ran out of path
+        # to pop) as the "actual behaviour". Both are real defects - see the
+        # function's docstring - so this now asserts the correct result instead.
         self.assertEqual(SpiderFootHelpers.urlRelativeToAbsolute(
-            'http://example.com/test/./test2'), 'http:/example.com/test/test2')
+            'http://example.com/test/./test2'), 'http://example.com/test/test2')
         self.assertEqual(SpiderFootHelpers.urlRelativeToAbsolute(
-            'http://example.com/test/../../test2'), 'http:/test2')
+            'http://example.com/test/../../test2'), 'http://example.com/test2')
         self.assertEqual(SpiderFootHelpers.urlRelativeToAbsolute(
-            'http://example.com/test/.././test2'), 'http:/example.com/test2')
+            'http://example.com/test/.././test2'), 'http://example.com/test2')
         self.assertEqual(SpiderFootHelpers.urlRelativeToAbsolute(
-            'http://example.com/test/../test2/../test3'), 'http:/example.com/test3')
+            'http://example.com/test/../test2/../test3'), 'http://example.com/test3')
+        # An explicit port must survive untouched (ties to the urlBaseUrl fix above).
+        self.assertEqual(SpiderFootHelpers.urlRelativeToAbsolute(
+            'http://example.com:3000/a/../b'), 'http://example.com:3000/b')
 
     def test_urlBaseDir(self):
         self.assertEqual(SpiderFootHelpers.urlBaseDir(
@@ -169,6 +174,26 @@ class TestSpiderFootHelpers(TestModuleBase):
             'http://example.com/test'), 'http://example.com')
         self.assertEqual(SpiderFootHelpers.urlBaseUrl(
             'http://example.com/test/'), 'http://example.com')
+
+    def test_urlBaseUrl_preserves_an_explicit_port(self):
+        """A non-default port must survive, not be dropped to the scheme's default.
+
+        Regression test for 2026-10-24: the previous regex treated the port's ':'
+        as a stop character, same as '/' or '?', so "http://host:3000/path" came
+        back as "http://host" - any relative link resolved against that base then
+        pointed at the wrong port.
+        """
+        self.assertEqual(SpiderFootHelpers.urlBaseUrl(
+            'http://example.com:3000/test'), 'http://example.com:3000')
+        self.assertEqual(SpiderFootHelpers.urlBaseUrl(
+            'http://example.com:3000/'), 'http://example.com:3000')
+        self.assertEqual(SpiderFootHelpers.urlBaseUrl(
+            'http://example.com:3000'), 'http://example.com:3000')
+        self.assertEqual(SpiderFootHelpers.urlBaseUrl(
+            'https://example.com:8443/path?query=1'), 'https://example.com:8443')
+        # unchanged: a default-looking URL with no port is not affected
+        self.assertEqual(SpiderFootHelpers.urlBaseUrl(
+            'http://example.com'), 'http://example.com')
 
     def test_dictionaryWordsFromWordlists(self):
         import importlib

@@ -16,10 +16,12 @@ from __future__ import annotations
 # -------------------------------------------------------------------------------
 
 import json
+import re
 import os.path
 import shutil
 import subprocess
 import tempfile
+import uuid
 import paramiko
 import io
 
@@ -54,7 +56,7 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
 
     # Default options
     opts = {
-        "gobuster_path": "",
+        "gobuster_path": "/tools/bin/gobuster",
         "wordlist": "",
         "threads": 10,
         "timeout": 30,
@@ -62,6 +64,7 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
         "follow_redirects": True,
         "extensions": "php,asp,aspx,jsp,html,htm,js",
         "use_proxy": False,
+        "soft_404_detection": True,
         # Remote execution options
         "remote_enabled": False,
         "remote_host": "",
@@ -83,6 +86,11 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
         "follow_redirects": "Follow redirects (gobuster -r)",
         "extensions": "Comma-separated list of file extensions to look for (gobuster -x).",
         "use_proxy": "Use the configured SpiderFoot proxy for scanning.",
+        "soft_404_detection": "Probe a random nonexistent path first and exclude any hit with the same "
+        "content length (gobuster -xl). Without this, a single-page app that serves its index page "
+        "for every path (Angular/React/Vue client-side routing) makes EVERY wordlist entry a false "
+        "'hit', each spawning its own crawl/probe downstream - confirmed live: a scan that should "
+        "take minutes ran for 16+ hours against OWASP Juice Shop.",
         "remote_enabled": "Enable remote execution via SSH (true/false)",
         "remote_host": "Remote SSH host (IP or hostname)",
         "remote_user": "Remote SSH username",
@@ -110,6 +118,76 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
     def producedEvents(self) -> list:
         """Return the list of events this module produces."""
         return ["URL_DIRECTORY", "URL_FILE"]
+
+    @staticmethod
+    def _parse_output(output: str) -> dict:
+        """Parse gobuster dir output into {"results": [{"path", "status"}]}.
+
+        gobuster 3.8 prints one line per hit, e.g.
+            admin                (Status: 200) [Size: 43]
+            docs                 (Status: 301) [Size: 0] [--> http://host/docs/]
+        A redirect to a trailing-slash URL marks a directory. JSON (older/other builds) is
+        accepted too.
+        """
+        try:
+            parsed = json.loads(output)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+
+        results = []
+        for line in output.splitlines():
+            m = re.match(r"^\s*(\S+)\s+\(Status:\s*(\d+)\)(.*)$", line)
+            if not m:
+                continue
+            path = m.group(1)
+            if not path.startswith("/"):
+                path = "/" + path
+            redirect = re.search(r"\[-->\s*(\S+?)\]", m.group(3))
+            if redirect and redirect.group(1).endswith("/") and not path.endswith("/"):
+                path += "/"
+            results.append({"path": path, "status": int(m.group(2))})
+        return {"results": results}
+
+    def _detect_soft_404(self, target_url: str) -> str | None:
+        """Probe a random, near-certainly-nonexistent path and return its content
+        length if the response would itself count as a gobuster "hit".
+
+        Returns None (no filtering applied - current behaviour, unchanged) if the
+        probe fails, or if the target correctly 404s (or otherwise falls outside
+        the configured status_codes) for a path that cannot exist. A single-page
+        app's catch-all route serves the same page for any path, so gobuster's
+        own -s status-code filter can't tell a real hit from a miss; -xl (exclude
+        by content length) can, since the catch-all response is always the same
+        size. Confirmed live: without this, every entry in a multi-thousand-line
+        wordlist "hits" against OWASP Juice Shop, each spawning its own
+        downstream crawl - a scan that should take minutes ran for 16+ hours.
+        """
+        if not self.opts.get("soft_404_detection", True):
+            return None
+
+        probe_path = f"__sf_soft404_probe_{uuid.uuid4().hex}__"
+        probe_url = f"{target_url.rstrip('/')}/{probe_path}"
+        length = None
+        try:
+            res = self.fetch_url(probe_url, timeout=self.opts.get("timeout", 30), use_cache=False)
+            if res:
+                try:
+                    status_ok = {int(c) for c in str(self.opts.get("status_codes", "")).split(",") if c.strip()}
+                except ValueError:
+                    status_ok = set()
+                code = res.get("code")
+                if code is not None and int(code) in status_ok and res.get("content") is not None:
+                    length = len(res["content"])
+                    self.debug(
+                        f"gobuster: {target_url} returns a {length}-byte response (status {code}) "
+                        f"for a path that cannot exist - excluding that length as a false hit"
+                    )
+        except Exception as e:
+            self.debug(f"gobuster: soft-404 probe failed, proceeding without it: {e}")
+
+        return length
 
     def execute_command(self, cmd: list[str]):
         """Execute an external command safely (no shell) and return the output file path."""
@@ -162,7 +240,13 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
         if not (host and user and tool_path and wordlist):
             self.error("Remote execution enabled but host/user/tool_path/wordlist not set.")
             return None
-        cmd = f'{tool_path} dir -q -u "{target_url}" -w "{wordlist}" -t {threads} -s {status_codes} -to {timeout}s -j'
+        cmd = f'{tool_path} dir -q -u "{target_url}" -w "{wordlist}" -t {threads} -s {status_codes} --timeout {timeout}s --no-progress --no-error -b ""'
+        # Probed from THIS host, not the remote one - an approximation (the remote host may
+        # reach the target by a different path), better than no soft-404 defence at all on the
+        # SSH-dispatched run. See _detect_soft_404().
+        soft_404_length = self._detect_soft_404(target_url)
+        if soft_404_length is not None:
+            cmd += f' --exclude-length {soft_404_length}'
         if follow_redirects:
             cmd += ' -r'
         if extensions:
@@ -192,11 +276,7 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
             if err:
                 self.error(f"Remote tool error: {err}")
                 return None
-            try:
-                return json.loads(output)
-            except Exception as e:
-                self.error(f"Error parsing remote tool output: {e}")
-                return None
+            return self._parse_output(output)
         except Exception as e:
             self.error(f"SSH connection or execution failed: {e}")
             return None
@@ -266,6 +346,8 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
             self.errorState = True
             return
 
+        soft_404_length = self._detect_soft_404(eventData)
+
         # Build the gobuster command
         cmd = [
             gobuster_path,
@@ -279,10 +361,18 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
             str(self.opts["threads"]),
             "-s",
             self.opts["status_codes"],
-            "-to",
+            "--timeout",
             str(self.opts["timeout"]) + "s",
-            "-j",  # JSON output format
+            # gobuster 3.8 has no JSON output mode; the plain-text lines are parsed instead
+            "--no-progress",
+            "--no-error",
+            # 3.8 blacklists 404 by default, which conflicts with an explicit -s allow-list
+            "-b",
+            "",
         ]
+
+        if soft_404_length is not None:
+            cmd.extend(["--exclude-length", str(soft_404_length)])
 
         if self.opts["follow_redirects"]:
             cmd.append("-r")
@@ -310,11 +400,7 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
                 with io.open(output_file, "r", encoding="utf-8", errors="replace") as file:
                     output = file.read()
 
-            try:
-                results = json.loads(output)
-            except Exception as e:
-                self.error(f"Could not parse gobuster output as JSON: {output}")
-                results = {"results": []}
+            results = self._parse_output(output)
 
             # Debug: Log parsed results
             self.debug(f"Parsed gobuster results: {results}")

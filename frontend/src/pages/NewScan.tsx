@@ -11,6 +11,7 @@ import {
   ShieldCheck, FileText, Loader2, Layers, Shield,
 } from 'lucide-react';
 import { PageHeader, Tabs, SearchInput, Toast, type ToastType } from '../components/ui';
+import { moduleCredentialStatus } from '../lib/settingsMeta';
 
 type TabKey = 'usecase' | 'profile' | 'data' | 'module';
 
@@ -22,13 +23,20 @@ const USE_CASES = [
   { key: 'passive', label: 'Passive Only', desc: 'Only passive/non-intrusive modules' },
 ];
 
-/* Curated set of fast, reliable passive modules for quick scans */
+/* Curated set of fast, reliable passive modules for quick scans.
+ * sfp_dnstxt, sfp_httpheaders and sfp_geoinfo were removed/renamed
+ * upstream at some point and silently dropped out of every "Quick Scan"
+ * run without anyone noticing (2026-10-25) — dnstxt -> sfp_dnsraw (DNS
+ * Raw Records, which covers TXT among other record types), httpheaders
+ * -> sfp_webserver (Web Server Identifier, reads headers other modules
+ * already fetched), geoinfo -> dropped, sfp_ipinfo below already covers
+ * geo data. */
 const QUICK_SCAN_MODULES = [
-  'sfp_dnsresolve', 'sfp_dnsbrute', 'sfp_dnscommonsrv', 'sfp_dnstxt',
+  'sfp_dnsresolve', 'sfp_dnsbrute', 'sfp_dnscommonsrv', 'sfp_dnsraw',
   'sfp_hackertarget', 'sfp_ipinfo', 'sfp_whois',
-  'sfp_sslcert', 'sfp_webframework', 'sfp_httpheaders', 'sfp_spider',
+  'sfp_sslcert', 'sfp_webframework', 'sfp_webserver', 'sfp_spider',
   'sfp_crossref', 'sfp_pageinfo', 'sfp_similar', 'sfp_names',
-  'sfp_email', 'sfp_geoinfo', 'sfp_portscan_tcp', 'sfp_socialprofiles',
+  'sfp_email', 'sfp_portscan_tcp', 'sfp_socialprofiles',
   'sfp__stor_db',
 ];
 
@@ -184,14 +192,6 @@ export default function NewScanPage() {
     setSelectedTypes(next);
   };
 
-  const hasApiKey = (m: Module) => {
-    if (!m.opts) return true;
-    // opts is { api_key: "", daysback: 30, ... } — raw values, not objects
-    return !Object.entries(m.opts).some(
-      ([k, v]) => (k.toLowerCase().includes('api_key') || k.toLowerCase().includes('apikey'))
-        && (v === '' || v === null || v === undefined),
-    );
-  };
 
   return (
     <div className="space-y-6">
@@ -448,7 +448,7 @@ export default function NewScanPage() {
                     <h4 className="section-label mb-2 sticky top-0 bg-dark-800 py-1">{cat}</h4>
                     <div className="space-y-1">
                       {mods.map((m) => {
-                        const apiOk = hasApiKey(m);
+                        const credStatus = moduleCredentialStatus(m.opts);
                         return (
                           <label
                             key={m.name}
@@ -467,14 +467,12 @@ export default function NewScanPage() {
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
                                 <span className="text-sm text-foreground font-medium">{m.name.replace('sfp_', '')}</span>
-                                {!apiOk && (
-                                  <span className="text-yellow-500" title="API key required">
+                                {credStatus === 'missing' && (
+                                  <span className="text-yellow-500" title="Needs an API key — set it on Data Source Credentials">
                                     <Lock className="h-3 w-3" />
                                   </span>
                                 )}
-                                {apiOk && m.opts && Object.keys(m.opts).some(
-                                  (k) => k.toLowerCase().includes('api_key'),
-                                ) && (
+                                {credStatus === 'configured' && (
                                   <span className="text-green-400" title="API key configured">
                                     <Unlock className="h-3 w-3" />
                                   </span>

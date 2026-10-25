@@ -1,0 +1,8 @@
+# deploy/trivyignore.txt - findings accepted by scan-gate.sh.
+#
+# One vulnerability ID per line, ALWAYS followed by a comment saying why it is
+# accepted and who accepted it and when. An entry with no justification should
+# not be merged. Nothing is accepted yet.
+#
+# Format:
+#   CVE-2026-0000   # <package> in <image>: <why it is not exploitable here>; accepted <who> <date>; revisit <date>

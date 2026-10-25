@@ -1,0 +1,426 @@
+# =============================================================================
+# deploy/stack-docker.yml
+# Version: 2.3.0
+# Created: 2026-10-23
+# Updated: 2026-10-24
+#
+# Summary:
+#   Purpose:
+#     Docker DEVELOPMENT / SANDBOX deployment (claude). The same 9 services,
+#     images, wiring and hardening as deploy/stack-podman.yml (production,
+#     baden) - deliberately, so that what is tested here is what runs in
+#     production. Only ever PULLS the images deploy/publish.sh builds and
+#     pushes; it never builds anything.
+#
+#     Branch work is tested here first as an -rc build (e.g. v6.1.0-bd.1-rc.1),
+#     and only a tag that has soaked here is released and deployed to baden.
+#     See deploy/README.md for the whole flow.
+#
+#     Replaces stack-spiderfoot-docker.yml v1.11.0, a build-from-source
+#     reference deployment with MinIO and Tika that no longer matched
+#     production. MinIO, Tika and the other profiles remain available through
+#     upstream's own docker-compose.yml, which this fork does not modify.
+#
+#   Usage:
+#     ./deploy/bootstrap-spiderfoot-env.sh      # once: generates the secrets file
+#     # then edit /srv/spiderfoot/stack-spiderfoot-env.env: set SPIDERFOOT_TAG and ANTHROPIC_API_KEY
+#     mkdir -p /srv/spiderfoot/{postgres,redis,qdrant,embeddings-cache}
+#     docker compose -f stack-docker.yml --env-file /srv/spiderfoot/stack-spiderfoot-env.env up -d
+#
+#     Test a branch: publish an -rc tag on davros, set SPIDERFOOT_TAG to it,
+#     then `docker compose ... pull && docker compose ... up -d`.
+#
+#   Prerequisites:
+#     - The tag in SPIDERFOOT_TAG has been published by deploy/publish.sh
+#     - /srv/spiderfoot/* exist. Docker has no ":U" flag, so ownership is set
+#       on the host: postgres data dir owned by uid 70 (the postgres:alpine
+#       user). Docker will create missing directories root-owned on first up.
+#     - ANTHROPIC_API_KEY in the env file (sf-agents calls Claude Sonnet 5.5 directly)
+#
+#   Warnings:
+#     - SPIDERFOOT_TAG is REQUIRED and has no default; -rc tags never move
+#       :latest, and this stack does not use :latest.
+#     - Everything about the services (read_only, tmpfs, cap_drop, the
+#       qdrant version, why sf-agents runs as root, healthchecks) is
+#       inherited from stack-podman.yml - read its header and changelog for
+#       the history and the reasons. Keep the two files in step: a change
+#       made in one that is not made in the other defeats the point of a
+#       dev stack. The one deliberate exception is sf-juiceshop (below): a
+#       vulnerable-by-design scan target belongs only in the dev stack.
+#     - The embedding provider is fastembed (CPU). sentence_transformer
+#       silently degrades to mock embeddings on current images - see
+#       stack-podman.yml Changelog 2.1.0.
+#     - Runs 300+ modules incl. 33+ active recon tools (scan profile) that
+#       make outbound requests to third parties during scans. Only scan
+#       targets you are authorised to investigate, and read Design-Reference
+#       s24.3 item 8 before pointing an active tool at anything not already
+#       isolated for testing.
+#
+# Changelog:
+#   2.3.0 (2026-10-24) - Adds sf-juiceshop (OWASP Juice Shop), profile "testing", DELIBERATELY NOT mirrored to
+#     stack-podman.yml: a vulnerable-by-design scan target has no place in production. Off by default
+#     (COMPOSE_PROFILES must include "testing"); published on this host only, never through Zoraxy.
+#   2.2.0 (2026-10-24) - Mirrors stack-podman.yml 2.10.0: sf-litellm removed, sf-agents calls Claude directly.
+#   2.1.0 (2026-10-23) - Mirrors stack-podman.yml 2.9.0: tmpfs over /home/spiderfoot/.config, .cache and .pdcp on sf-celery-worker-active,
+#     plus cap_add NET_RAW, no-new-privileges off and NMAP_PRIVILEGED=1 (see the comment on the service).
+#   2.0.0 (2026-10-23) - Rewritten from scratch as a pull-only mirror of
+#     stack-podman.yml 2.8.0 (see its changelog for the shared history).
+#     Previous 1.x versions were a different design and are in git history.
+#     WHY it was replaced rather than patched: it built from source on the
+#     deploy host (the pattern is build elsewhere, pull here); it ran 11
+#     services against production's 9 (MinIO + init job and Tika, which
+#     production does not run); it used named volumes and its own env layout
+#     where production bind-mounts /srv/spiderfoot; and it had drifted behind
+#     production's fixes. A dev stack that does not mirror production cannot
+#     say whether a change is safe to release. Full reasoning: deploy/README.md.
+#
+# =============================================================================
+
+name: spiderfoot
+
+services:
+  sf-postgres:
+    image: docker.io/library/postgres:15-alpine
+    container_name: sf-postgres
+    hostname: sf-postgres
+    restart: always
+    environment:
+      - TZ=${TZ}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - /srv/spiderfoot/postgres:/var/lib/postgresql/data
+      - /etc/localtime:/etc/localtime:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - spiderfoot-net
+
+  sf-redis:
+    image: docker.io/library/redis:7-alpine
+    container_name: sf-redis
+    hostname: sf-redis
+    restart: always
+    environment:
+      - TZ=${TZ}
+    volumes:
+      - /srv/spiderfoot/redis:/data
+      - /etc/localtime:/etc/localtime:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - spiderfoot-net
+
+  sf-api:
+    image: ghcr.io/braedach/spiderfoot-api:${SPIDERFOOT_TAG:?set SPIDERFOOT_TAG to an exact published tag, e.g. v6.1.0-bd.1}
+    container_name: sf-api
+    hostname: sf-api
+    restart: always
+    user: "1000:1000"
+    read_only: true
+    labels:
+      - com.docker.compose.project=spiderfoot
+      - com.docker.compose.service=sf-api
+    tmpfs:
+      - /home/spiderfoot/cache:mode=1777
+      - /home/spiderfoot/logs:mode=1777
+      - /tmp
+    environment:
+      - TZ=${TZ}
+      - SF_DEPLOYMENT_MODE=${SF_DEPLOYMENT_MODE}
+      - SF_POSTGRES_DSN=${SF_DATABASE_URL}
+      - SF_REDIS_URL=${SF_REDIS_URL}
+      - SF_LOG_FORMAT=${SF_LOG_FORMAT}
+      - SF_JWT_SECRET=${SF_JWT_SECRET_KEY}
+      - SF_ADMIN_PASSWORD=${SF_ADMIN_PASSWORD}
+    depends_on:
+      - sf-postgres
+      - sf-redis
+    healthcheck:
+      test: ["CMD", "python3", "-c", "__import__('urllib.request').request.urlopen('http://127.0.0.1:9001/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      spiderfoot-net:
+        aliases:
+          - api
+
+  sf-celery-worker:
+    image: ghcr.io/braedach/spiderfoot-scanner:${SPIDERFOOT_TAG:?set SPIDERFOOT_TAG to an exact published tag, e.g. v6.1.0-bd.1}
+    container_name: sf-celery-worker
+    hostname: sf-celery-worker
+    restart: always
+    user: "1000:1000"
+    read_only: true
+    labels:
+      - com.docker.compose.project=spiderfoot
+      - com.docker.compose.service=sf-celery-worker
+    tmpfs:
+      - /home/spiderfoot/cache:mode=1777
+      - /home/spiderfoot/logs:mode=1777
+      - /tmp
+    environment:
+      - TZ=${TZ}
+      - SF_DEPLOYMENT_MODE=${SF_DEPLOYMENT_MODE}
+      - SF_POSTGRES_DSN=${SF_DATABASE_URL}
+      - SF_REDIS_URL=${SF_REDIS_URL}
+      - SF_LOG_FORMAT=${SF_LOG_FORMAT}
+      # Real-time Qdrant indexing via EventBus - CURRENTLY INERT. The
+      # scanner-side publish code (commit 1bead36e) was reverted on
+      # 2026-09-11 after a scan looked stalled post-deploy; turned out to
+      # be a bad baseline comparison, not a confirmed bug, but reverted
+      # anyway rather than trust something already under suspicion
+      # mid-incident. Nothing in the currently-deployed image reads these
+      # two vars. Left in place, not removed, for whenever that feature
+      # gets a clean, unhurried verification pass and goes back in - see
+      # stack-spiderfoot-podman.yml's git history / PR #393 for the fix.
+      - SF_EVENTBUS_BACKEND=redis
+      - SF_EVENTBUS_REDIS_URL=${SF_REDIS_URL}
+    depends_on:
+      - sf-postgres
+      - sf-redis
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - spiderfoot-net
+
+  sf-celery-worker-active:
+    image: ghcr.io/braedach/spiderfoot-active-scanner:${SPIDERFOOT_TAG:?set SPIDERFOOT_TAG to an exact published tag, e.g. v6.1.0-bd.1}
+    container_name: sf-celery-worker-active
+    hostname: sf-celery-worker-active
+    restart: always
+    profiles:
+      - scan
+    user: "1000:1000"
+    read_only: true
+    labels:
+      - com.docker.compose.project=spiderfoot
+      - com.docker.compose.service=sf-celery-worker-active
+    tmpfs:
+      - /home/spiderfoot/cache:mode=1777
+      - /home/spiderfoot/logs:mode=1777
+      - /home/spiderfoot/.config:mode=1777
+      - /home/spiderfoot/.cache:mode=1777
+      - /home/spiderfoot/.pdcp:mode=1777
+      - /tmp
+    environment:
+      - TZ=${TZ}
+      - SF_DEPLOYMENT_MODE=${SF_DEPLOYMENT_MODE}
+      - SF_POSTGRES_DSN=${SF_DATABASE_URL}
+      - SF_REDIS_URL=${SF_REDIS_URL}
+      - SF_LOG_FORMAT=${SF_LOG_FORMAT}
+      # Real-time Qdrant indexing via EventBus - CURRENTLY INERT, same as
+      # sf-celery-worker above (reverted 2026-09-11, kept for later).
+      - SF_EVENTBUS_BACKEND=redis
+      - SF_EVENTBUS_REDIS_URL=${SF_REDIS_URL}
+      - NMAP_PRIVILEGED=1
+    depends_on:
+      - sf-postgres
+      - sf-redis
+    # Raw-socket scanning (nmap -sS, naabu SYN, masscan) needs CAP_NET_RAW and nothing else. The
+    # image gives those binaries cap_net_raw as a FILE capability, and the kernel ignores file
+    # capabilities for a non-root process while no-new-privileges is set - so this one worker
+    # runs with it off (verified: with it on, raw scans fail "Operation not permitted" even
+    # with NET_RAW granted). Everything else stays dropped, the image has no setuid binaries,
+    # and the root filesystem is read-only. The alternative that keeps no-new-privileges is
+    # user "0:0" with cap_drop ALL + this cap_add; it was judged worse (uid 0 inside).
+    # NMAP_PRIVILEGED tells nmap to trust that capability instead of demanding euid 0.
+    security_opt:
+      - no-new-privileges:false
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_RAW
+    networks:
+      - spiderfoot-net
+
+  sf-frontend-ui:
+    image: ghcr.io/braedach/spiderfoot-frontend:${SPIDERFOOT_TAG:?set SPIDERFOOT_TAG to an exact published tag, e.g. v6.1.0-bd.1}
+    container_name: sf-frontend-ui
+    hostname: sf-frontend-ui
+    restart: always
+    read_only: true
+    ports:
+      - 5001:80
+    labels:
+      - com.docker.compose.project=spiderfoot
+      - com.docker.compose.service=sf-frontend-ui
+    tmpfs:
+      - /etc/nginx/conf.d
+      - /var/cache/nginx
+      - /var/run
+    environment:
+      - TZ=${TZ}
+      - NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1
+    depends_on:
+      - sf-api
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - NET_BIND_SERVICE
+    networks:
+      - spiderfoot-net
+
+  sf-qdrant:
+    image: qdrant/qdrant:v1.19.1
+    container_name: sf-qdrant
+    hostname: sf-qdrant
+    restart: always
+    environment:
+      - TZ=${TZ}
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__SERVICE__HTTP_PORT=6333
+    volumes:
+      - /srv/spiderfoot/qdrant:/qdrant/storage
+      - /etc/localtime:/etc/localtime:ro
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/6333'"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      spiderfoot-net:
+        aliases:
+          - qdrant
+
+  sf-agents:
+    image: ghcr.io/braedach/spiderfoot-base:${SPIDERFOOT_TAG:?set SPIDERFOOT_TAG to an exact published tag, e.g. v6.1.0-bd.1}
+    container_name: sf-agents
+    hostname: sf-agents
+    restart: always
+    # Runs as root (0:0), unlike the other services - the embeddings-cache
+    # bind mount below needs a writable owner and podman's ":U" auto-chown
+    # bind option isn't actually being honored through this stack's compose
+    # engine (confirmed: podman inspect showed a plain rbind, no chown
+    # applied). Running as root sidesteps the UID-mismatch entirely without
+    # a manual host-side chown on every fresh deploy. Contained by cap_drop:
+    # ALL below - root here has no elevated Linux capabilities (no
+    # CAP_DAC_OVERRIDE, CAP_SYS_ADMIN, etc.), so it's UID 0 in name only.
+    user: "0:0"
+    entrypoint: ["/usr/local/bin/docker-entrypoint.sh"]
+    command: ["python", "-m", "spiderfoot.agents.service"]
+    # No GPU device here, deliberately. The fork-owned base image is CPU-only
+    # (fastembed, no GPU variant), so a GPU buys nothing today. The Podman CDI
+    # device in stack-podman.yml (nvidia.com/gpu=all) is Podman syntax; Docker
+    # would use deploy.resources.reservations.devices instead, and read_only
+    # must come off for it - add it only alongside a GPU-capable base image
+    # (which needs its own dependency lock; see deploy/docker/Dockerfile.base).
+    labels:
+      - com.docker.compose.project=spiderfoot
+      - com.docker.compose.service=sf-agents
+    tmpfs:
+      - /home/spiderfoot/cache:mode=1777
+      - /home/spiderfoot/logs:mode=1777
+      - /home/spiderfoot/data:mode=1777
+      - /home/spiderfoot/.spiderfoot:mode=1777
+      - /tmp
+    environment:
+      - TZ=${TZ}
+      - HF_HOME=/home/spiderfoot/.cache/huggingface
+      - SF_SERVICE_ROLE=agents
+      - SF_AGENTS_HOST=0.0.0.0
+      - SF_AGENTS_PORT=8100
+      - SF_POSTGRES_DSN=${SF_DATABASE_URL}
+      - SF_REDIS_URL=${SF_REDIS_URL}
+      # Claude is called directly through the official SDK (the LiteLLM proxy this replaced is gone).
+      - SF_LLM_PROVIDER=anthropic
+      - SF_LLM_MODEL=${SF_LLM_MODEL:-claude-sonnet-5-5}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY}
+      - SF_QDRANT_BACKEND=http
+      - SF_QDRANT_HOST=qdrant
+      - SF_QDRANT_PORT=6333
+      - SF_QDRANT_GRPC_PORT=6334
+      - SF_QDRANT_PREFIX=sf_
+      - SF_EMBEDDING_PROVIDER=fastembed
+      - SF_EMBEDDING_MODEL=all-MiniLM-L6-v2
+      - SF_EMBEDDING_DIMENSIONS=384
+      # Added 2026-09-17: was unset everywhere (this file, stack-spiderfoot-
+      # docker.yml, both env-examples), meaning report_generator.py's own
+      # configurable-cap fix (see PR #393) had nothing to actually raise it
+      # to - every report was still silently capped at the hardcoded-default
+      # 500 events regardless. 2000 comfortably covers the 687-event scan
+      # that originally exposed the cap.
+      - SF_REPORT_MAX_EVENTS_PER_SCAN=${SF_REPORT_MAX_EVENTS_PER_SCAN:-2000}
+      # Real-time Qdrant indexing via EventBus - CURRENTLY INERT, same as
+      # sf-celery-worker above (reverted 2026-09-11, kept for later). This
+      # is also where the indexer itself would run once re-enabled.
+      - SF_EVENTBUS_BACKEND=redis
+      - SF_EVENTBUS_REDIS_URL=${SF_REDIS_URL}
+    volumes:
+      - /srv/spiderfoot/embeddings-cache:/home/spiderfoot/.cache/huggingface
+    depends_on:
+      - sf-postgres
+      - sf-redis
+      - sf-qdrant
+    healthcheck:
+      test: ["CMD", "python3", "-c", "__import__('urllib.request').request.urlopen('http://127.0.0.1:8100/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - spiderfoot-net
+
+  # Deliberately vulnerable scan target for exercising the scanner end-to-end
+  # (OWASP Juice Shop). DEV STACK ONLY - never add this to stack-podman.yml.
+  # Off by default: needs COMPOSE_PROFILES to include "testing". Published
+  # to the host so a human can browse it, but never through Zoraxy and never
+  # on a LAN-reachable address by default - bind it to 127.0.0.1 in a local
+  # override if this host itself is not sandboxed (see deploy/README.md).
+  sf-juiceshop:
+    image: bkimminich/juice-shop
+    container_name: sf-juiceshop
+    hostname: sf-juiceshop
+    restart: always
+    profiles:
+      - testing
+    labels:
+      - com.docker.compose.project=spiderfoot
+      - com.docker.compose.service=sf-juiceshop
+    ports:
+      - 5002:3000
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - spiderfoot-net
+
+networks:
+  spiderfoot-net:
+    name: spiderfoot-net
+    driver: bridge

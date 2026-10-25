@@ -945,7 +945,8 @@ following the exact structure specified in your system instructions.
     def create(cls) -> "ReportGeneratorAgent":
         """Create a report generator configured for CTI reports."""
         config = AgentConfig.from_env("report_generator")
-        config.llm_model = "gemma3-27b"
+        # SF_REPORT_LLM_MODEL overrides the shared SF_LLM_MODEL for reports (was a hard-coded proxy alias).
+        config.llm_model = os.environ.get("SF_REPORT_LLM_MODEL") or config.llm_model
         config.timeout_seconds = 600  # 10 min for large reports
         config.event_types = cls(config).event_types
         return cls(config)

@@ -58,6 +58,7 @@ class LLMProvider(Enum):
     AZURE = "azure"
     VLLM = "vllm"
     LOCAL = "local"
+    ANTHROPIC = "anthropic"
     MOCK = "mock"
 
 
@@ -101,6 +102,7 @@ class LLMConfig:
             "azure": LLMProvider.AZURE,
             "vllm": LLMProvider.VLLM,
             "local": LLMProvider.LOCAL,
+            "anthropic": LLMProvider.ANTHROPIC,
             "mock": LLMProvider.MOCK,
         }
 
@@ -144,6 +146,9 @@ class LLMConfig:
             if not base:
                 base = DEFAULT_VLLM_BASE_URL
             return f"{base}/chat/completions"
+
+        elif self.provider == LLMProvider.ANTHROPIC:
+            return "https://api.anthropic.com/v1/messages"  # informational: the SDK makes the call
 
         elif self.provider == LLMProvider.MOCK:
             return "mock://llm/chat/completions"
@@ -650,6 +655,9 @@ class LLMClient:
         t0 = time.monotonic()
         self._total_requests += 1
 
+        if self.config.provider == LLMProvider.ANTHROPIC:
+            return self._make_anthropic_request(messages, t0, **kwargs)
+
         body = self._build_request_body(messages, stream=False, **kwargs)
         data = json.dumps(body).encode("utf-8")
 
@@ -716,12 +724,87 @@ class LLMClient:
 
         return response
 
+    def _make_anthropic_request(
+        self,
+        messages: list[dict[str, str]],
+        t0: float,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        """Single request to Claude through the official SDK (no proxy).
+
+        Retries stay in ``_call_with_retry``, so the SDK's own are switched off.
+        ``temperature`` is not sent: current Claude models reject it.
+        """
+        import anthropic
+
+        from spiderfoot.ai import anthropic_chat
+
+        request = anthropic_chat.build_request(
+            messages,
+            model=kwargs.get("model", self.config.model),
+            max_tokens=kwargs.get("max_tokens", self.config.max_tokens),
+            response_format=kwargs.get("response_format"),
+        )
+        client = anthropic.Anthropic(
+            api_key=self.config.api_key or None,  # None -> ANTHROPIC_API_KEY
+            timeout=self.config.timeout,
+            max_retries=0,
+        )
+
+        try:
+            try:
+                message = anthropic_chat.messages_api(client).create(**request, **anthropic_chat.fallback_kwargs())
+            except anthropic.BadRequestError:
+                if "format" not in request.get("output_config", {}):
+                    raise
+                log.warning("Claude rejected the response schema; retrying without it")
+                message = anthropic_chat.messages_api(client).create(
+                    **anthropic_chat.without_schema(request), **anthropic_chat.fallback_kwargs()
+                )
+            content = anthropic_chat.response_text(message)
+        except anthropic.AuthenticationError as e:
+            raise LLMAuthError(str(e), 401) from e
+        except anthropic.RateLimitError as e:
+            raise LLMRateLimitError(str(e), 429) from e
+        except anthropic.APITimeoutError as e:
+            raise LLMTimeoutError(f"Request timed out: {e}") from e
+        except anthropic.APIConnectionError as e:
+            raise LLMError(f"Connection error: {e}") from e
+        except anthropic.APIStatusError as e:
+            raise LLMError(str(e), e.status_code) from e
+        except RuntimeError as e:  # refusal / no text
+            raise LLMError(str(e)) from e
+
+        latency_ms = (time.monotonic() - t0) * 1000
+        usage = LLMUsage(
+            prompt_tokens=message.usage.input_tokens,
+            completion_tokens=message.usage.output_tokens,
+            total_tokens=message.usage.input_tokens + message.usage.output_tokens,
+        )
+        self._total_tokens += usage.total_tokens
+        self._total_latency_ms += latency_ms
+        log.info(
+            "LLM response: model=%s, tokens=%d, latency=%.0fms",
+            message.model, usage.total_tokens, latency_ms,
+        )
+        return LLMResponse(
+            content=content,
+            model=message.model,
+            usage=usage,
+            finish_reason=message.stop_reason or "",
+            latency_ms=latency_ms,
+            raw=message.to_dict(),
+            success=True,
+        )
+
     def _stream_request(
         self,
         messages: list[dict[str, str]],
         **kwargs: Any,
     ) -> Generator[StreamChunk]:
         """Make a streaming API request."""
+        if self.config.provider == LLMProvider.ANTHROPIC:
+            raise LLMError("Streaming is not implemented for the anthropic provider")
         body = self._build_request_body(messages, stream=True, **kwargs)
         data = json.dumps(body).encode("utf-8")
 

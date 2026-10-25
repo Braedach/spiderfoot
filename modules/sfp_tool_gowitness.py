@@ -84,6 +84,14 @@ class sfp_tool_gowitness(SpiderFootAsyncPlugin):
                     return candidate
         return None
 
+    def _find_chrome(self):
+        for name in ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable"):
+            for p in os.environ.get("PATH", "").split(os.pathsep):
+                candidate = os.path.join(p, name)
+                if os.path.isfile(candidate):
+                    return candidate
+        return None
+
     def handleEvent(self, event):
         data = event.data
         if self.errorState:
@@ -108,23 +116,31 @@ class sfp_tool_gowitness(SpiderFootAsyncPlugin):
         width = res[0] if len(res) > 0 else "1440"
         height = res[1] if len(res) > 1 else "900"
 
+        # gowitness v3 command line (v2's `single <url> --resolution-x ... --disable-logging` no longer exists).
         cmd = [
             binary,
-            "single",
-            target,
+            "scan", "single",
+            "-u", target,
             "--screenshot-path", output_dir,
+            "--screenshot-format", "png",
             "--timeout", str(self.opts["timeout"]),
             "--delay", str(self.opts["delay"]),
-            "--resolution-x", width,
-            "--resolution-y", height,
-            "--disable-logging",
+            "--chrome-window-x", width,
+            "--chrome-window-y", height,
+            "--write-none",
+            "--quiet",
         ]
 
-        if self.opts["chrome_path"]:
-            cmd.extend(["--chrome-path", self.opts["chrome_path"]])
+        # Without --chrome-path gowitness tries to DOWNLOAD a Chrome, which a locked-down
+        # scanner container can neither reach nor write.
+        chrome = self.opts["chrome_path"] or self._find_chrome()
+        if chrome:
+            cmd.extend(["--chrome-path", chrome])
 
         try:
             env = os.environ.copy()
+            # Chrome writes its profile under $HOME; the worker's HOME is read-only.
+            env["HOME"] = output_dir
             env["CHROMIUM_FLAGS"] = "--no-sandbox --disable-gpu --disable-dev-shm-usage"
 
             proc = subprocess.run(

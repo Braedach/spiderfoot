@@ -1,0 +1,273 @@
+# =============================================================================
+# deploy/docker/Dockerfile.active-scanner
+# Version: 1.1.0
+# Created: 2026-10-23
+#
+# Fork-owned replacement for docker/Dockerfile.active-scanner (upstream's file is left
+# untouched). Built by deploy/publish.sh with the repository root as the build context
+# and the fork-owned deploy/docker/Dockerfile.base image as BASE_IMAGE.
+#
+# The old image was the worst one in production: 42 critical / 985 high findings and 39
+# flagged "secrets" (public exploit fixtures). It pulled ~40 third-party inputs at build
+# time from moving targets - 16 Go tools at `@latest`, six git repositories at branch
+# HEAD, unpinned pip/npm packages, wordlists from moving branches, one binary with no
+# checksum - so rebuilding the same tag produced a different image. Everything below is
+# now pinned and every download is checksum-verified. Pins are release versions or full
+# commit SHAs; the 14-day cool-down applies to all of them (deploy/README.md).
+#
+# TOOLS REMOVED, and why (SpiderFoot events they produced are still produced, by the tool
+# named in brackets):
+#   amass      - v4.2.0's own Go dependencies (x/net 0.15, x/crypto 0.13, pgx 5.4.3) carry two
+#                critical and 48 high findings that only a newer amass fixes; v5 is a different
+#                architecture (a long-running engine, no -json/-max-dns-queries flags), so the
+#                module would break. Its events are covered [subfinder + dnsx].
+#   gospider   - last release 2021.            [katana]
+#   hakrawler  - last release 2022.            [katana]
+#   waybackurls- last release 2022.            [gau, which queries Wayback among other sources]
+#   LinkFinder - no release for 2.5 years.     [katana -jc, JavaScript endpoint extraction]
+#   CMSeeK     - last release 2020; it only ever produced WEBSERVER_TECHNOLOGY.   [whatweb, httpx]
+#   retire.js  - never worked in the old image: its node runtime was not installed and its
+#                bin symlink was not copied. Removed rather than shipping Node for it.
+#   `pip trufflehog` - PyPI's package is the abandoned 2021 v2.1.13. Replaced by the maintained
+#                Go TruffleHog v3 (checksum-verified release binary); the module was rewritten.
+# TOOLS UPGRADED: nuclei 3.3.9 -> 3.11.1 (3.3.9 had 7 published advisories, fixed in 3.8/3.10);
+#   dalfox Go v2 (unauthenticated RCE in <=2.12.0) -> v3.2.4, a Rust rewrite (the module needed
+#   a flag change); ffuf "2.1.0-dev" -> 2.3.0 (two DoS advisories); subfinder 2.16 -> 2.17,
+#   katana 1.7 -> 1.8.
+# OTHER FIXES: git is kept (the old image purged it, so the gitleaks and trufflehog modules,
+#   which `git clone`, could never run); `openssl` is installed (testssl.sh needs it); the
+#   package list is kept so the image can be scanned; Python tools live in their own
+#   hash-locked venv (/opt/venv-tools) so they cannot conflict with the application's.
+#
+# Pinned 2026-10-23. To refresh: re-run the checks in deploy/README.md "Bumping pins".
+#
+# Changelog:
+#   1.1.0 (2026-10-24) - nmap/naabu/masscan get cap_net_raw only (was cap_net_raw+cap_net_admin,
+#     neither used); massdns gets none (UDP only); setcap now fails the build instead of being
+#     silently ignored. See deploy/README.md's "Active scanner" and the stacks' NET_RAW change.
+#   1.0.0 (2026-10-23) - Initial version.
+# =============================================================================
+
+# Global ARG - must be before the first FROM so every stage can use it
+ARG BASE_IMAGE=spiderfoot-base:latest
+
+# -- Stage 0: name the SpiderFoot base image (venv + application source + entrypoint) --
+FROM ${BASE_IMAGE} AS spiderfoot-base
+
+# -- Stage 1: Python recon tools, hash-locked, in their own venv ---------------
+FROM python:3.12-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704 AS pytools
+COPY deploy/requirements-tools.lock /tmp/requirements-tools.lock
+RUN python -m venv /opt/venv-tools && \
+    /opt/venv-tools/bin/pip install --no-cache-dir --require-hashes --no-deps -r /tmp/requirements-tools.lock && \
+    rm -rf /opt/venv-tools/lib/python3.12/site-packages/pip /opt/venv-tools/lib/python3.12/site-packages/pip-*.dist-info \
+           /opt/venv-tools/bin/pip /opt/venv-tools/bin/pip3 /opt/venv-tools/bin/pip3.12
+
+# -- Stage 2: Go recon tools, pinned. GOTOOLCHAIN=local: never auto-download a toolchain --
+FROM golang:1.27-trixie@sha256:fbb7ae40b62ff8afe31662df570d39b4f5052ac32b90dae8e60d7657a20a74f4 AS go-builder
+RUN apt-get update && apt-get install -y --no-install-recommends libpcap-dev git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+ENV GOBIN=/tools/bin GOTOOLCHAIN=local GOFLAGS="-trimpath -p=2"
+RUN mkdir -p /tools/bin
+COPY deploy/docker/go-build.sh /usr/local/bin/go-build
+
+# Dependency floors (see go-build.sh for why). Each is the first release that clears every
+# finding the scan gate raised against these tools on 2026-10-23, and each is more than 14
+# days old. grpc is pinned to a commit: its fix is on master, not yet in a release.
+# Re-derive this list from the gate's report when it changes (deploy/README.md).
+ENV GO_FLOORS="golang.org/x/net@v0.60.0 golang.org/x/crypto@v0.55.0 golang.org/x/text@v0.41.0 \
+ golang.org/x/mod@v0.40.0 github.com/klauspost/compress@v1.18.7 github.com/jackc/pgx/v5@v5.9.0 \
+ github.com/getkin/kin-openapi@v0.149.0 github.com/go-git/go-git/v5@v5.19.2 \
+ github.com/sirupsen/logrus@v1.9.3 github.com/valyala/fasthttp@v1.34.0 \
+ google.golang.org/grpc@v1.85.0-dev.0.20260825072537-93e31b48545e"
+
+# ProjectDiscovery suite
+RUN go-build install github.com/projectdiscovery/httpx/cmd/httpx@v1.12.0
+RUN go-build install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@v2.17.0
+RUN go-build install github.com/projectdiscovery/dnsx/cmd/dnsx@v1.3.1
+RUN go-build install github.com/projectdiscovery/naabu/v2/cmd/naabu@v2.6.1
+RUN go-build install github.com/projectdiscovery/katana/cmd/katana@v1.8.0
+RUN go-build install github.com/projectdiscovery/tlsx/cmd/tlsx@v1.4.0
+# nuclei is built from source rather than downloaded: the release binary is compiled with
+# Go 1.26.5, which has fixable standard-library vulnerabilities (fixed in 1.27.3, the
+# toolchain this stage uses).
+RUN go-build install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@v3.11.1
+# Brute-forcing / fuzzing
+RUN go-build install github.com/OJ/gobuster/v3@v3.8.2
+RUN go-build install github.com/ffuf/ffuf/v2@v2.3.0
+# URL discovery. gau's last RELEASE is from 2024-10 and carries old dependencies, so it is
+# pinned to a default-branch commit (2026-07-17) instead; see deploy/README.md.
+RUN go-build install github.com/lc/gau/v2/cmd/gau@1c2bd254dab1e9b646257210470a192ed9a185c1
+# Screenshotting. gowitness v3 has no /v3 module path (a version tag is not a valid Go module
+# version) and its go.mod has `replace` directives (so `go install pkg@version` refuses it); it is
+# built from a checkout of the commit behind its 3.2.0 tag (2026-09-14) instead.
+RUN git init -q /src/gowitness && cd /src/gowitness \
+    && git fetch -q --depth 1 https://github.com/sensepost/gowitness.git 91b32724ac80111518bbfb61b0bc22d5bb48e24d \
+    && git checkout -q FETCH_HEAD \
+    && go-build raise \
+    && go build -v -o /tools/bin/gowitness . \
+    && rm -rf /src/gowitness
+# Secret detection. The repository moved to gitleaks/gitleaks, but v8.30.1's go.mod still
+# declares the old module path, so that is the path the build must use.
+RUN go-build install github.com/zricethezav/gitleaks/v8@v8.30.1
+
+# -- Stage 3: C recon tools, pinned to commits -----------------------------------
+FROM debian:trixie-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad AS c-builder
+RUN apt-get update && apt-get install -y --no-install-recommends git make gcc libc6-dev libpcap-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /tools/bin
+# massdns v1.1.0
+RUN git init -q /build/massdns && cd /build/massdns && \
+    git remote add origin https://github.com/blechschmidt/massdns.git && \
+    git fetch -q --depth 1 origin ca8114164361f6a296399d8160bb07d55bdc4843 && git checkout -q FETCH_HEAD && \
+    make && cp bin/massdns /tools/bin/massdns
+# masscan - its last tagged release is 1.3.2 from 2021, so a default-branch commit (2026-10-05)
+RUN git init -q /build/masscan && cd /build/masscan && \
+    git remote add origin https://github.com/robertdavidgraham/masscan.git && \
+    git fetch -q --depth 1 origin 8e6b3b0c07a81e8ea61d557c06134a21a6881614 && git checkout -q FETCH_HEAD && \
+    make -j"$(nproc)" && cp bin/masscan /tools/bin/masscan
+
+# -- Stage 4: wordlists, pinned to commits, each file checksum-verified -----------
+FROM debian:trixie-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad AS wordlists
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
+ARG SECLISTS=190c6f7bd58c847ceadfe57d9853592737f059e8
+ARG RESOLVERS=874845058ad1370c2203af6262b2b9e2d12f6a9c
+WORKDIR /tools/wordlists
+RUN set -e; \
+    base="https://raw.githubusercontent.com/danielmiessler/SecLists/${SECLISTS}/Discovery"; \
+    curl -fsSL "$base/Web-Content/common.txt" -o common.txt; \
+    curl -fsSL "$base/Web-Content/raft-medium-directories.txt" -o raft-medium-directories.txt; \
+    curl -fsSL "$base/Web-Content/raft-medium-files.txt" -o raft-medium-files.txt; \
+    curl -fsSL "$base/Web-Content/burp-parameter-names.txt" -o burp-parameter-names.txt; \
+    curl -fsSL "$base/DNS/subdomains-top1million-5000.txt" -o subdomains-top1million-5000.txt; \
+    curl -fsSL "$base/DNS/subdomains-top1million-20000.txt" -o subdomains-top1million-20000.txt; \
+    curl -fsSL "$base/DNS/subdomains-top1million-110000.txt" -o subdomains-top1million-110000.txt; \
+    curl -fsSL "https://raw.githubusercontent.com/trickest/resolvers/${RESOLVERS}/resolvers.txt" -o resolvers.txt; \
+    printf '%s\n' \
+      "fc320bacd30d93f5080029912b93667cd739401f81634579a7125fc0c027e6d5  common.txt" \
+      "a9626959f818d9e198259665c5a88053b7b061c538f46da215d172bcba305fe9  raft-medium-directories.txt" \
+      "0a0ae977d8227256d4c4f3a2b96ddbe620c37bba861fe3d28eb529e1aa929e14  raft-medium-files.txt" \
+      "91f7e457415ffd0e4278d13887804036b62240a135a022a6fd6e831a7151899f  burp-parameter-names.txt" \
+      "e331367c140298cb179114fdeefa78f58f696219f0dec017a28bb79487cfcf19  subdomains-top1million-5000.txt" \
+      "685fad386d19c3b7ecbcd18645606bc5c47a3b2339fa3d79f44c46bd9e79c1ef  subdomains-top1million-20000.txt" \
+      "7b8359732bdee838ecdb9ef2cd3bb9a792347dab0457fd9b33a9b152d8dc238d  subdomains-top1million-110000.txt" \
+      "491939b1e7723554a66a5e6f2561ac48baa56f656f93d1d57781841083d58c64  resolvers.txt" \
+      | sha256sum -c -
+
+# -- Stage 5: pre-built tools (dalfox is Rust, trufflehog ships a Go binary) - release binaries checksum-verified, repos pinned to commits --
+FROM debian:trixie-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad AS tool-downloader
+RUN apt-get update && apt-get install -y --no-install-recommends git curl unzip ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /tools/bin /tools/dl
+WORKDIR /tools/dl
+# dalfox v3.2.4 (Rust rewrite; musl build is fully static)
+RUN curl -fsSL -o dalfox.tgz https://github.com/hahwul/dalfox/releases/download/v3.2.4/dalfox-v3.2.4-linux-x86_64-musl.tar.gz && \
+    echo "c11cfd2f8261973f0a2a2a1eba5a147ce77712a29acfa6343f9847fb8bb7eca2  dalfox.tgz" | sha256sum -c - && \
+    tar xzf dalfox.tgz && cp dalfox-v3.2.4-linux-x86_64-musl/dalfox /tools/bin/dalfox
+# trufflehog v3.99.2 (maintained Go TruffleHog; replaces the abandoned PyPI v2)
+RUN curl -fsSL -o th.tgz https://github.com/trufflesecurity/trufflehog/releases/download/v3.99.2/trufflehog_3.99.2_linux_amd64.tar.gz && \
+    echo "3c7b0d1dc4278294269bfdd7594bca8bb28c78da0a4a06ad202ded37b48deca4  th.tgz" | sha256sum -c - && \
+    tar xzf th.tgz trufflehog && mv trufflehog /tools/bin/trufflehog
+# git-hosted tools, pinned to the commit behind each release tag, .git removed afterwards
+RUN set -e; \
+    pin() { d="$1"; url="$2"; sha="$3"; mkdir -p "$d"; git -C "$d" init -q; git -C "$d" remote add origin "$url"; \
+            git -C "$d" fetch -q --depth 1 origin "$sha"; git -C "$d" checkout -q FETCH_HEAD; \
+            test "$(git -C "$d" rev-parse HEAD)" = "$sha"; rm -rf "$d/.git"; }; \
+    pin /tools/nuclei-templates https://github.com/projectdiscovery/nuclei-templates.git f8b8b8dcd70d93826c3767e1829ef8243af9f03b; \
+    pin /tools/testssl.sh       https://github.com/testssl/testssl.sh.git               97763a411c525720a5f9bd9d2cded416b10f210a; \
+    pin /tools/nikto            https://github.com/sullo/nikto.git                      d201dac320fc5187eac75e723dd07a716196ec5a
+RUN rm -rf /tools/dl
+
+# -- Stage 6: runtime - Debian 13, same Python as the base so the copied venv resolves --
+FROM python:3.12-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
+
+LABEL org.opencontainers.image.title="SpiderFoot Active Scanner" \
+      org.opencontainers.image.description="Celery worker for active scanning with the recon toolkit"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libxml2 libxslt1.1 libjpeg62-turbo zlib1g dnsutils ca-certificates openssl \
+    nmap nbtscan onesixtyone whatweb sslscan bsdmainutils \
+    libpcap0.8t64 libcap2-bin \
+    chromium git \
+    perl libnet-ssleay-perl libwhisker2-perl libjson-perl libxml-writer-perl \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Recreate the non-root spiderfoot user (must match the base image)
+RUN addgroup --system spiderfoot && \
+    adduser --system --ingroup spiderfoot --home /home/spiderfoot \
+            --shell /usr/sbin/nologin --gecos "SpiderFoot" spiderfoot
+
+# Application venv, source and entrypoint come from the (pip-free) base; the tools venv from stage 1
+COPY --from=spiderfoot-base /opt/venv                           /opt/venv
+COPY --from=spiderfoot-base /home/spiderfoot                    /home/spiderfoot
+COPY --from=spiderfoot-base /usr/local/bin/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY --from=pytools         /opt/venv-tools                     /opt/venv-tools
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh && chown -R spiderfoot:spiderfoot /home/spiderfoot
+
+# Compiled / downloaded tools
+COPY --from=go-builder      /tools/bin/          /tools/bin/
+COPY --from=c-builder       /tools/bin/          /tools/bin/
+COPY --from=tool-downloader /tools/bin/          /tools/bin/
+COPY --from=tool-downloader /tools/nuclei-templates /tools/nuclei-templates
+COPY --from=tool-downloader /tools/testssl.sh    /tools/testssl.sh
+COPY --from=tool-downloader /tools/nikto         /tools/nikto
+COPY --from=wordlists       /tools/wordlists     /tools/wordlists
+
+# App venv first so a bare `python` is the application's; the tools venv only supplies its own console scripts.
+# The stack runs this image as uid 1000 (not the image's own `spiderfoot` user), which has no
+# passwd entry, so without this $HOME is "/" - read-only. katana, nuclei and the other
+# ProjectDiscovery tools write their config under $HOME/.config at start-up and refuse to run
+# if they cannot. The stack mounts tmpfs over /home/spiderfoot/.config, .cache and .pdcp.
+ENV HOME=/home/spiderfoot
+ENV PATH="/tools/bin:/opt/venv/bin:/opt/venv-tools/bin:$PATH" \
+    VIRTUAL_ENV="/opt/venv" \
+    PYTHONPATH="/home/spiderfoot" \
+    PYTHONUNBUFFERED=1
+WORKDIR /home/spiderfoot
+
+# Nikto symlink; all tools executable
+RUN ln -sf /tools/nikto/program/nikto.pl /usr/local/bin/nikto && \
+    chmod +x /tools/nikto/program/nikto.pl && chmod +x /tools/bin/*
+
+# Raw-socket capability for the network scanners that need it - CAP_NET_RAW and nothing else.
+# (Upstream granted cap_net_admin too, which none of them use; and massdns only opens UDP
+# sockets, so it needs no capability at all.) A file capability only takes effect if the
+# container's bounding set contains it, so the stack must `cap_add: NET_RAW` for the worker;
+# without it these binaries refuse to start (exit 126) rather than run unprivileged.
+# Fails the build if setcap fails or the result is not what is expected.
+RUN setcap cap_net_raw=eip /usr/bin/nmap && \
+    setcap cap_net_raw=eip /tools/bin/naabu && \
+    setcap cap_net_raw=eip /tools/bin/masscan && \
+    for b in /usr/bin/nmap /tools/bin/naabu /tools/bin/masscan; do \
+        getcap "$b" | grep -q 'cap_net_raw=eip$' || { echo "setcap check failed: $b"; exit 1; }; \
+    done && \
+    test -z "$(getcap /tools/bin/massdns)"
+
+# Hardening: no package installers in the running container (apt, dpkg, and the base image's
+# own pip), but KEEP /var/lib/dpkg/status so the image can be scanned (see Dockerfile.base).
+RUN rm -rf /usr/local/lib/python3.12/site-packages/pip /usr/local/lib/python3.12/site-packages/pip-*.dist-info \
+           /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.12 /var/lib/apt /var/cache/apt && \
+    find /var/lib/dpkg -mindepth 1 ! -name status -delete 2>/dev/null || true && \
+    rm -f /usr/bin/dpkg /usr/bin/dpkg-deb /usr/bin/dpkg-query /usr/bin/dpkg-split /usr/bin/dpkg-trigger \
+          /usr/bin/apt /usr/bin/apt-get /usr/bin/apt-cache /usr/bin/apt-config /usr/bin/apt-mark
+
+ENV SF_SERVICE_ROLE=active-scanner \
+    SF_WORDLISTS_PATH=/tools/wordlists \
+    CELERY_WORKER_CONCURRENCY=2
+
+USER spiderfoot
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD python -m celery -A spiderfoot.celery_app:celery_app inspect ping --timeout 5 || exit 1
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+
+# Celery worker - scan queue only
+CMD ["python", "-m", "celery", \
+     "-A", "spiderfoot.celery_app:celery_app", \
+     "worker", \
+     "--loglevel=info", \
+     "--queues=scan", \
+     "--concurrency=2", \
+     "--hostname=active-scanner@%h", \
+     "--without-heartbeat", \
+     "--without-mingle"]

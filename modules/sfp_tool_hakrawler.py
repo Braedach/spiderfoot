@@ -22,7 +22,7 @@ class sfp_tool_hakrawler(SpiderFootAsyncPlugin):
     meta = {
         "name": "Tool - hakrawler",
         "summary": "Simple, fast web crawler for URL and endpoint discovery.",
-        "flags": ["tool", "slow", "invasive"],
+        "flags": ["deprecated", "tool", "slow", "invasive"],
         "useCases": ["Investigate", "Footprint"],
         "categories": ["Crawling and Scanning"],
         "toolDetails": {
