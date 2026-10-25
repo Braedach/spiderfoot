@@ -374,6 +374,14 @@ export const dataApi = {
   entityTypes: (signal?: AbortSignal) =>
     api.get<{ entity_types: string[] }>('/api/data/entity-types', { signal }).then((r) => r.data),
 
+  /** Which modules can ever actually fire for this target, per its detected
+   * type — null `reachable` means the type couldn't be determined, which
+   * callers should treat as "don't filter anything", not "nothing fires". */
+  reachableModules: (target: string, signal?: AbortSignal) =>
+    api.get<{ target_type: string | null; reachable: string[] | null }>(
+      '/api/data/modules/reachable', { params: { target }, signal },
+    ).then((r) => r.data),
+
   riskLevels: (signal?: AbortSignal) =>
     api.get<{ risk_levels: string[] }>('/api/data/risk-levels', { signal }).then((r) => r.data),
 

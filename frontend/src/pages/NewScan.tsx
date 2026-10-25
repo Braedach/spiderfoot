@@ -8,9 +8,9 @@ import {
 import type { StealthLevelName } from '../lib/api';
 import {
   Radar, Lock, Unlock, Zap,
-  ShieldCheck, FileText, Loader2, Layers, Shield,
+  ShieldCheck, FileText, Loader2, Layers, Shield, Info,
 } from 'lucide-react';
-import { PageHeader, Tabs, SearchInput, Toast, type ToastType } from '../components/ui';
+import { PageHeader, Tabs, SearchInput, Toast, useDebounce, type ToastType } from '../components/ui';
 import { moduleCredentialStatus } from '../lib/settingsMeta';
 
 type TabKey = 'usecase' | 'profile' | 'data' | 'module';
@@ -69,6 +69,21 @@ export default function NewScanPage() {
   });
 
   const profiles: ScanProfile[] = profilesData?.profiles ?? [];
+
+  /* Which modules can ever fire for this target, per its detected type —
+   * computed server-side from the same watches/produces graph the scan
+   * engine itself runs on (not the quick client-side regex above, which is
+   * just a display hint). Debounced so it doesn't fire on every keystroke;
+   * null while unknown/undetected means "don't grey anything out". */
+  const debouncedTarget = useDebounce(target.trim(), 400);
+  const { data: reachabilityData } = useQuery({
+    queryKey: ['reachable-modules', debouncedTarget],
+    queryFn: ({ signal }) => dataApi.reachableModules(debouncedTarget, signal),
+    enabled: debouncedTarget.length > 0,
+  });
+  const reachableModules = reachabilityData?.reachable
+    ? new Set(reachabilityData.reachable)
+    : null;
 
   const modules: Module[] = modulesData?.items ?? [];
   const entityTypes: string[] = entityData?.entity_types ?? [];
@@ -442,6 +457,13 @@ export default function NewScanPage() {
                 </button>
               </div>
 
+              {reachableModules && (
+                <p className="flex items-center gap-1.5 text-xs text-dark-500 mb-3">
+                  <Info className="h-3.5 w-3.5 flex-shrink-0" />
+                  Dimmed modules won&apos;t do anything for this target ({reachabilityData?.target_type?.replace(/_/g, ' ').toLowerCase()}) — they&apos;re still selectable, just structurally unable to fire.
+                </p>
+              )}
+
               <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
                 {grouped.map(([cat, mods]) => (
                   <div key={cat}>
@@ -449,6 +471,7 @@ export default function NewScanPage() {
                     <div className="space-y-1">
                       {mods.map((m) => {
                         const credStatus = moduleCredentialStatus(m.opts);
+                        const isUnreachable = reachableModules !== null && !reachableModules.has(m.name);
                         return (
                           <label
                             key={m.name}
@@ -456,7 +479,7 @@ export default function NewScanPage() {
                               selectedModules.has(m.name)
                                 ? 'border-spider-500/50 bg-spider-600/10'
                                 : 'border-transparent hover:bg-dark-700/30'
-                            }`}
+                            } ${isUnreachable ? 'opacity-40' : ''}`}
                           >
                             <input
                               type="checkbox"
@@ -467,6 +490,11 @@ export default function NewScanPage() {
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
                                 <span className="text-sm text-foreground font-medium">{m.name.replace('sfp_', '')}</span>
+                                {isUnreachable && (
+                                  <span className="text-dark-500" title={`Won't run for this target type (${reachabilityData?.target_type}) — nothing in the pipeline would ever hand it a relevant event`}>
+                                    <Info className="h-3 w-3" />
+                                  </span>
+                                )}
                                 {credStatus === 'missing' && (
                                   <span className="text-yellow-500" title="Needs an API key — set it on Data Source Credentials">
                                     <Lock className="h-3 w-3" />

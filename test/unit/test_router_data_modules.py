@@ -199,3 +199,73 @@ class TestModuleOptsFreshness:
         assert r.status_code == 200
         dnsresolve = next(m for m in r.json()["items"] if m["name"] == "sfp_dnsresolve")
         assert dnsresolve["opts"]["verify"] is False
+
+
+# A small, deliberately multi-hop graph: sfp_portscan is only reachable from
+# an INTERNET_NAME/DOMAIN_NAME target *through* sfp_dnsresolve's output, not
+# directly — proves the reachability walk is transitive, not one-hop.
+_REACHABILITY_MODULES = {
+    "sfp_dnsresolve": {"opts": {}, "optdescs": {}, "cats": ["Passive"], "flags": [],
+                        "consumes": ["INTERNET_NAME", "DOMAIN_NAME"], "provides": ["IP_ADDRESS"]},
+    "sfp_portscan": {"opts": {}, "optdescs": {}, "cats": ["Investigate"], "flags": ["invasive"],
+                      "consumes": ["IP_ADDRESS"], "provides": ["TCP_PORT_OPEN"]},
+    "sfp_whois": {"opts": {}, "optdescs": {}, "cats": ["Footprint"], "flags": [],
+                  "consumes": ["DOMAIN_NAME"], "provides": ["RAW_RIR_DATA"]},
+    "sfp_phonelookup": {"opts": {}, "optdescs": {}, "cats": ["Footprint"], "flags": [],
+                         "consumes": ["PHONE_NUMBER"], "provides": ["HUMAN_NAME"]},
+    "sfp__stor_db": {"opts": {}, "optdescs": {}, "cats": [], "flags": [],
+                      "consumes": ["*"], "provides": []},
+}
+
+
+@pytest.fixture
+def reachability_client():
+    fake_cfg = MagicMock()
+    fake_cfg.get_config.return_value = {"__modules__": _REACHABILITY_MODULES}
+    with patch.object(data, "get_app_config", lambda: fake_cfg):
+        app = FastAPI()
+        app.dependency_overrides[get_api_key] = lambda: "test-key"
+        app.include_router(data.router)
+        yield TestClient(app)
+
+
+class TestReachableModules:
+    """GET /data/modules/reachable — the 2026-10-25 feedback item: tools
+    were offered regardless of target type even though most structurally
+    can never fire for it. This computes the real answer by walking the
+    same watches/produces graph the scan engine itself runs on.
+    """
+
+    def test_domain_target_reaches_direct_and_transitive_modules(self, reachability_client):
+        r = reachability_client.get("/data/modules/reachable", params={"target": "example.com"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["target_type"] == "INTERNET_NAME"
+        # Direct (watches DOMAIN_NAME) and transitive (watches IP_ADDRESS,
+        # which only sfp_dnsresolve's *output* produces) both included.
+        assert "sfp_dnsresolve" in body["reachable"]
+        assert "sfp_whois" in body["reachable"]
+        assert "sfp_portscan" in body["reachable"]
+        # Unrelated to a domain target at any distance.
+        assert "sfp_phonelookup" not in body["reachable"]
+
+    def test_wildcard_consumer_always_reachable(self, reachability_client):
+        r = reachability_client.get("/data/modules/reachable", params={"target": "example.com"})
+        assert "sfp__stor_db" in r.json()["reachable"]
+        r2 = reachability_client.get("/data/modules/reachable", params={"target": "+1-555-0100"})
+        assert "sfp__stor_db" in r2.json()["reachable"]
+
+    def test_phone_target_is_isolated_from_domain_chain(self, reachability_client):
+        r = reachability_client.get("/data/modules/reachable", params={"target": "+1-555-0100"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["target_type"] == "PHONE_NUMBER"
+        assert body["reachable"] == ["sfp__stor_db", "sfp_phonelookup"]
+
+    def test_unrecognised_target_returns_null_rather_than_empty(self, reachability_client):
+        # A target string targetTypeFromString can't classify must mean
+        # "can't tell, don't filter anything" to the frontend — not "nothing
+        # is reachable", which would grey out every module.
+        r = reachability_client.get("/data/modules/reachable", params={"target": ""})
+        assert r.status_code == 200
+        assert r.json() == {"target_type": None, "reachable": None}

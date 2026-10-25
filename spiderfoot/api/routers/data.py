@@ -10,6 +10,8 @@ from ..pagination import PaginationParams, paginate
 from ..schemas import RiskLevelsResponse
 from spiderfoot.sflib.core import SpiderFoot
 from spiderfoot.db import SpiderFootDb
+from spiderfoot.helpers import SpiderFootHelpers
+from spiderfoot.plugins.module_resolver import ModuleResolver, ModuleDescriptor
 import logging
 
 router = APIRouter(dependencies=[Depends(get_api_key)])
@@ -123,6 +125,83 @@ def _refresh_module_opts(module_list: list[dict]) -> None:
             if db_value is not None:
                 new_opts[opt_key] = coerce_like(db_value, val)
         m["opts"] = new_opts
+
+
+@router.get("/data/modules/reachable")
+async def get_reachable_modules(
+    target: str,
+    api_key: str = optional_auth_dep,
+) -> dict:
+    """Which modules can ever actually fire for a given target.
+
+    SpiderFoot's module system is event-driven: a module only runs when it
+    receives an event type it watches, so a module unrelated to the target
+    (e.g. a web-crawling tool against a bare phone number) simply never
+    fires — enabling it isn't *wrong*, just not useful. This computes the
+    real answer by walking the same watches/produces graph the scan engine
+    itself is driven by, starting from the exact root event(s) a scan
+    against this target would seed (spiderfoot/scan/scanner.py): the
+    target's detected type, plus DOMAIN_NAME too for a registrable-domain
+    INTERNET_NAME target, since the scanner seeds both for those.
+
+    Returns `target_type: null` (and no reachable list) when the target
+    string doesn't match any known type — the caller should treat that as
+    "can't tell, don't filter anything" rather than "nothing is reachable".
+    """
+    target_type = SpiderFootHelpers.targetTypeFromString(target)
+    if not target_type:
+        return {"target_type": None, "reachable": None}
+
+    try:
+        config = get_app_config()
+        modules = config.get_config().get("__modules__", {})
+        resolver = ModuleResolver()
+        for name, m in modules.items():
+            if not isinstance(m, dict):
+                continue
+            resolver.register(ModuleDescriptor(
+                name=name,
+                watched_events=list(m.get("consumes") or []),
+                produced_events=list(m.get("provides") or []),
+            ))
+
+        roots = {target_type}
+        if target_type == "INTERNET_NAME":
+            # scanner.py also seeds DOMAIN_NAME for a registrable domain —
+            # mirror that rather than require an exact TLD check here too,
+            # since either root being reachable is what matters.
+            roots.add("DOMAIN_NAME")
+
+        reachable = _forward_reachable_modules(resolver, roots)
+        return {"target_type": target_type, "reachable": sorted(reachable)}
+    except Exception as e:
+        log.exception("Failed to compute reachable modules for target type %s", target_type)
+        raise HTTPException(status_code=500, detail="Failed to compute reachable modules") from e
+
+
+def _forward_reachable_modules(resolver: ModuleResolver, root_events: set[str]) -> set[str]:
+    """BFS forward from `root_events` through the watches/produces graph:
+    a module is reachable once something it watches is reachable, and
+    everything it produces becomes reachable in turn. Modules that watch
+    "*" (storage/export modules wanting every event) are always reachable,
+    regardless of target type.
+    """
+    reachable_modules: set[str] = set(resolver.consumers_of("*"))
+    seen_events = set(root_events)
+    frontier = set(root_events)
+    while frontier:
+        new_events: set[str] = set()
+        for evt in frontier:
+            for mod in resolver.consumers_of(evt):
+                if mod in reachable_modules:
+                    continue
+                reachable_modules.add(mod)
+                desc = resolver.get_module(mod)
+                if desc:
+                    new_events |= set(desc.produced_events) - seen_events
+        seen_events |= new_events
+        frontier = new_events
+    return reachable_modules
 
 
 @router.get("/data/sources")
