@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from ..dependencies import get_app_config, optional_auth, get_api_key
+from ..dependencies import get_app_config, optional_auth, get_api_key, get_fresh_config_values, coerce_like
 from ..pagination import PaginationParams, paginate
 from ..schemas import RiskLevelsResponse
 from spiderfoot.sflib.core import SpiderFoot
@@ -89,10 +89,40 @@ async def list_modules(
             ]
         else:
             module_list = list(modules) if modules else []
+        _refresh_module_opts(module_list)
         return paginate(module_list, params)
     except Exception as e:
         log.exception("Failed to list modules")
         raise HTTPException(status_code=500, detail="Failed to list modules") from e
+
+
+def _refresh_module_opts(module_list: list[dict]) -> None:
+    """Overlay each module's opts with a fresh read from the database —
+    see `get_fresh_config_values` in dependencies.py for why: the
+    in-memory config this list is otherwise built from is a per-API-worker
+    cache that can be stale relative to a save made on a different worker.
+
+    Builds a new `opts` dict per module rather than mutating in place —
+    `m["opts"]` is the *same object* as the API worker's long-lived cached
+    config (sf.getModules() doesn't copy it), which is also what a running
+    scan reads its module options from. Mutating it in place here would
+    make a GET request for display purposes a backdoor writer into live
+    scan state, not just this HTTP response.
+    """
+    fresh = get_fresh_config_values()
+    if not fresh:
+        return
+    for m in module_list:
+        opts = m.get("opts")
+        name = m.get("name")
+        if not isinstance(opts, dict) or not name:
+            continue
+        new_opts = dict(opts)
+        for opt_key, val in new_opts.items():
+            db_value = fresh.get(f"{name}:{opt_key}")
+            if db_value is not None:
+                new_opts[opt_key] = coerce_like(db_value, val)
+        m["opts"] = new_opts
 
 
 @router.get("/data/sources")

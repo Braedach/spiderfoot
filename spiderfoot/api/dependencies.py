@@ -337,6 +337,73 @@ def reset_app_config() -> None:
     app_config = None
 
 
+# ---------------------------------------------------------------------------
+# Cross-worker config freshness
+# ---------------------------------------------------------------------------
+#
+# `app_config` above is a per-process singleton. With more than one API
+# worker (SF_API_WORKERS > 1, the normal deployment), each worker is a
+# separate OS process with its own independent copy, loaded from the
+# database once at that worker's own startup and never refreshed after.
+# A save on one worker writes through to the database correctly
+# (Config.save_config), but a read served by a *different* worker still
+# returns whatever was in memory at ITS startup — invisible until that
+# worker restarts. Which worker serves which request is effectively
+# random, so a just-saved value appears to flicker between "there" and
+# "gone" across requests. Found 2026-10-25 via Data Source Credentials
+# looking inconsistent after saving Shodan/Censys keys.
+#
+# Rather than reload the whole Config() (expensive — see its __init__)
+# or restructure worker config sharing (a bigger change than this
+# warrants), the callers that show live values (GET /api/config,
+# GET /api/data/modules) overlay a fresh, cheap read straight from
+# tbl_config on top of the possibly-stale in-memory snapshot, so a save
+# is visible on the very next read regardless of which worker serves it.
+
+def get_fresh_config_values() -> dict[str, str]:
+    """Fresh read of every persisted config value straight from the
+    database, bypassing the per-process cache above entirely.
+
+    Keyed exactly as ``SpiderFootDb.configGet()`` returns them:
+    ``"<module_name>:<opt_name>"`` for module-scoped rows, bare
+    ``"<opt_name>"`` for GLOBAL ones. Values are always strings (the
+    `val` column), so coerce with `coerce_like` before display.
+    """
+    try:
+        dbh = SpiderFootDb(get_app_config().get_config())
+        return dbh.configGet()
+    except Exception:
+        logging.getLogger("spiderfoot.api").warning(
+            "Failed to read fresh config values from the database; "
+            "falling back to the (possibly stale) in-memory config.",
+            exc_info=True,
+        )
+        return {}
+
+
+def coerce_like(raw: str, like: Any) -> Any:
+    """Coerce a raw string value (as stored in tbl_config) to match the
+    type already on `like` (the in-memory default/previous value for
+    that same option) — so overlaying a fresh DB value never changes an
+    option's type out from under code that expects e.g. a bool or int.
+    Unknown/unmatched types, and values that don't parse, pass through
+    as the original string.
+    """
+    if isinstance(like, bool):
+        return raw.lower() in ("true", "1", "yes", "on")
+    if isinstance(like, int) and not isinstance(like, bool):
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return raw
+    if isinstance(like, float):
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return raw
+    return raw
+
+
 async def get_api_key(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str | None:
     """Validate and return the API key from request credentials."""
     if not credentials:

@@ -14,6 +14,7 @@ const ScanDetailPage = lazy(() => import('./pages/ScanDetail'));
 const NewScanPage = lazy(() => import('./pages/NewScan'));
 const SettingsPage = lazy(() => import('./pages/Settings'));
 const DataSourceCredentialsPage = lazy(() => import('./pages/DataSourceCredentials'));
+const AIConnectionsPage = lazy(() => import('./pages/AIConnections'));
 const WorkspacesPage = lazy(() => import('./pages/Workspaces'));
 const ModulesPage = lazy(() => import('./pages/Modules'));
 const DocumentationPage = lazy(() => import('./pages/Documentation'));
@@ -118,6 +119,9 @@ export default function App() {
 
         {/* Data Source Credentials — third-party API keys/tokens for scan modules */}
         <Route path="credentials" element={<Suspense fallback={<LazyFallback />}><DataSourceCredentialsPage /></Suspense>} />
+
+        {/* AI Connections — the LLM provider for AI reports and RAG analysis */}
+        <Route path="ai-connections" element={<Suspense fallback={<LazyFallback />}><AIConnectionsPage /></Suspense>} />
 
         {/* Schedules — recurring scan management */}
         <Route path="schedules" element={<Suspense fallback={<LazyFallback />}><SchedulesPage /></Suspense>} />

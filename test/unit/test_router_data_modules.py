@@ -141,3 +141,61 @@ class TestMetadata:
     ])
     def test_metadata_endpoints(self, client, path):
         assert client.get(path).status_code == 200
+
+
+class TestModuleOptsFreshness:
+    """Regression coverage for the per-API-worker config cache going stale:
+    a save on one worker was invisible to GET /data/modules served by a
+    different worker until that worker restarted (2026-10-25, reported as
+    Data Source Credentials "flickering" between there/not there, and
+    Shodan/Censys keys appearing not to save). GET /data/modules must
+    overlay a fresh database read on top of whatever the in-memory config
+    happens to hold.
+    """
+
+    def test_fresh_db_value_overrides_stale_in_memory_value(self, client):
+        # In-memory config (as mocked by the `client` fixture) says
+        # sfp_whois's "key" opt is blank — but a save on another worker
+        # already wrote a real value to the database.
+        with patch.object(data, "get_fresh_config_values",
+                           lambda: {"sfp_whois:key": "a-real-api-key"}):
+            r = client.get("/data/modules", params={"page_size": 10})
+        assert r.status_code == 200
+        whois = next(m for m in r.json()["items"] if m["name"] == "sfp_whois")
+        assert whois["opts"]["key"] == "a-real-api-key"
+
+    def test_missing_db_row_keeps_in_memory_value(self, client):
+        # No fresh row for this option — untouched, not blanked out.
+        with patch.object(data, "get_fresh_config_values", lambda: {}):
+            r = client.get("/data/modules", params={"page_size": 10})
+        assert r.status_code == 200
+        whois = next(m for m in r.json()["items"] if m["name"] == "sfp_whois")
+        assert whois["opts"]["key"] == ""
+
+    def test_get_fresh_config_values_degrades_gracefully_on_db_error(self):
+        # Isolated unit test of get_fresh_config_values() itself: on a DB
+        # error it must return {} rather than raise, so a caller that
+        # forgets its own try/except (like _refresh_module_opts) still
+        # can't turn a DB hiccup into a 500 on every module listing.
+        import spiderfoot.api.dependencies as deps
+
+        fake_cfg = MagicMock()
+        fake_cfg.get_config.return_value = {}
+
+        def _boom(*a, **kw):
+            raise RuntimeError("db unavailable")
+
+        with patch.object(deps, "get_app_config", lambda: fake_cfg), \
+                patch.object(deps, "SpiderFootDb", _boom):
+            assert deps.get_fresh_config_values() == {}
+
+    def test_fresh_bool_value_is_coerced_not_left_as_string(self, client):
+        # sfp_dnsresolve's "verify" opt is a bool in memory (True); the DB
+        # only ever stores strings. The overlay must coerce back to bool so
+        # frontend/consumer code relying on the type doesn't regress.
+        with patch.object(data, "get_fresh_config_values",
+                           lambda: {"sfp_dnsresolve:verify": "false"}):
+            r = client.get("/data/modules", params={"page_size": 10})
+        assert r.status_code == 200
+        dnsresolve = next(m for m in r.json()["items"] if m["name"] == "sfp_dnsresolve")
+        assert dnsresolve["opts"]["verify"] is False

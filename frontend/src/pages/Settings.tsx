@@ -22,7 +22,7 @@ import { useDocumentTitle } from '../hooks/useDocumentTitle';
 export default function SettingsPage() {
   useDocumentTitle('Settings');
   const queryClient = useQueryClient();
-  const [activeSection, setActiveSection] = useState('global:ai');
+  const [activeSection, setActiveSection] = useState('global:embedding');
   const [search, setSearch] = useState('');
   const [toast, setToast] = useState<{ type: ToastType; message: string } | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -60,6 +60,7 @@ export default function SettingsPage() {
     }
     const items: { key: string; label: string; count: number; isGlobal: boolean }[] = [];
     for (const [groupId, meta] of Object.entries(GLOBAL_GROUPS).sort((a, b) => a[1].order - b[1].order)) {
+      if (meta.hideFromSettingsSidebar) continue;
       const count = groupCounts.get(groupId) ?? 0;
       if (count === 0) continue;
       items.push({ key: `global:${groupId}`, label: meta.label, count, isGlobal: true });
@@ -222,7 +223,7 @@ export default function SettingsPage() {
         className="hidden"
         onChange={onImportFileChange}
       />
-      <PageHeader title="Settings" subtitle="Platform configuration, grouped by subsystem. Module API keys live on Data Source Credentials.">
+      <PageHeader title="Settings" subtitle="Platform configuration, grouped by subsystem. Module API keys live on Data Source Credentials; the LLM provider on AI Connections.">
         <div className="flex gap-2">
           <button className="btn-secondary text-sm" onClick={handleImport}>
             <Upload className="h-3.5 w-3.5" /> Import
