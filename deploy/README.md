@@ -273,6 +273,17 @@ and checksum-verified; Python tools live in their own hash-locked venv.
   module suite (1387 passed) clean after. Not in any built image yet - lands
   in the build after `rc.5`. `wappalyzer`'s gap is unrelated (needs an API
   key, not a path) and is a user decision, not a code fix.
+- **2026-10-25: `rc.5` proven end to end against two real targets.** OWASP
+  Juice Shop (`rc5-juiceshop`): `FINISHED`, ~40 minutes, 839 events. Then a
+  live, authorised external target, `demo.testfire.net` (`rc5-demotestfire-pass1`,
+  the 27-module HTTP/DNS/TLS-only set, port-scanners deliberately excluded for
+  this first pass): `FINISHED`, ~2 hours, 5,324 events, with the UDM SE
+  gateway's IDS/IPS watched live throughout and clean the whole run. Both runs
+  surfaced the five-tool path-default gap above, now fixed. With the backend
+  now validated on real targets, work has moved to the GUI: a Settings/API-key
+  cleanup is underway (see "Frontend" below), and further validation passes
+  (a port-scanner pass against `demo.testfire.net`, more external targets) are
+  still to come.
 - **Accepted, not fixed:** gosu (Go 1.24.6) in every Postgres image and Node
   packages in Qdrant's SBOM file: neither is ours to patch; revisit when the
   maintainers ship. Grype's openssl findings are Debian-backport false positives.
@@ -303,6 +314,49 @@ cd deploy && uv pip compile requirements.in -o requirements.lock --generate-hash
 Delete the old lock first (otherwise uv keeps its pins). Re-compile the tools
 lock the same way from `requirements-tools.in`. Then `publish.sh` rebuilds and
 gates; nothing is pushed on a failure.
+
+## Frontend
+
+**2026-10-25, in progress:** with the backend proven end to end (see "Active
+scanner" above), attention has moved to the React GUI (`frontend/`). First
+problem: `Settings` mixed the ~124 third-party API keys scan modules need
+(Shodan, Censys, VirusTotal, etc.) into one long alphabetical list with every
+other module, including ones with nothing to configure at all — and that list
+sat right next to a nav item called "API Keys" that was actually something
+else entirely: SpiderFoot's own REST API bearer tokens, unrelated to any
+module. Two different things sharing one name, in adjacent nav slots.
+
+Fixed so far:
+- A new **Data Source Credentials** page (`/credentials`) lists just the
+  ~124 credential-bearing modules, searchable, with a configured/not-configured
+  status per module. `Settings` no longer shows a module whose only options
+  are credentials; a module with both credential and non-credential options
+  still shows the latter in Settings, with a link across to Credentials for
+  the former.
+- The old "API Keys" nav item is renamed **Access Tokens** (own REST API
+  tokens — unchanged functionality, just no longer competing for the same
+  name as the new page).
+- `Settings`'s ~130-entry flat Global Settings list is now grouped by
+  subsystem (AI Provider, Embeddings, Reranker, Vector Search, Network,
+  Database, Cache & Queue, Object Storage, Elasticsearch, Web & API, Core),
+  mirroring the grouping the backend (`spiderfoot/config/app_config.py`)
+  already carries internally but never exposed. The AI Provider group in
+  particular — `_llm_provider`/`_llm_model`/`_llm_api_key`/etc., the setting
+  that controls whether `sf-agents` calls Anthropic, OpenAI or Ollama — used
+  to sit anonymously among those 130 keys with no description at all; it now
+  has its own labelled, described section.
+- Sensitive-value masking (password input, reveal toggle) is now driven by
+  one shared classifier (`frontend/src/lib/settingsMeta.ts`) instead of a
+  narrower inline regex that missed at least one real case
+  (`_socks5pwd`, the SOCKS proxy password, was never masked before).
+
+Verified by running the actual dev build against the live local stack (not
+just `tsc`/`vitest`) and walking through both pages in the browser: the
+module list, search, the configured/not-configured filter, editing and
+saving a credential against the real API, and the grouped Settings sidebar.
+Not yet done: a pass over `Modules.tsx` and the `NewScan` flow for the same
+"obsolete, broken, or needs addressing" review, which is still open per the
+plan to turn to the GUI once the backend validation looked solid.
 
 ## Deploy
 
