@@ -298,7 +298,7 @@ const GUIDES: Guide[] = [
       },
       {
         title: 'API key configuration',
-        content: `Many modules require API keys for third-party services. Configure these in **Settings > API Keys**.\n\nCommon services requiring keys:\n- Shodan, Censys (infrastructure search)\n- VirusTotal (malware/threat intelligence)\n- Have I Been Pwned (breach data)\n- SecurityTrails (DNS history)\n- Hunter.io (email discovery)\n\nModules degrade gracefully if no API key is provided — they simply skip their lookups.`,
+        content: `Many modules require API keys for third-party services. Configure these on the **Data Source Credentials** page (not Settings > Access Tokens — those are SpiderFoot's own API tokens, a separate thing).\n\nCommon services requiring keys:\n- Shodan, Censys (infrastructure search)\n- VirusTotal (malware/threat intelligence)\n- Have I Been Pwned (breach data)\n- SecurityTrails (DNS history)\n- Hunter.io (email discovery)\n\nModules degrade gracefully if no API key is provided — they simply skip their lookups.`,
       },
       {
         title: 'Module dependencies',
@@ -335,7 +335,7 @@ const GUIDES: Guide[] = [
   },
   {
     title: 'Security & Access',
-    desc: 'Configure SSO, RBAC, API keys, and audit logging for your deployment.',
+    desc: 'Configure SSO, RBAC, access tokens, and audit logging for your deployment.',
     icon: Shield,
     sections: [
       {
@@ -344,15 +344,15 @@ const GUIDES: Guide[] = [
       },
       {
         title: 'Role-Based Access Control (RBAC)',
-        content: `RBAC roles control access to SpiderFoot features:\n\n- **Admin**: Full access — manage users, settings, and all scans\n- **Analyst**: Create and view scans, export results\n- **Viewer**: Read-only access to scan results\n- **API**: Programmatic access with rate limiting\n\nConfigure RBAC in Settings > Access Control. API keys inherit the role of the user who created them.`,
+        content: `RBAC roles control access to SpiderFoot features:\n\n- **Admin**: Full access — manage users, settings, and all scans\n- **Analyst**: Create and view scans, export results\n- **Viewer**: Read-only access to scan results\n- **API**: Programmatic access with rate limiting\n\nConfigure RBAC in Settings > Access Control. Access tokens inherit the role of the user who created them.`,
       },
       {
-        title: 'API key management',
-        content: `API keys provide programmatic access to SpiderFoot:\n\n1. Navigate to **Settings > API Keys**\n2. Click "Generate New Key"\n3. Set permissions and expiration\n4. Store the key securely — it's shown only once\n\nUse the API key in requests via the \`Authorization: Bearer <key>\` header. Keys can be revoked at any time from the Settings page.`,
+        title: 'Access token management',
+        content: `Access tokens provide programmatic access to SpiderFoot's own REST API — distinct from the third-party API keys scan modules need (see Data Source Credentials for those):\n\n1. Navigate to **Access Tokens**\n2. Click "Generate Token"\n3. Set permissions and expiration\n4. Store the token securely — it's shown only once\n\nUse the token in requests via the \`Authorization: Bearer <token>\` header. Tokens can be revoked at any time from the Access Tokens page.`,
       },
       {
         title: 'Audit log review and compliance',
-        content: `SpiderFoot logs all significant actions for audit compliance:\n\n- Scan creation, modification, and deletion\n- User authentication events\n- Configuration changes\n- API key usage\n- Data exports\n\nAccess audit logs via the API: \`GET /api/config/history\`. Logs include timestamps, user identity, action type, and affected resources. Use Grafana dashboards for visual audit trail analysis.`,
+        content: `SpiderFoot logs all significant actions for audit compliance:\n\n- Scan creation, modification, and deletion\n- User authentication events\n- Configuration changes\n- Access token usage\n- Data exports\n\nAccess audit logs via the API: \`GET /api/config/history\`. Logs include timestamps, user identity, action type, and affected resources. Use Grafana dashboards for visual audit trail analysis.`,
       },
     ],
   },

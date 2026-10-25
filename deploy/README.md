@@ -350,10 +350,24 @@ Fixed so far:
   narrower inline regex that missed at least one real case
   (`_socks5pwd`, the SOCKS proxy password, was never masked before).
 
+Found and fixed along the way, unrelated to the rename itself: every
+`RequirePermission`-gated page (Access Tokens, SSO Settings) redirected a
+genuine admin straight back to the Dashboard on a fresh page load. Root
+cause in `frontend/src/lib/auth.ts` — two independent fetches on mount
+(`fetchAuthStatus`, `fetchCurrentUser`) each set the one shared `isLoading`
+flag to `false` on their own completion; whichever resolved first cleared
+it while `user` could still be `null`, so the permission check ran against
+no user and bounced. Fixed by tracking each fetch's completion separately
+and only clearing `isLoading` once both are done (`authStatusLoaded` /
+`userLoaded` in the store). Confirmed reproducible on `/sso-settings`
+(untouched by anything else this session) before fixing, and confirmed
+fixed on both routes after.
+
 Verified by running the actual dev build against the live local stack (not
-just `tsc`/`vitest`) and walking through both pages in the browser: the
-module list, search, the configured/not-configured filter, editing and
-saving a credential against the real API, and the grouped Settings sidebar.
+just `tsc`/`vitest`) and walking through the pages in the browser: the
+credentials module list, search, the configured/not-configured filter,
+editing and saving a credential against the real API, the grouped Settings
+sidebar, and a cold load of both previously-redirecting admin pages.
 Not yet done: a pass over `Modules.tsx` and the `NewScan` flow for the same
 "obsolete, broken, or needs addressing" review, which is still open per the
 plan to turn to the GUI once the backend validation looked solid.

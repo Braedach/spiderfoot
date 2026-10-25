@@ -34,11 +34,11 @@ describe('ApiKeysPage', () => {
 
   it('renders page heading', async () => {
     render(<ApiKeysPage />, { wrapper: createWrapper() });
-    expect(screen.getByText('API Keys')).toBeTruthy();
+    expect(screen.getByText('Access Tokens')).toBeTruthy();
   });
 
   it('sets document title', async () => {
     render(<ApiKeysPage />, { wrapper: createWrapper() });
-    expect(document.title).toContain('API Keys');
+    expect(document.title).toContain('Access Tokens');
   });
 });

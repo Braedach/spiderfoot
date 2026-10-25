@@ -154,17 +154,17 @@ describe('Layout', () => {
     expect(screen.queryByText('SSO Settings')).not.toBeInTheDocument();
   });
 
-  /* ─── API Keys for authenticated users ──────────────────── */
+  /* ─── Access Tokens for authenticated users ─────────────── */
 
-  it('shows API Keys link for any authenticated user', () => {
+  it('shows Access Tokens link for any authenticated user', () => {
     setViewerUser();
     renderLayout();
-    expect(screen.getByText('API Keys')).toBeInTheDocument();
+    expect(screen.getByText('Access Tokens')).toBeInTheDocument();
   });
 
-  it('does not show API Keys when not authenticated', () => {
+  it('does not show Access Tokens when not authenticated', () => {
     renderLayout();
-    expect(screen.queryByText('API Keys')).not.toBeInTheDocument();
+    expect(screen.queryByText('Access Tokens')).not.toBeInTheDocument();
   });
 
   /* ─── User menu ──────────────────────────────────────────── */

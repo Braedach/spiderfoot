@@ -1,15 +1,18 @@
 /**
- * SpiderFoot API Key Management Page
+ * SpiderFoot Access Token Management Page
  *
- * Create, list, revoke, and delete API keys.
- * Users can manage their own keys; admins can manage all keys.
+ * Bearer tokens for programmatic access to SpiderFoot's own REST API —
+ * distinct from the third-party API keys scan modules need (see the
+ * Data Source Credentials page for those).
+ * Create, list, revoke, and delete tokens.
+ * Users can manage their own tokens; admins can manage all tokens.
  * Supports fine-grained permissions: allowed modules/endpoints, rate limits.
  */
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import {
-  Key,
+  Fingerprint,
   Plus,
   Trash2,
   Shield,
@@ -92,7 +95,7 @@ function expiresLabel(ts: number): string {
 // ── Component ────────────────────────────────────────────
 
 export default function ApiKeysPage() {
-  useDocumentTitle('API Keys');
+  useDocumentTitle('Access Tokens');
   const { user: currentUser, hasPermission } = useAuthStore();
   const isAdmin = hasPermission('user:read');
 
@@ -136,11 +139,11 @@ export default function ApiKeysPage() {
   });
 
   const error = queryError
-    ? getErrorMessage(queryError, 'Failed to load API keys')
+    ? getErrorMessage(queryError, 'Failed to load access tokens')
     : revokeMutation.error
-      ? getErrorMessage(revokeMutation.error, 'Failed to revoke key')
+      ? getErrorMessage(revokeMutation.error, 'Failed to revoke token')
       : deleteMutation.error
-        ? getErrorMessage(deleteMutation.error, 'Failed to delete key')
+        ? getErrorMessage(deleteMutation.error, 'Failed to delete token')
         : '';
 
   // ── Filter ─────────────────────────────────────────────
@@ -164,11 +167,12 @@ export default function ApiKeysPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-3">
-            <Key className="h-7 w-7 text-spider-400" />
-            API Keys
+            <Fingerprint className="h-7 w-7 text-spider-400" />
+            Access Tokens
           </h1>
           <p className="text-dark-400 text-sm mt-1">
-            Generate API keys for programmatic access with fine-grained permissions
+            Bearer tokens for programmatic access to the SpiderFoot API, with fine-grained permissions.
+            For a scan module&apos;s own third-party API key, see Data Source Credentials.
           </p>
         </div>
         <button
@@ -176,7 +180,7 @@ export default function ApiKeysPage() {
           className="flex items-center gap-2 px-4 py-2 bg-spider-600 hover:bg-spider-500 text-white rounded-lg text-sm font-medium transition-colors"
         >
           <Plus className="h-4 w-4" />
-          Generate Key
+          Generate Token
         </button>
       </div>
 
@@ -230,14 +234,14 @@ export default function ApiKeysPage() {
                   <td colSpan={8} className="px-4 py-12 text-center text-dark-500">
                     <div className="flex items-center justify-center gap-2">
                       <div className="animate-spin h-5 w-5 border-2 border-spider-500 border-t-transparent rounded-full" />
-                      Loading API keys...
+                      Loading access tokens...
                     </div>
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="px-4 py-12 text-center text-dark-500">
-                    {search ? 'No keys match your search' : 'No API keys yet. Click "Generate Key" to create one.'}
+                    {search ? 'No tokens match your search' : 'No access tokens yet. Click "Generate Token" to create one.'}
                   </td>
                 </tr>
               ) : (
@@ -346,8 +350,8 @@ export default function ApiKeysPage() {
       )}
       {revokeKey && (
         <ConfirmModal
-          title="Revoke API Key"
-          message={<>Are you sure you want to revoke <span className="text-foreground font-medium">{revokeKey.name}</span>? The key will immediately stop working.</>}
+          title="Revoke Access Token"
+          message={<>Are you sure you want to revoke <span className="text-foreground font-medium">{revokeKey.name}</span>? The token will immediately stop working.</>}
           confirmLabel="Revoke"
           confirmClass="bg-yellow-600 hover:bg-yellow-500"
           onConfirm={() => revokeMutation.mutate(revokeKey)}
@@ -356,7 +360,7 @@ export default function ApiKeysPage() {
       )}
       {deleteKey && (
         <ConfirmModal
-          title="Delete API Key"
+          title="Delete Access Token"
           message={<>Are you sure you want to permanently delete <span className="text-foreground font-medium">{deleteKey.name}</span>? This cannot be undone.</>}
           confirmLabel="Delete"
           confirmClass="bg-red-600 hover:bg-red-500"
@@ -419,7 +423,7 @@ function CreateKeyModal({
     mutationFn: (data: Record<string, unknown>) =>
       authApi.createAuthApiKey(data),
     onSuccess: (result: ApiKeyRecord) => onCreated(result),
-    onError: (err: unknown) => setError(getErrorMessage(err, 'Failed to create API key')),
+    onError: (err: unknown) => setError(getErrorMessage(err, 'Failed to create access token')),
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -465,7 +469,7 @@ function CreateKeyModal({
   };
 
   return (
-    <ModalShell title="Generate API Key" onClose={onClose} wide>
+    <ModalShell title="Generate Access Token" onClose={onClose} wide>
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && (
           <div className="flex items-center gap-2 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
@@ -474,12 +478,12 @@ function CreateKeyModal({
           </div>
         )}
 
-        <FormField label="Key Name" hint="A descriptive name for this key (e.g. 'CI/CD Pipeline', 'Monitoring Script')">
-          <input type="text" value={name} onChange={(e) => setName(e.target.value)} required className={inputClass} placeholder="My API Key" />
+        <FormField label="Token Name" hint="A descriptive name for this token (e.g. 'CI/CD Pipeline', 'Monitoring Script')">
+          <input type="text" value={name} onChange={(e) => setName(e.target.value)} required className={inputClass} placeholder="My Access Token" />
         </FormField>
 
         <div className="grid grid-cols-2 gap-4">
-          <FormField label="Role" hint="Maximum permission level for this key">
+          <FormField label="Role" hint="Maximum permission level for this token">
             <div className="relative">
               <select value={role} onChange={(e) => setRole(e.target.value)} className={selectClass}>
                 {availableRoles.map((r) => (
@@ -529,7 +533,7 @@ function CreateKeyModal({
             Cancel
           </button>
           <button type="submit" disabled={createMutation.isPending || !name.trim()} className="px-4 py-2 bg-spider-600 hover:bg-spider-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors">
-            {createMutation.isPending ? 'Generating...' : 'Generate Key'}
+            {createMutation.isPending ? 'Generating...' : 'Generate Token'}
           </button>
         </div>
       </form>
@@ -555,15 +559,15 @@ function KeyCreatedModal({ apiKey, onClose }: { apiKey: ApiKeyRecord; onClose: (
   };
 
   return (
-    <ModalShell title="API Key Created" onClose={onClose}>
+    <ModalShell title="Access Token Created" onClose={onClose}>
       <div className="space-y-4">
         <div className="px-4 py-3 bg-green-500/5 border border-green-500/20 rounded-lg">
           <div className="flex items-center gap-2 text-green-400 text-sm font-medium mb-2">
             <CheckCircle className="h-4 w-4" />
-            Key generated successfully
+            Token generated successfully
           </div>
           <p className="text-xs text-dark-400 mb-3">
-            Copy this key now — it will <span className="text-foreground font-medium">not be shown again</span>.
+            Copy this token now — it will <span className="text-foreground font-medium">not be shown again</span>.
           </p>
           <div className="flex items-center gap-2">
             <code className={clsx(
