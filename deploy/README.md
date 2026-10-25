@@ -392,6 +392,47 @@ with their real successors or dropped where redundant. Verified live:
 19/19 resolve now, confirmed by actually selecting Quick Scan in the
 browser and watching the module count.
 
+**2026-10-25: user feedback after using the merged build — a real backend
+bug, not a UI quirk.** Reported as Data Source Credentials "flickering"
+between there/not-there after refresh, and Shodan/Censys keys "not
+accepting." Root cause: `get_app_config()` (`spiderfoot/api/dependencies.py`)
+is a per-process singleton. `SF_API_WORKERS=4` runs four separate
+`multiprocessing`-fork processes inside the one `sf-api` container
+(confirmed live via `/proc`), each with its own independent copy loaded
+from the database once at *that worker's own startup*. A save writes
+through to Postgres correctly, but a read served by a different worker
+still returns whatever was in memory at its own startup — invisible until
+that worker restarts. Which of the 4 serves any given request is
+effectively random, so a save looked like it "sometimes" worked, for any
+module, not specifically Shodan or Censys. Fixed by overlaying a fresh
+database read on top of the in-memory snapshot in `GET /api/data/modules`
+and `GET /api/config`, coercing types so a bool/int option doesn't turn
+into a string after the round trip through the database's string-only
+storage, and building a *new* opts dict per module rather than mutating in
+place — the in-memory dict is the same object a running scan reads its
+options from, so mutating it in a display-only GET would make that request
+a backdoor writer into live scan state. Verified live, not just unit
+tests: wrote a credential via the real PATCH endpoint, then read it back
+20 times immediately after across whichever of the 4 real worker
+processes answered each request — 100% consistent. Same for Censys's
+two-field credential.
+
+Also from that feedback: the AI provider setting moved out of Settings
+(a group nobody would think to look for) into its own **AI Connections**
+page, with one-click presets for Anthropic, OpenAI, Ollama, Mock, and
+DeepSeek — DeepSeek isn't a distinct backend provider type, its API is
+OpenAI-wire-compatible, so the preset is just `_llm_provider=openai` with
+DeepSeek's base URL pre-filled, no backend change needed. GitHub Copilot
+is explicitly called out as *not* available as a preset: its API needs
+GitHub's own OAuth device-flow sign-in, not a pasted API key, which
+nothing in this backend implements — deliberately not added as a dropdown
+entry that would just silently fail. Checked the fourth feedback item
+(missing geodata in the `rc5-demotestfire-pass1` AI report) against the
+scan's actual module list in Postgres: all 27 modules are HTTP/DNS/TLS
+tooling, no `sfp_ipinfo` or any geo-IP module was ever in scope for that
+deliberately narrow first pass — not a bug, the report is accurately
+reflecting what was actually collected.
+
 ## Deploy
 
 Production (Podman, `stack-podman.yml`) and development (Docker,
