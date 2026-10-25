@@ -433,6 +433,45 @@ tooling, no `sfp_ipinfo` or any geo-IP module was ever in scope for that
 deliberately narrow first pass — not a bug, the report is accurately
 reflecting what was actually collected.
 
+**2026-10-25, same feedback session — target-type-aware module selection.**
+The deeper question behind "the profile issue again": shouldn't the tools
+offered depend on what kind of target you're scanning (domain vs. phone
+number vs. IP, etc.)? They already structurally can't do anything irrelevant
+— every module only fires when it receives an event type it watches, so a
+web-crawling tool enabled against a bare phone number just never runs, it
+doesn't error — but New Scan's module picker had no way to show that, so it
+offered everything regardless of target type with no indication of what
+would actually do anything.
+
+Added `GET /api/data/modules/reachable?target=<value>`: detects the
+target's type with the same `SpiderFootHelpers.targetTypeFromString()` the
+scan engine itself uses, seeds the same root event(s) `scanner.py` would
+seed for a real scan, and walks forward through the watches/produces graph
+to the full transitive closure of modules that could ever receive a
+relevant event. The graph engine for this already existed
+(`spiderfoot/plugins/module_resolver.py`, tested, complete) but — like the
+cross-worker config bug and the module enable/disable toggle found earlier
+this session — was never wired to anything. New Scan's "By Module" tab now
+dims unreachable modules with a tooltip explaining why, while leaving them
+selectable rather than hard-filtering, since target-type detection can be
+ambiguous.
+
+Verified against the real module catalog: a domain target correctly
+excludes exactly the handle-based social-media and wallet-address modules
+(`sfp_reddit`, `sfp_etherscan`, `sfp_telegram`, etc. — 20 of 305).
+Also surfaced something worth knowing rather than quietly shipping around:
+the real module graph is far more interconnected than intuition suggests —
+`sfp_tool_phoneinfoga` produces `RAW_RIR_DATA`, a "hub" event type huge
+numbers of modules watch, so a phone-number target reaches the same 285
+modules a domain target does. That's a real, correct chain (phone → RIR
+text blob → whatever else parses RIR text), not a bug in the walk; it just
+means this mainly catches the clearly-isolated module categories rather
+than being a dramatic filter. Doesn't fully explain "why scans take so
+long" either, by the same logic — an irrelevant module that never receives
+a matching event costs almost nothing sitting idle in this architecture;
+scan duration is driven by the genuinely-relevant active/invasive tools
+actually running, not idle ones.
+
 ## Deploy
 
 Production (Podman, `stack-podman.yml`) and development (Docker,
