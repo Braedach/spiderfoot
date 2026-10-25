@@ -199,8 +199,11 @@ and checksum-verified; Python tools live in their own hash-locked venv.
   `no-new-privileges: false` for this worker only: nmap, naabu and masscan carry
   `cap_net_raw` as a file capability, which the kernel ignores for a non-root
   process while no-new-privileges is on (tested). massdns needs none.
-- **Module paths:** the older tool modules need their `*_path` option set per scan
-  (e.g. `/tools/testssl.sh/testssl.sh`); tools are on `PATH` otherwise.
+- **Module paths:** most tool modules default to blank and auto-search `PATH`.
+  Five don't - `gobuster`, `testssl.sh`, `whatweb`, `wafw00f`, `snallygaster`
+  require an explicit `*_path` with no fallback, and nothing anywhere had ever
+  set one (see the dated entry below); their defaults now point at the real
+  path baked into this image (e.g. `/tools/testssl.sh/testssl.sh`).
 - **Testing an image:** run each tool module against a local server with the
   stack's exact container flags (`--read-only`, `--user 1000:1000`,
   `--cap-drop ALL --cap-add NET_RAW`, the tmpfs mounts). That found a dozen
@@ -252,6 +255,24 @@ and checksum-verified; Python tools live in their own hash-locked venv.
   ten modules (`rc.5`) - the gobuster/ffuf fix above plus everything in the
   commits before it, proven by actually running the thing, not just by the
   gate passing.
+- **2026-10-25: five tool modules had no binary path configured, anywhere, ever.**
+  `gobuster`, `testssl.sh`, `whatweb`, `wafw00f`, `snallygaster` all errored
+  "did not set a path to the tool" during a live external scan. This looked
+  like a scan-profile artifact (the scan used a hand-built module list rather
+  than a named profile) but wasn't - traced `api/routers/scan.py` through
+  `scan/scanner.py` and confirmed a profile only ever selects *which* modules
+  run, never their options, so no profile choice could have fixed this.
+  These five modules, unlike most others here, ship with no `PATH` fallback
+  and require an explicit path; a direct query of `tbl_config` on Postgres
+  confirmed none had ever been set, in any profile, on any scan - including
+  `rc.5`'s own Juice Shop run, which hit the identical five errors unnoticed.
+  Fixed by baking the real, confirmed binary paths from this image into each
+  module's own default `opts` (`/tools/bin/gobuster`,
+  `/tools/testssl.sh/testssl.sh`, `/usr/bin/whatweb`,
+  `/opt/venv-tools/bin/wafw00f`, `/opt/venv-tools/bin/snallygaster`). Full
+  module suite (1387 passed) clean after. Not in any built image yet - lands
+  in the build after `rc.5`. `wappalyzer`'s gap is unrelated (needs an API
+  key, not a path) and is a user decision, not a code fix.
 - **Accepted, not fixed:** gosu (Go 1.24.6) in every Postgres image and Node
   packages in Qdrant's SBOM file: neither is ours to patch; revisit when the
   maintainers ship. Grype's openssl findings are Debian-backport false positives.
