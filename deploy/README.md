@@ -245,6 +245,13 @@ and checksum-verified; Python tools live in their own hash-locked venv.
   regardless of parameter; `sfp_tool_massdns` has no wildcard-DNS defence of
   its own, but nothing in the current `tools-only` profile feeds it a bulk
   candidate list, so this is a flagged, currently-dormant risk, not fixed.
+- **`v6.1.0-bd.1-rc.5`: the first build that produces real, trustworthy results
+  end to end**, not just a clean scan gate. A full `tools-only` run against
+  Juice Shop went from never finishing (16+ hrs, aborted at 22,665 events, on
+  `rc.4`) to `FINISHED` in ~40 minutes with 839 varied, plausible events across
+  ten modules (`rc.5`) - the gobuster/ffuf fix above plus everything in the
+  commits before it, proven by actually running the thing, not just by the
+  gate passing.
 - **Accepted, not fixed:** gosu (Go 1.24.6) in every Postgres image and Node
   packages in Qdrant's SBOM file: neither is ours to patch; revisit when the
   maintainers ship. Grype's openssl findings are Debian-backport false positives.
