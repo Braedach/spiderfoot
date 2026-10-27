@@ -472,6 +472,37 @@ a matching event costs almost nothing sitting idle in this architecture;
 scan duration is driven by the genuinely-relevant active/invasive tools
 actually running, not idle ones.
 
+**2026-10-28: `rc.7` confirmation run against `demo.testfire.net`** (PR #10
+merged, same 27-module scope as the original pass-1 run, for a fair
+comparison): `FINISHED`, 5,328 events in ~2h5m vs. pass-1's 5,324 in ~2h0m —
+consistent, no regression. Zero recurrence of the five-tool "did not set a
+path" errors; the credentials freshness fix held steady (10/10, then
+15/15 consistent reads live against the real deployment, not a hotfix
+mount this time). Found one more layer of the same bug class, fixed
+immediately: `gobuster` got past the path check this time and hit the
+*next* blank-with-no-default required option, `wordlist` — never
+surfaced before because the path check failed first in every earlier
+run, so this one was never reached. Same fix as before: default it to
+the same `/tools/wordlists/common.txt` `ffuf` already correctly uses.
+
+**Also found, not fixed — flagged for follow-up, confirmed unrelated to
+anything changed recently:** no scan since the original Oct 25 pair
+(`rc5-juiceshop`, `rc5-demotestfire-pass1`) has produced any correlation
+results, across three different worker container generations (`rc.5`,
+`rc.6`, this `rc.7` run) — `scanner.py`'s `runCorrelations()` checks
+`tbl_config`'s `__correlationrules__`, which is empty, despite the 97
+correlation rule YAML files being present on disk in every one of those
+images. Neither the API's `Config` class nor (as far as traced so far)
+anything else loads those files into that config key — unlike modules,
+which *do* get a filesystem-fallback load when the DB copy is empty.
+Likely explanation: whatever populated it for the original pair never
+persisted that to the database, so the moment that specific worker
+process was replaced the rules were gone for good, with nothing
+re-seeding them since. Not touched by anything in PR #9 or #10. Needs a
+proper trace of the scan worker's own startup config path (separate
+from the API's) to confirm and fix properly — didn't want to guess at
+a fix for something this is involved without being sure.
+
 ## Deploy
 
 Production (Podman, `stack-podman.yml`) and development (Docker,
