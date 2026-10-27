@@ -20,6 +20,7 @@ import {
   Shield,
   KeyRound,
   Fingerprint,
+  Sparkles,
   Lock,
   Sun,
   Moon,
@@ -53,6 +54,7 @@ const navItems: NavItem[] = [
   { name: 'Documentation', to: '/documentation', icon: BookOpen },
   { name: 'Settings', to: '/settings', icon: Settings },
   { name: 'Data Source Credentials', to: '/credentials', icon: KeyRound },
+  { name: 'AI Connections', to: '/ai-connections', icon: Sparkles },
 ];
 
 interface ServiceLink {

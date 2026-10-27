@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from pydantic import BaseModel, Field
-from ..dependencies import get_app_config, get_config_repository, optional_auth, get_api_key
+from ..dependencies import get_app_config, get_config_repository, optional_auth, get_api_key, get_fresh_config_values, coerce_like
 import logging
 from typing import Any
 
@@ -104,6 +104,14 @@ async def get_config_endpoint(api_key: str = optional_auth_dep) -> ConfigSummary
             k: v for k, v in raw.items()
             if not k.startswith('__') or k in ['__version__', '__database']
         }
+        # Overlay fresh values straight from the database — see
+        # get_fresh_config_values() in dependencies.py: the in-memory
+        # config above is a per-API-worker cache that can be stale
+        # relative to a save made on a different worker.
+        fresh = get_fresh_config_values()
+        for k in list(safe_config.keys()):
+            if ":" not in k and k in fresh:
+                safe_config[k] = coerce_like(fresh[k], safe_config[k])
         return ConfigSummaryResponse(
             summary=cfg.config_summary(),
             config=safe_config,

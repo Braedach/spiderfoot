@@ -64,10 +64,12 @@ interface GroupMeta {
   label: string;
   description: string;
   order: number;
+  /** Has its own dedicated page (AI Connections) — Settings' sidebar skips it rather than show it twice. */
+  hideFromSettingsSidebar?: boolean;
 }
 
 export const GLOBAL_GROUPS: Record<string, GroupMeta> = {
-  ai: { label: 'AI Provider', description: 'The LLM used for report generation and RAG analysis (Anthropic, OpenAI, Ollama, or a local/mock provider).', order: 0 },
+  ai: { label: 'AI Provider', description: 'The LLM used for report generation and RAG analysis (Anthropic, OpenAI, Ollama, or a local/mock provider).', order: 0, hideFromSettingsSidebar: true },
   embedding: { label: 'Embeddings (RAG)', description: 'Model used to turn scan events into vectors for semantic correlation.', order: 1 },
   reranker: { label: 'Reranker (RAG)', description: 'Model used to re-score and filter vector search results.', order: 2 },
   vector: { label: 'Vector Search', description: 'Qdrant vector database and the vector-based correlation engine.', order: 3 },

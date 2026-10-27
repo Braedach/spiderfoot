@@ -5,11 +5,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from ..dependencies import get_app_config, optional_auth, get_api_key
+from ..dependencies import get_app_config, optional_auth, get_api_key, get_fresh_config_values, coerce_like
 from ..pagination import PaginationParams, paginate
 from ..schemas import RiskLevelsResponse
 from spiderfoot.sflib.core import SpiderFoot
 from spiderfoot.db import SpiderFootDb
+from spiderfoot.helpers import SpiderFootHelpers
+from spiderfoot.plugins.module_resolver import ModuleResolver, ModuleDescriptor
 import logging
 
 router = APIRouter(dependencies=[Depends(get_api_key)])
@@ -89,10 +91,117 @@ async def list_modules(
             ]
         else:
             module_list = list(modules) if modules else []
+        _refresh_module_opts(module_list)
         return paginate(module_list, params)
     except Exception as e:
         log.exception("Failed to list modules")
         raise HTTPException(status_code=500, detail="Failed to list modules") from e
+
+
+def _refresh_module_opts(module_list: list[dict]) -> None:
+    """Overlay each module's opts with a fresh read from the database —
+    see `get_fresh_config_values` in dependencies.py for why: the
+    in-memory config this list is otherwise built from is a per-API-worker
+    cache that can be stale relative to a save made on a different worker.
+
+    Builds a new `opts` dict per module rather than mutating in place —
+    `m["opts"]` is the *same object* as the API worker's long-lived cached
+    config (sf.getModules() doesn't copy it), which is also what a running
+    scan reads its module options from. Mutating it in place here would
+    make a GET request for display purposes a backdoor writer into live
+    scan state, not just this HTTP response.
+    """
+    fresh = get_fresh_config_values()
+    if not fresh:
+        return
+    for m in module_list:
+        opts = m.get("opts")
+        name = m.get("name")
+        if not isinstance(opts, dict) or not name:
+            continue
+        new_opts = dict(opts)
+        for opt_key, val in new_opts.items():
+            db_value = fresh.get(f"{name}:{opt_key}")
+            if db_value is not None:
+                new_opts[opt_key] = coerce_like(db_value, val)
+        m["opts"] = new_opts
+
+
+@router.get("/data/modules/reachable")
+async def get_reachable_modules(
+    target: str,
+    api_key: str = optional_auth_dep,
+) -> dict:
+    """Which modules can ever actually fire for a given target.
+
+    SpiderFoot's module system is event-driven: a module only runs when it
+    receives an event type it watches, so a module unrelated to the target
+    (e.g. a web-crawling tool against a bare phone number) simply never
+    fires — enabling it isn't *wrong*, just not useful. This computes the
+    real answer by walking the same watches/produces graph the scan engine
+    itself is driven by, starting from the exact root event(s) a scan
+    against this target would seed (spiderfoot/scan/scanner.py): the
+    target's detected type, plus DOMAIN_NAME too for a registrable-domain
+    INTERNET_NAME target, since the scanner seeds both for those.
+
+    Returns `target_type: null` (and no reachable list) when the target
+    string doesn't match any known type — the caller should treat that as
+    "can't tell, don't filter anything" rather than "nothing is reachable".
+    """
+    target_type = SpiderFootHelpers.targetTypeFromString(target)
+    if not target_type:
+        return {"target_type": None, "reachable": None}
+
+    try:
+        config = get_app_config()
+        modules = config.get_config().get("__modules__", {})
+        resolver = ModuleResolver()
+        for name, m in modules.items():
+            if not isinstance(m, dict):
+                continue
+            resolver.register(ModuleDescriptor(
+                name=name,
+                watched_events=list(m.get("consumes") or []),
+                produced_events=list(m.get("provides") or []),
+            ))
+
+        roots = {target_type}
+        if target_type == "INTERNET_NAME":
+            # scanner.py also seeds DOMAIN_NAME for a registrable domain —
+            # mirror that rather than require an exact TLD check here too,
+            # since either root being reachable is what matters.
+            roots.add("DOMAIN_NAME")
+
+        reachable = _forward_reachable_modules(resolver, roots)
+        return {"target_type": target_type, "reachable": sorted(reachable)}
+    except Exception as e:
+        log.exception("Failed to compute reachable modules for target type %s", target_type)
+        raise HTTPException(status_code=500, detail="Failed to compute reachable modules") from e
+
+
+def _forward_reachable_modules(resolver: ModuleResolver, root_events: set[str]) -> set[str]:
+    """BFS forward from `root_events` through the watches/produces graph:
+    a module is reachable once something it watches is reachable, and
+    everything it produces becomes reachable in turn. Modules that watch
+    "*" (storage/export modules wanting every event) are always reachable,
+    regardless of target type.
+    """
+    reachable_modules: set[str] = set(resolver.consumers_of("*"))
+    seen_events = set(root_events)
+    frontier = set(root_events)
+    while frontier:
+        new_events: set[str] = set()
+        for evt in frontier:
+            for mod in resolver.consumers_of(evt):
+                if mod in reachable_modules:
+                    continue
+                reachable_modules.add(mod)
+                desc = resolver.get_module(mod)
+                if desc:
+                    new_events |= set(desc.produced_events) - seen_events
+        seen_events |= new_events
+        frontier = new_events
+    return reachable_modules
 
 
 @router.get("/data/sources")
