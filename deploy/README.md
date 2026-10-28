@@ -149,10 +149,16 @@ were structural, so the fixes are rules, not one-off patches:
   (`--exclude-newer`).
 - **...except for a published security fix, as a named, written exception.**
   Taken so far: `certifi` and Pillow 13 (critical CA-trust and image-decoding
-  findings), and on 2026-10-24 `brotli` 1.2.1 (critical), `filelock` 4.2.1 and
-  `pypdf` 6.21.2 (high), plus the `cryptography` override in the tools lock. Each is
-  an `--exclude-newer-package` date in the compile command below, and must pass the
-  scan gate. Move them back under the 14-day rule at the next rebuild.
+  findings), on 2026-10-24 `brotli` 1.2.1 (critical), `filelock` 4.2.1 and
+  `pypdf` 6.21.2 (high), and on 2026-10-28 `dnspython` 2.9.0 in both locks
+  (high — DoS via DNS compression pointer traversal, CVE-2026-114605), plus the
+  `cryptography` override in the tools lock. Each is an `--exclude-newer-package`
+  date in the compile command below, and must pass the scan gate. Move them back
+  under the 14-day rule at the next rebuild — **do a plain recompile without
+  reapplying every exception's date first** and only re-add the ones the gate
+  still reports; rc.8 lost `brotli`/`filelock`/`pypdf`/`certifi` back to vulnerable
+  pre-exception versions this way until the diff was checked against the prior
+  lock and the still-needed overrides were restored.
 - **...and official OS base images are exempt.** `node`, `nginx`, `python`,
   `debian` are rebuilt every day or two as patches land, so an old build is a
   *less* patched build. They are pinned by digest and refreshed deliberately; the
@@ -539,6 +545,22 @@ instead of raising, and the loaded shape matches what
 (`test_config_api_modernization.py`, `test_correlation_wiring.py`,
 `test_router_data_modules.py`, `test_scan_service_phase2.py`,
 `test_module_pipeline.py` — 232 tests total) passes clean.
+
+**2026-10-28: `rc.8` first build attempt failed the scan gate** — unrelated
+to the correlation fix itself. Two newly-published CVEs landed on pins that
+were fine as of `rc.7`: `dnspython` 2.8.0 (HIGH, CVE-2026-114605, fixed in
+2.9.0, affects `base`/`api`/`scanner`/`active-scanner`) and the `go-jose`
+dependency inside the from-source `nuclei` build (HIGH, CVE-2026-116587,
+fixed in 4.1.6, affects `active-scanner` only). Fixed both as named
+exceptions: `dnspython` via `--exclude-newer-package` in both
+`requirements.lock` and `requirements-tools.lock`, `go-jose` by adding
+`github.com/go-jose/go-jose/v4@v4.1.6` to `GO_FLOORS` in
+`Dockerfile.active-scanner`. Recompiling the lockfiles with only the new
+exception and the existing 14-day window silently **dropped** the
+`brotli`/`filelock`/`pypdf`/`certifi` exceptions taken on 2026-10-24 back
+to their pre-fix, vulnerable versions — caught by diffing the new lock
+against the previous one before committing, not by the scan gate (which
+hadn't run yet). All exceptions re-added; see "Supply-chain policy" above.
 
 ## Deploy
 
