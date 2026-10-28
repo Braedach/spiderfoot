@@ -503,6 +503,43 @@ proper trace of the scan worker's own startup config path (separate
 from the API's) to confirm and fix properly — didn't want to guess at
 a fix for something this is involved without being sure.
 
+**2026-10-28: correlation-rules gap above, traced and fixed.** The
+scanner never has its own config path — `scanner.py` just runs with
+whatever flat `global_opts` dict the API process handed it when the
+scan was created (`spiderfoot/api/routers/scan.py`'s
+`create_scan()` → `config.get_app_config().get_config()`), so the gap
+was entirely inside the API's `Config.__init__`
+(`spiderfoot/api/dependencies.py`). `__modules__` already had a
+filesystem-fallback load for exactly this situation — "DB copy is
+empty, so load it from disk instead" — but `__correlationrules__` had
+no equivalent, so it stayed permanently `[]` the moment the DB row
+(which is never written in the first place; nothing persists
+correlation rules to `tbl_config`) came back empty. Added the same
+fallback: when the merged config's `__correlationrules__` is falsy,
+load every YAML in `correlations/` (respecting
+`SF_CORRELATION_RULES_DIR` if set, same env var the existing manual
+`/scans/{id}/correlations/run` endpoint already honoured) via
+`SpiderFootHelpers.loadCorrelationRulesRaw()`, same pattern as the
+modules fallback. Verified live against the real `rc.7` image before
+baking it into a build: hotfix-mounted the fixed `dependencies.py`
+into `sf-api` only (scanner workers don't need it — they just receive
+whatever the API already resolved), confirmed 95 rules now load
+in-process, then ran the real `RuleExecutor` against the already-
+finished `rc.7` confirmation scan (`257F1C60`) exactly the way
+`scanner.py`'s `runCorrelations()` does — went from the 0 it had
+before to 38 correlation results (2 HIGH, 18 MEDIUM, 18 INFO), now
+persisted in `tbl_scan_correlation_results` for that scan. Hotfix
+mount reverted immediately after. 4 new unit tests added in
+`test/unit/test_config_api_modernization.py::TestCorrelationRulesFilesystemFallback`
+covering: the real directory loads non-empty rules, a DB-persisted
+value (if one ever exists) takes precedence over the filesystem, a
+missing/misconfigured rules directory degrades to an empty list
+instead of raising, and the loaded shape matches what
+`runCorrelations()` actually reads it as. Full targeted suite
+(`test_config_api_modernization.py`, `test_correlation_wiring.py`,
+`test_router_data_modules.py`, `test_scan_service_phase2.py`,
+`test_module_pipeline.py` — 232 tests total) passes clean.
+
 ## Deploy
 
 Production (Podman, `stack-podman.yml`) and development (Docker,

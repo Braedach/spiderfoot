@@ -117,6 +117,27 @@ class Config:
                 except Exception as exc:
                     self.log.warning("Failed to load modules: %s", exc)
 
+        # Load correlation rules from filesystem. Unlike modules, these are
+        # never persisted to tbl_config, so dbh.configGet() never returns a
+        # '__correlationrules__' row and this key stays permanently empty
+        # unless loaded here — leaving it empty means SpiderFootScanner's
+        # runCorrelations() silently skips every scan ("no rules configured").
+        if not merged.get('__correlationrules__'):
+            import os
+            rules_dir = os.environ.get("SF_CORRELATION_RULES_DIR")
+            if not rules_dir:
+                rules_dir = os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)), '..', '..', 'correlations'
+                )
+                rules_dir = os.path.abspath(rules_dir)
+            if os.path.isdir(rules_dir):
+                try:
+                    rules = SpiderFootHelpers.loadCorrelationRulesRaw(rules_dir)
+                    merged['__correlationrules__'] = rules
+                    self.log.info("Loaded %d correlation rules into config", len(rules))
+                except Exception as exc:
+                    self.log.warning("Failed to load correlation rules: %s", exc)
+
         self._app_config = AppConfig.from_dict(merged)
         self._app_config.apply_env_overrides()
 
