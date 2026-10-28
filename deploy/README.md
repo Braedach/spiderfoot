@@ -574,6 +574,23 @@ manual correlation trigger: `tbl_scan_correlation_results` had 2 rows
 fired on its own as part of the standard scan-completion path, same as
 every scan from here on.
 
+**2026-10-29: `rc.9`'s scan gate result, and PR #11 merged.** Trivy (the
+actual gate) passed all 5 images with **zero fixable CRITICAL/HIGH
+findings** — `deploy/trivyignore.txt` is empty, nothing is waived, anything
+fixable gets fixed instead. Grype's cross-check (reported only, does not
+gate) flagged `base`/`api`/`scanner`: 13, `active-scanner`: 16, `frontend`: 0
+— per "Supply-chain policy" above, these are Debian-backport false
+positives (Grype matches the embedded OpenSSL version string and misses that
+Debian already backported the fix; Trivy reads the distro package version,
+which is the correct check). Remaining accepted-not-fixed residuals, both
+upstream and outside this fork's control: `gosu` in the official Postgres
+image, and Node packages in Qdrant's own SBOM — revisit when those
+maintainers ship. `active-scanner`'s Go-tool-bundled dependencies (the
+historically worst offender, 2 critical/112 high on the first scan) are
+engineered out via `GO_FLOORS` rather than left unfixed. PR #11 (correlation
+rules fix, gobuster wordlist fix, rc.8→rc.9 CVE pin bumps) merged into
+`master` (`86d3f7ad`).
+
 ## Deploy
 
 Production (Podman, `stack-podman.yml`) and development (Docker,
