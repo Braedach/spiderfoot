@@ -562,6 +562,18 @@ to their pre-fix, vulnerable versions — caught by diffing the new lock
 against the previous one before committing, not by the scan gate (which
 hadn't run yet). All exceptions re-added; see "Supply-chain policy" above.
 
+**2026-10-28: `rc.9` built, deployed, and the correlation fix confirmed
+fully automatic.** All 5 images passed the scan gate clean and pushed
+(PR #11). Deployed to the local test stack (`SPIDERFOOT_TAG=v6.1.0-bd.1-rc.9`),
+confirmed the correlation rules load with no hotfix mount this time — the
+fix is in the shipped image, not a live patch. Ran a fresh scan
+(`rc9-correlation-pipeline-check`, `CDE7C865`, 3 modules against
+`demo.testfire.net`) straight through the normal `POST /scans` API, no
+manual correlation trigger: `tbl_scan_correlation_results` had 2 rows
+(1 INFO, 1 MEDIUM) once the scan reached `FINISHED` — `runCorrelations()`
+fired on its own as part of the standard scan-completion path, same as
+every scan from here on.
+
 ## Deploy
 
 Production (Podman, `stack-podman.yml`) and development (Docker,
