@@ -610,3 +610,70 @@ class TestBackwardCompatibility:
     def test_scan_result_delete_stub(self):
         cfg = _make_config()
         cfg.scanResultDelete("test-scan-id")  # should not raise
+
+
+# =====================================================================
+# Correlation rules filesystem fallback (full, non-skip_db init path)
+# =====================================================================
+#
+# '__correlationrules__' is never persisted to tbl_config (unlike
+# '__modules__', which has an existing filesystem fallback), so a bare
+# DB read always comes back empty. Without a filesystem fallback this
+# key stays permanently empty and SpiderFootScanner.runCorrelations()
+# silently skips every scan.
+
+class TestCorrelationRulesFilesystemFallback:
+
+    @staticmethod
+    def _init_config(mock_db_cls, mock_sf_cls, db_config_get, env=None):
+        import os
+        from unittest.mock import patch as _patch
+        from spiderfoot.api.dependencies import Config
+
+        mock_db = MagicMock()
+        mock_db.configGet.return_value = db_config_get
+        mock_db_cls.return_value = mock_db
+        mock_sf = MagicMock()
+        mock_sf.configUnserialize.side_effect = lambda stored, default: {**default, **stored}
+        mock_sf_cls.return_value = mock_sf
+
+        env = env or {}
+        with _patch.dict(os.environ, env, clear=False):
+            return Config()
+
+    @patch('spiderfoot.api.dependencies.SpiderFoot')
+    @patch('spiderfoot.api.dependencies.SpiderFootDb')
+    def test_loads_real_rules_from_default_correlations_dir(self, mock_db_cls, mock_sf_cls):
+        cfg = self._init_config(mock_db_cls, mock_sf_cls, db_config_get={})
+        rules = cfg.app_config.correlation_rules
+        assert rules, "expected the real correlations/ directory to populate rules"
+        assert all('meta' in r and 'collections' in r for r in rules)
+
+    @patch('spiderfoot.api.dependencies.SpiderFoot')
+    @patch('spiderfoot.api.dependencies.SpiderFootDb')
+    def test_db_rules_take_precedence_over_filesystem(self, mock_db_cls, mock_sf_cls):
+        db_rules = [{'id': 'from-db', 'meta': {}, 'collections': {}, 'headline': 'x'}]
+        cfg = self._init_config(
+            mock_db_cls, mock_sf_cls,
+            db_config_get={'__correlationrules__': db_rules},
+        )
+        assert cfg.app_config.correlation_rules == db_rules
+
+    @patch('spiderfoot.api.dependencies.SpiderFoot')
+    @patch('spiderfoot.api.dependencies.SpiderFootDb')
+    def test_missing_rules_dir_degrades_to_empty_list(self, mock_db_cls, mock_sf_cls):
+        cfg = self._init_config(
+            mock_db_cls, mock_sf_cls, db_config_get={},
+            env={'SF_CORRELATION_RULES_DIR': '/nonexistent/path/for/testing'},
+        )
+        assert cfg.app_config.correlation_rules in ([], None)
+
+    @patch('spiderfoot.api.dependencies.SpiderFoot')
+    @patch('spiderfoot.api.dependencies.SpiderFootDb')
+    def test_rules_survive_round_trip_into_scanner_config(self, mock_db_cls, mock_sf_cls):
+        """The exact shape SpiderFootScanner.runCorrelations() reads."""
+        cfg = self._init_config(mock_db_cls, mock_sf_cls, db_config_get={})
+        flat = cfg.get_config()
+        rules = flat.get('__correlationrules__')
+        assert rules
+        assert all(isinstance(r, dict) and 'id' in r for r in rules)

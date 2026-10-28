@@ -57,7 +57,7 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
     # Default options
     opts = {
         "gobuster_path": "/tools/bin/gobuster",
-        "wordlist": "",
+        "wordlist": "/tools/wordlists/common.txt",
         "threads": 10,
         "timeout": 30,
         "status_codes": "200,204,301,302,307,401,403",

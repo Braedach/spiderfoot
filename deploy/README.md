@@ -149,10 +149,16 @@ were structural, so the fixes are rules, not one-off patches:
   (`--exclude-newer`).
 - **...except for a published security fix, as a named, written exception.**
   Taken so far: `certifi` and Pillow 13 (critical CA-trust and image-decoding
-  findings), and on 2026-10-24 `brotli` 1.2.1 (critical), `filelock` 4.2.1 and
-  `pypdf` 6.21.2 (high), plus the `cryptography` override in the tools lock. Each is
-  an `--exclude-newer-package` date in the compile command below, and must pass the
-  scan gate. Move them back under the 14-day rule at the next rebuild.
+  findings), on 2026-10-24 `brotli` 1.2.1 (critical), `filelock` 4.2.1 and
+  `pypdf` 6.21.2 (high), and on 2026-10-28 `dnspython` 2.9.0 in both locks
+  (high — DoS via DNS compression pointer traversal, CVE-2026-114605), plus the
+  `cryptography` override in the tools lock. Each is an `--exclude-newer-package`
+  date in the compile command below, and must pass the scan gate. Move them back
+  under the 14-day rule at the next rebuild — **do a plain recompile without
+  reapplying every exception's date first** and only re-add the ones the gate
+  still reports; rc.8 lost `brotli`/`filelock`/`pypdf`/`certifi` back to vulnerable
+  pre-exception versions this way until the diff was checked against the prior
+  lock and the still-needed overrides were restored.
 - **...and official OS base images are exempt.** `node`, `nginx`, `python`,
   `debian` are rebuilt every day or two as patches land, so an old build is a
   *less* patched build. They are pinned by digest and refreshed deliberately; the
@@ -471,6 +477,102 @@ long" either, by the same logic — an irrelevant module that never receives
 a matching event costs almost nothing sitting idle in this architecture;
 scan duration is driven by the genuinely-relevant active/invasive tools
 actually running, not idle ones.
+
+**2026-10-28: `rc.7` confirmation run against `demo.testfire.net`** (PR #10
+merged, same 27-module scope as the original pass-1 run, for a fair
+comparison): `FINISHED`, 5,328 events in ~2h5m vs. pass-1's 5,324 in ~2h0m —
+consistent, no regression. Zero recurrence of the five-tool "did not set a
+path" errors; the credentials freshness fix held steady (10/10, then
+15/15 consistent reads live against the real deployment, not a hotfix
+mount this time). Found one more layer of the same bug class, fixed
+immediately: `gobuster` got past the path check this time and hit the
+*next* blank-with-no-default required option, `wordlist` — never
+surfaced before because the path check failed first in every earlier
+run, so this one was never reached. Same fix as before: default it to
+the same `/tools/wordlists/common.txt` `ffuf` already correctly uses.
+
+**Also found, not fixed — flagged for follow-up, confirmed unrelated to
+anything changed recently:** no scan since the original Oct 25 pair
+(`rc5-juiceshop`, `rc5-demotestfire-pass1`) has produced any correlation
+results, across three different worker container generations (`rc.5`,
+`rc.6`, this `rc.7` run) — `scanner.py`'s `runCorrelations()` checks
+`tbl_config`'s `__correlationrules__`, which is empty, despite the 97
+correlation rule YAML files being present on disk in every one of those
+images. Neither the API's `Config` class nor (as far as traced so far)
+anything else loads those files into that config key — unlike modules,
+which *do* get a filesystem-fallback load when the DB copy is empty.
+Likely explanation: whatever populated it for the original pair never
+persisted that to the database, so the moment that specific worker
+process was replaced the rules were gone for good, with nothing
+re-seeding them since. Not touched by anything in PR #9 or #10. Needs a
+proper trace of the scan worker's own startup config path (separate
+from the API's) to confirm and fix properly — didn't want to guess at
+a fix for something this is involved without being sure.
+
+**2026-10-28: correlation-rules gap above, traced and fixed.** The
+scanner never has its own config path — `scanner.py` just runs with
+whatever flat `global_opts` dict the API process handed it when the
+scan was created (`spiderfoot/api/routers/scan.py`'s
+`create_scan()` → `config.get_app_config().get_config()`), so the gap
+was entirely inside the API's `Config.__init__`
+(`spiderfoot/api/dependencies.py`). `__modules__` already had a
+filesystem-fallback load for exactly this situation — "DB copy is
+empty, so load it from disk instead" — but `__correlationrules__` had
+no equivalent, so it stayed permanently `[]` the moment the DB row
+(which is never written in the first place; nothing persists
+correlation rules to `tbl_config`) came back empty. Added the same
+fallback: when the merged config's `__correlationrules__` is falsy,
+load every YAML in `correlations/` (respecting
+`SF_CORRELATION_RULES_DIR` if set, same env var the existing manual
+`/scans/{id}/correlations/run` endpoint already honoured) via
+`SpiderFootHelpers.loadCorrelationRulesRaw()`, same pattern as the
+modules fallback. Verified live against the real `rc.7` image before
+baking it into a build: hotfix-mounted the fixed `dependencies.py`
+into `sf-api` only (scanner workers don't need it — they just receive
+whatever the API already resolved), confirmed 95 rules now load
+in-process, then ran the real `RuleExecutor` against the already-
+finished `rc.7` confirmation scan (`257F1C60`) exactly the way
+`scanner.py`'s `runCorrelations()` does — went from the 0 it had
+before to 38 correlation results (2 HIGH, 18 MEDIUM, 18 INFO), now
+persisted in `tbl_scan_correlation_results` for that scan. Hotfix
+mount reverted immediately after. 4 new unit tests added in
+`test/unit/test_config_api_modernization.py::TestCorrelationRulesFilesystemFallback`
+covering: the real directory loads non-empty rules, a DB-persisted
+value (if one ever exists) takes precedence over the filesystem, a
+missing/misconfigured rules directory degrades to an empty list
+instead of raising, and the loaded shape matches what
+`runCorrelations()` actually reads it as. Full targeted suite
+(`test_config_api_modernization.py`, `test_correlation_wiring.py`,
+`test_router_data_modules.py`, `test_scan_service_phase2.py`,
+`test_module_pipeline.py` — 232 tests total) passes clean.
+
+**2026-10-28: `rc.8` first build attempt failed the scan gate** — unrelated
+to the correlation fix itself. Two newly-published CVEs landed on pins that
+were fine as of `rc.7`: `dnspython` 2.8.0 (HIGH, CVE-2026-114605, fixed in
+2.9.0, affects `base`/`api`/`scanner`/`active-scanner`) and the `go-jose`
+dependency inside the from-source `nuclei` build (HIGH, CVE-2026-116587,
+fixed in 4.1.6, affects `active-scanner` only). Fixed both as named
+exceptions: `dnspython` via `--exclude-newer-package` in both
+`requirements.lock` and `requirements-tools.lock`, `go-jose` by adding
+`github.com/go-jose/go-jose/v4@v4.1.6` to `GO_FLOORS` in
+`Dockerfile.active-scanner`. Recompiling the lockfiles with only the new
+exception and the existing 14-day window silently **dropped** the
+`brotli`/`filelock`/`pypdf`/`certifi` exceptions taken on 2026-10-24 back
+to their pre-fix, vulnerable versions — caught by diffing the new lock
+against the previous one before committing, not by the scan gate (which
+hadn't run yet). All exceptions re-added; see "Supply-chain policy" above.
+
+**2026-10-28: `rc.9` built, deployed, and the correlation fix confirmed
+fully automatic.** All 5 images passed the scan gate clean and pushed
+(PR #11). Deployed to the local test stack (`SPIDERFOOT_TAG=v6.1.0-bd.1-rc.9`),
+confirmed the correlation rules load with no hotfix mount this time — the
+fix is in the shipped image, not a live patch. Ran a fresh scan
+(`rc9-correlation-pipeline-check`, `CDE7C865`, 3 modules against
+`demo.testfire.net`) straight through the normal `POST /scans` API, no
+manual correlation trigger: `tbl_scan_correlation_results` had 2 rows
+(1 INFO, 1 MEDIUM) once the scan reached `FINISHED` — `runCorrelations()`
+fired on its own as part of the standard scan-completion path, same as
+every scan from here on.
 
 ## Deploy
 
