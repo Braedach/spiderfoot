@@ -591,6 +591,27 @@ engineered out via `GO_FLOORS` rather than left unfixed. PR #11 (correlation
 rules fix, gobuster wordlist fix, rc.8→rc.9 CVE pin bumps) merged into
 `master` (`86d3f7ad`).
 
+**2026-11-03: Dependabot enabled; frontend npm dependencies were an unscanned gap.**
+Trivy cannot see inside the frontend's minified JS bundle, so the `rc.9`
+"0 findings" on the frontend image said nothing about the npm packages compiled
+into it. Dependabot raised 233 alerts: 143 on `frontend/package-lock.json`, 86
+on upstream's stale `Pipfile.lock` (March 2025; no image installs from it, they
+use `deploy/requirements.lock`), 4 on `requirements.txt` / `test/requirements.txt`.
+Fixed: `npm audit fix --before=2026-10-20` (respects the 14-day cool-down) took
+49 vulnerable packages to 22; two named security exceptions, `follow-redirects`
+1.16.2 and `vite` 6.4.5, took it to 20. All runtime-scope alerts with a fix are
+now patched; `tsc`, the build and all 300 frontend tests pass. `Pipfile` and
+`Pipfile.lock` removed. `setuptools` floor raised to 84.1.0, `pytest` pinned to
+9.0.3. `publish.sh` now runs `npm audit --omit=dev --audit-level=high` against
+the lockfile and fails the build on a high/critical runtime finding (checked: it
+passes the new lockfile and fails the old one). Dependabot has a 14-day cooldown
+to match the policy above; security updates bypass it.
+
+Remaining, all accepted: dev-only tooling (`vitest`/`tinypool` critical, `eslint`
+chain, `@hey-api/openapi-ts` / `js-yaml`) needs major bumps (vitest 5 needs a
+newer vite) and never ships in the image; `katex`/`mermaid` low needs mermaid 12;
+`dompurify` low and `paramiko` low have no fix.
+
 ## Deploy
 
 Production (Podman, `stack-podman.yml`) and development (Docker,
