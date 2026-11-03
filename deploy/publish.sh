@@ -310,6 +310,15 @@ for svc in "${SERVICES[@]}"; do
     FAILED_SCANS+=("$svc")
   fi
 done
+# Trivy cannot see inside the frontend's minified JS bundle, so the npm
+# dependencies compiled into it are audited here, against the lockfile
+# `npm ci` builds from. Runtime deps only; high/critical fail the build.
+NODE_IMG=node:24-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53
+if ! docker run --rm -v "${REPO_ROOT}/frontend/package.json:/a/package.json:ro" \
+     -v "${REPO_ROOT}/frontend/package-lock.json:/a/package-lock.json:ro" -w /a "$NODE_IMG" \
+     npm audit --omit=dev --audit-level=high 2>&1 | tee -a "$LOG_FILE"; then
+  FAILED_SCANS+=("frontend-npm-audit")
+fi
 if [[ ${#FAILED_SCANS[@]} -gt 0 ]]; then
   error "Scan gate FAILED for: ${FAILED_SCANS[*]}. Nothing was pushed. Reports: ${SCAN_DIR}"
   exit 1
