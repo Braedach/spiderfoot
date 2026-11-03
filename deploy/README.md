@@ -612,6 +612,19 @@ chain, `@hey-api/openapi-ts` / `js-yaml`) needs major bumps (vitest 5 needs a
 newer vite) and never ships in the image; `katex`/`mermaid` low needs mermaid 12;
 `dompurify` low and `paramiko` low have no fix.
 
+**2026-11-03: `rc.10` failed its scan gate on four newly-published CVE sets** (nothing
+pushed). Python, all four Python images: `pyasn1` 0.6.4 -> 0.6.5 (4 high),
+`pypdf` 6.21.2 -> 6.21.4 (7 high) and `graphql-core` 3.3.0 -> 3.3.1 (1 high), each a
+named exception (all published after the cut-off). Frontend: `libexpat` 2.9.0-r0 in the
+nginx base (CVE-2026-117610, CVE-2026-118370), still unpatched in upstream's newest
+`nginx:1.30-alpine`, so it is upgraded from Alpine alongside `brotli-libs`. The locks were
+recompiled with last time's window (`--exclude-newer 2026-10-14`) plus the exceptions,
+so only those packages (and a `filelock` patch release) moved; a recompile at today's
+window would also have pulled in `pycryptodome` 4.x, `fastapi` and `anthropic` bumps.
+The `setuptools` floor raised in the previous entry was reverted: 84.x is outside the
+window and a two-major jump for build tooling isn't worth low/medium findings in a file
+no image uses. The new `npm audit` gate passed on this run.
+
 ## Deploy
 
 Production (Podman, `stack-podman.yml`) and development (Docker,
