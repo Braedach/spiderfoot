@@ -42,7 +42,9 @@ An internal-use fork of [poppopjmp/spiderfoot](https://github.com/poppopjmp/spid
 
 ## Breaking change
 
-`requirements.txt` no longer installs `sentence-transformers` or `torch` at all. If `SF_EMBEDDING_PROVIDER=sentence_transformer` is set anywhere it will **silently** fall back to fake, hash-derived embeddings, with no error and quietly wrong report content. Set `SF_EMBEDDING_PROVIDER=fastembed` (the default in both stack files).
+**rc.15: the LLM API key is no longer an environment variable.** Upgrading from rc.14 or earlier requires: (1) replace the stack file (the old one *requires* `ANTHROPIC_API_KEY` and does not pass the JWT secret to `sf-agents` and the workers); (2) redeploy on `rc.15`; (3) sign in as an administrator, open **AI Connections**, enter the provider key, choose a model and make the provider active; (4) delete `ANTHROPIC_API_KEY` from the stack environment. Until a key is saved there, AI reports fail with a message pointing at AI Connections. Keys are encrypted using a key derived from `SF_JWT_SECRET_KEY`, so rotating that secret means entering them again.
+
+**Earlier:** `requirements.txt` no longer installs `sentence-transformers` or `torch` at all. If `SF_EMBEDDING_PROVIDER=sentence_transformer` is set anywhere it will **silently** fall back to fake, hash-derived embeddings, with no error and quietly wrong report content. Set `SF_EMBEDDING_PROVIDER=fastembed` (the default in both stack files).
 
 ## Deploying this fork
 
