@@ -106,7 +106,10 @@ verifies each image's revision label equals the commit being shipped, pushes
 - the tag already pushed to `origin`
 - a clean clone dedicated to publishing — it checks the tag out in place
 - roughly 30GB free disk and 6GB RAM: `active-scanner` compiles Go and C tools
-  from source, and a cache-cold build can take over 20 minutes
+  from source, and a cache-cold build can take over 20 minutes. `publish.sh` refuses to start with under 12 GB
+  free under Docker's root, and removes this project's local images (`spiderfoot-*` and the `ghcr.io/braedach/...`
+  tags of the five services) before a build and again on any exit, so a run that stops at the scan gate or the
+  push no longer leaves about 4 GB behind. Other projects' images are never touched.
 
 The token is read from `/etc/davros/ghcr-token`, the build host's one shared token file (root-only, `chmod 600`,
 outside every repository and Docker build context, and shared by every project built there). `publish.sh` prompts
@@ -678,6 +681,14 @@ active at a time, and `sf-agents` and the Celery workers read the active one on 
 the key lives only in the GUI. For an existing deployment, save a provider key in AI Connections, confirm a report,
 update the stack file, then delete `ANTHROPIC_API_KEY` from the stack environment (the old stack file requires it, so
 update the file first).
+
+**2026-11-05: `rc.15`'s first run failed with `docker save failed`, not a vulnerability.** The build host was at
+93% disk (4.9 GB free): `publish.sh` only removed the images of a run that finished, so every run that stopped at
+the scan gate or the push (rc.1, rc.8, rc.10, rc.14 and the failed rc.15) left about 4 GB of local images, and
+saving the 3.2 GB `active-scanner` image for scanning ran out of space. The stale images were removed by hand
+(24 GB free afterwards) and `publish.sh` now removes this project's local images before a build and on any exit,
+and refuses to start with under 12 GB free (see "Prerequisites"). The same run also confirmed the build token
+now read from `/etc/davros/ghcr-token` works (GHCR login succeeded).
 
 ## Deploy
 
