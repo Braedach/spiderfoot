@@ -111,11 +111,13 @@ verifies each image's revision label equals the commit being shipped, pushes
   tags of the five services) before a build and again on any exit, so a run that stops at the scan gate or the
   push no longer leaves about 4 GB behind. Other projects' images are never touched.
 
-The token is read from `/etc/davros/ghcr-token`, the build host's one shared token file (root-only, `chmod 600`,
-outside every repository and Docker build context, and shared by every project built there). `publish.sh` prompts
-for it if the file is absent, and drops the file and prompts again if GitHub rejects it. It still refuses to run if
-its state directory (log and publish state) is inside the repo. Never pass the token as an argument or env var, and
-never commit it.
+The build token lives in one shared file, `/etc/davros/ghcr-token` (root-only, `chmod 600`, outside every repository
+and Docker build context, shared by every project built on that host), and `publish.sh` reads it directly: no
+per-project copy and no symlink. If the file is missing it prompts for the token. If GitHub rejects the token it
+prompts for a replacement and overwrites the file only once the new token is accepted and you confirm saving it; it
+never deletes the shared file, because every project relies on it and a rejected login can be transient. It still
+refuses to run if its state directory (log and publish state) is inside the repo. Never pass the token as an argument
+or env var, and never commit it.
 
 **Token scope.** A classic PAT with `repo` can read and write *every*
 repository the account can reach, private ones included; it cannot be narrowed

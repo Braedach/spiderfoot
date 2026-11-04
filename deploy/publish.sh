@@ -43,12 +43,13 @@
 #       to one repository - it can read and write every repo the account can
 #       reach, private ones included. Use a token created only for this, kept
 #       only on the build host, and rotate it. See deploy/README.md "Token
-#       scope". Cached beside the clone at ../.spiderfoot-publish/.ghcr-token
-#       (chmod 600, OUTSIDE the repo) as a SYMLINK to the one shared token at
-#       /etc/davros/ghcr-token (Design-Reference 17.1/17.4, decision 59) - a
-#       fresh save always goes to the shared file, never a second local copy.
-#       Prompted for when the symlink is absent, and dropped and re-prompted
-#       for when GitHub rejects it. Never pass it as an argument or env var.
+#       scope". Read directly from /etc/davros/ghcr-token, the build host's one
+#       token file (root-only, chmod 600, OUTSIDE the repo; Design-Reference
+#       17.1, decision 59). Prompted for when that file is missing. When GitHub
+#       rejects it, a replacement is prompted for and the file is overwritten
+#       only once the new token is accepted: it is NEVER deleted first, because
+#       every project on this host relies on it. Never pass it as an argument
+#       or env var.
 #     - the tag must already exist on origin (create it on the commit you
 #       mean to ship: the tip of the tested branch for -rc, the merged
 #       commit for a release).
@@ -110,13 +111,9 @@ case "$(realpath -m "$STATE_ROOT")/" in
     exit 1 ;;
 esac
 LOG_FILE="${STATE_ROOT}/publish.log"
-GHCR_TOKEN_FILE="${STATE_ROOT}/.ghcr-token"   # chmod 600, outside the repo
-# Fleet-wide shared store for the one Davros build token (every project on this
-# host uses the same PAT; Design-Reference.md 17.1/17.4). A fresh save below
-# goes here, not to GHCR_TOKEN_FILE directly, so rotating or re-entering the
-# token in any one project's run fixes it for all of them instead of forking
-# another local copy.
-DAVROS_GHCR_TOKEN_CANONICAL="/etc/davros/ghcr-token"
+# The one Davros build token, shared by every project built on this host and referred to directly (no per-project
+# copy, no symlink). Root-only, outside every repo and Docker build context.
+GHCR_TOKEN_FILE="/etc/davros/ghcr-token"
 STATE_FILE="${STATE_ROOT}/.publish-state"
 
 GHCR_REGISTRY="ghcr.io"
@@ -194,34 +191,55 @@ if [[ -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)" ]]; th
 fi
 
 # ---- GHCR + GitHub auth (mandatory) -----------------------------------------
+# Write the token to the one shared file atomically (temp file in the same directory, then rename), so a failed write
+# can never leave it empty or half-written, and never delete it first.
+save_ghcr_token() {   # $1 = token
+  local tmp=""
+  if install -d -m 700 -o root -g root "$(dirname "$GHCR_TOKEN_FILE")" \
+      && tmp=$(umask 077; mktemp "${GHCR_TOKEN_FILE}.XXXXXX") \
+      && printf '%s\n' "$1" > "$tmp" \
+      && chown root:root "$tmp" && chmod 600 "$tmp" \
+      && mv -f "$tmp" "$GHCR_TOKEN_FILE"; then
+    info "Saved to ${GHCR_TOKEN_FILE}"
+  else
+    [[ -n "$tmp" ]] && rm -f "$tmp"
+    warn "Could not write ${GHCR_TOKEN_FILE}; the token was used for this run only."
+  fi
+}
+ghcr_login() {   # $1 = token
+  echo "$1" | docker login "${GHCR_REGISTRY}" --username "${GHCR_NAMESPACE}" --password-stdin >/dev/null
+}
+
 GH_TOKEN_VAL=""
-FROM_CACHE=0
-if [[ -f "$GHCR_TOKEN_FILE" ]]; then
+FROM_FILE=0
+NEW_TOKEN=0
+if [[ -s "$GHCR_TOKEN_FILE" ]]; then
   GH_TOKEN_VAL=$(cat "$GHCR_TOKEN_FILE")
-  FROM_CACHE=1
+  FROM_FILE=1
 elif [[ -t 0 ]]; then
   read -srp "GitHub token (classic PAT, write:packages + repo scope): " GH_TOKEN_VAL
   echo
+  NEW_TOKEN=1
 else
-  error "No ${GHCR_TOKEN_FILE} and no TTY to prompt (unattended run before first interactive setup?)."
-  error "Run once interactively first, or: echo \"ghp_xxx\" > ${GHCR_TOKEN_FILE} && chmod 600 ${GHCR_TOKEN_FILE}"
+  error "No ${GHCR_TOKEN_FILE} and no TTY to prompt."
+  error "Create it (root, chmod 600) with the Davros build token, or run this once interactively."
   exit 1
 fi
 
 info "Logging in to ${GHCR_REGISTRY} as ${GHCR_NAMESPACE}..."
 LOGIN_OK=0
-if echo "${GH_TOKEN_VAL}" | docker login "${GHCR_REGISTRY}" --username "${GHCR_NAMESPACE}" --password-stdin >/dev/null; then
+if ghcr_login "$GH_TOKEN_VAL"; then
   LOGIN_OK=1
-elif [[ "$FROM_CACHE" -eq 1 ]]; then
-  warn "${GHCR_REGISTRY} login failed with the cached token - likely expired or revoked."
-  rm -f "$GHCR_TOKEN_FILE"
-  warn "Removed the stale token file."
+elif [[ "$FROM_FILE" -eq 1 ]]; then
+  # Never delete ${GHCR_TOKEN_FILE} here: it is the one token every project relies on, and a rejected login can be
+  # transient (network, a GitHub incident). Only a replacement that GitHub accepts overwrites it, below.
+  warn "${GHCR_REGISTRY} login failed with the token in ${GHCR_TOKEN_FILE} - expired, revoked, or a transient error. The file is left untouched."
   if [[ -t 0 ]]; then
     read -srp "Replacement GitHub token (classic PAT, write:packages + repo scope): " GH_TOKEN_VAL
     echo
-    FROM_CACHE=0
-    if echo "${GH_TOKEN_VAL}" | docker login "${GHCR_REGISTRY}" --username "${GHCR_NAMESPACE}" --password-stdin >/dev/null; then
+    if ghcr_login "$GH_TOKEN_VAL"; then
       LOGIN_OK=1
+      NEW_TOKEN=1
     fi
   fi
 fi
@@ -231,18 +249,10 @@ if [[ "$LOGIN_OK" -ne 1 ]]; then
 fi
 ok "${GHCR_REGISTRY} login successful"
 
-if [[ ! -f "$GHCR_TOKEN_FILE" && -t 0 ]]; then
-  read -rp "Save for future/repeat runs at ${GHCR_TOKEN_FILE}? [y/N] " save_answer
+if [[ "$NEW_TOKEN" -eq 1 && -t 0 ]]; then
+  read -rp "Save at ${GHCR_TOKEN_FILE} for every project on this host? [y/N] " save_answer
   if [[ "$save_answer" =~ ^[Yy] ]]; then
-    if ( umask 077; printf '%s\n' "$GH_TOKEN_VAL" > "$DAVROS_GHCR_TOKEN_CANONICAL" ) 2>/dev/null; then
-      chmod 600 "$DAVROS_GHCR_TOKEN_CANONICAL"
-      ln -sf "$DAVROS_GHCR_TOKEN_CANONICAL" "$GHCR_TOKEN_FILE"
-      info "Saved to the shared token store (${DAVROS_GHCR_TOKEN_CANONICAL}); ${GHCR_TOKEN_FILE} now symlinks to it"
-    else
-      ( umask 077; printf '%s\n' "$GH_TOKEN_VAL" > "$GHCR_TOKEN_FILE" )
-      chmod 600 "$GHCR_TOKEN_FILE"
-      warn "Could not write ${DAVROS_GHCR_TOKEN_CANONICAL} - saved a LOCAL copy at ${GHCR_TOKEN_FILE} instead. Move it into the shared store and symlink by hand."
-    fi
+    save_ghcr_token "$GH_TOKEN_VAL"
   fi
 fi
 GH_PAT="$GH_TOKEN_VAL"
