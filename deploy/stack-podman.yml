@@ -555,10 +555,12 @@ networks:
   spiderfoot-net:
     name: spiderfoot-net
     driver: bridge
-  # The network sf-api (model list) and sf-agents (chat) use to reach a containerised Ollama as http://ollama:11434.
-  # Default: an extra, empty network this stack creates; attach your Ollama container to it. To reuse a network that
-  # already exists (baden's Ollama stack uses llm-net, and its host firewall blocks the host-address route), set
-  # SF_LLM_NETWORK=llm-net and SF_LLM_NETWORK_EXTERNAL=true in the stack environment.
+  # The second network sf-api (model list) and sf-agents (chat) join, ONLY so they can reach Ollama as http://ollama:11434.
+  # Default: an empty network this stack creates (spiderfoot-llm-net); attach your Ollama container to it, or ignore it if you
+  # do not use Ollama. Baden is different: its Ollama is a separate stack that owns a network called llm-net, and baden's host
+  # firewall drops container-to-host traffic on 11434, so baden sets SF_LLM_NETWORK=llm-net and SF_LLM_NETWORK_EXTERNAL=true
+  # to join that existing network. Anything on this network can reach sf-api and sf-agents: see deploy/README.md, "Ollama and
+  # the LLM network".
   llm-net:
     name: ${SF_LLM_NETWORK:-spiderfoot-llm-net}
     external: ${SF_LLM_NETWORK_EXTERNAL:-false}
