@@ -318,6 +318,11 @@ How it behaves:
   a key derived (HKDF-SHA256) from the stack's `SF_JWT_SECRET_KEY`; the API only ever reports "key set". **Rotating
   `SF_JWT_SECRET_KEY` makes stored keys undecryptable**; they then show as "No key" and must be entered again. The
   API, `sf-agents` and both Celery workers all receive that secret (as `SF_JWT_SECRET`) for this reason.
+- **Ollama.** In AI Connections set the API base URL to an address the `sf-api` and `sf-agents` containers can reach. For an
+  Ollama container, attach it to the network this stack creates, `spiderfoot-llm-net`, and use `http://ollama:11434`. To reuse a
+  network that already exists, set `SF_LLM_NETWORK=<name>` and `SF_LLM_NETWORK_EXTERNAL=true` in the stack environment. A host
+  address often does not work: a host firewall that drops container-to-host traffic blocks it. An address behind a login page
+  (a reverse proxy with authentication) cannot work either.
 - **One model per provider**, chosen from what the provider offers: the page asks the provider for its model list using the stored key (Anthropic's models API, an OpenAI-compatible `/models` endpoint for OpenAI and DeepSeek, Ollama's `/api/tags`), through `GET /api/ai/providers/<id>/models`. The key never reaches the browser. If the provider cannot be reached the page falls back to typing a model name, and a blank model uses the provider's default.
 
 Code: `spiderfoot/ai/llm_settings.py` (storage, encryption, resolution), `spiderfoot/ai/provider_models.py` (model lists), `spiderfoot/api/routers/ai_providers.py`
