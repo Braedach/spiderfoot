@@ -320,10 +320,42 @@ How it behaves:
   a key derived (HKDF-SHA256) from the stack's `SF_JWT_SECRET_KEY`; the API only ever reports "key set". **Rotating
   `SF_JWT_SECRET_KEY` makes stored keys undecryptable**; they then show as "No key" and must be entered again. The
   API, `sf-agents` and both Celery workers all receive that secret (as `SF_JWT_SECRET`) for this reason.
+- **Ollama** needs a network route from `sf-api` and `sf-agents` to the Ollama server; see "Ollama and the LLM network" below.
 - **One model per provider**, chosen from what the provider offers: the page asks the provider for its model list using the stored key (Anthropic's models API, an OpenAI-compatible `/models` endpoint for OpenAI and DeepSeek, Ollama's `/api/tags`), through `GET /api/ai/providers/<id>/models`. The key never reaches the browser. If the provider cannot be reached the page falls back to typing a model name, and a blank model uses the provider's default.
 
 Code: `spiderfoot/ai/llm_settings.py` (storage, encryption, resolution), `spiderfoot/ai/provider_models.py` (model lists), `spiderfoot/api/routers/ai_providers.py`
 (admin-only API), `frontend/src/pages/AIConnections.tsx`.
+
+### Ollama and the LLM network (read this if you deploy the stack)
+
+`sf-api` (lists the models) and `sf-agents` (runs the chats) each join **a second network, `llm-net`, for one reason: so
+they can reach Ollama as `http://ollama:11434`.** Nothing else uses it, and the Celery workers do not join it. The cloud
+providers (Anthropic, OpenAI, DeepSeek) do not need it at all.
+
+**Why baden uses an existing network called `llm-net`.** On baden, Ollama is a separate Podman stack that owns a network
+named `llm-net` (shared only with Open WebUI). SpiderFoot cannot reach Ollama any other way there: baden's host firewall
+drops container-to-host traffic on port 11434, so the host's address times out, and the public address is behind a login
+page, which a server-side call cannot pass. So baden's stack environment sets two variables so the SpiderFoot stack joins
+the network Ollama already lives on:
+
+```
+SF_LLM_NETWORK=llm-net
+SF_LLM_NETWORK_EXTERNAL=true
+```
+
+**Everyone else: you need to set nothing.** With the variables unset, the stack creates its own empty network,
+`spiderfoot-llm-net`, which does no harm if you do not use Ollama. If you run Ollama in a container, either attach that
+container to `spiderfoot-llm-net`, or set the two variables to the name of the network your Ollama already uses (as baden
+does). Then, in **AI Connections**, set Ollama's API base URL to `http://<ollama container name>:11434`. If Ollama runs on
+another host, skip all of this and use an address the containers can reach.
+
+**Security: who can reach what.**
+- Every container on this network can reach `sf-api` (8001) and `sf-agents` (8100). Attach only the Ollama container, and
+  never anything untrusted or multi-user.
+- Reusing an existing network (as baden does) also lets `sf-api` and `sf-agents` reach everything else on it. On baden that
+  is Ollama and Open WebUI. Reuse a network only if its members are ones you trust.
+- If you do not use Ollama, remove the two `llm-net` attachments from your stack file, or leave the default empty network.
+- An external network must already exist, or the deploy fails.
 
 ### AI model
 
