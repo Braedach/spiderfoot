@@ -43,11 +43,12 @@
 #       to one repository - it can read and write every repo the account can
 #       reach, private ones included. Use a token created only for this, kept
 #       only on the build host, and rotate it. See deploy/README.md "Token
-#       scope". Read from /etc/davros/ghcr-token, the build host's one shared
-#       token file (root-only, chmod 600, OUTSIDE the repo; Design-Reference
-#       17.1). Prompted for when that file is absent, and dropped and
-#       re-prompted for when GitHub rejects it. Never pass it as an argument
-#       or env var.
+#       scope". Cached beside the clone at ../.spiderfoot-publish/.ghcr-token
+#       (chmod 600, OUTSIDE the repo) as a SYMLINK to the one shared token at
+#       /etc/davros/ghcr-token (Design-Reference 17.1/17.4, decision 59) - a
+#       fresh save always goes to the shared file, never a second local copy.
+#       Prompted for when the symlink is absent, and dropped and re-prompted
+#       for when GitHub rejects it. Never pass it as an argument or env var.
 #     - the tag must already exist on origin (create it on the commit you
 #       mean to ship: the tip of the tested branch for -rc, the merged
 #       commit for a release).
@@ -109,9 +110,13 @@ case "$(realpath -m "$STATE_ROOT")/" in
     exit 1 ;;
 esac
 LOG_FILE="${STATE_ROOT}/publish.log"
-# The one Davros build token, shared by every project built on this host
-# (Design-Reference.md 17.1). Root-only, outside every repo and Docker build context.
-GHCR_TOKEN_FILE="/etc/davros/ghcr-token"
+GHCR_TOKEN_FILE="${STATE_ROOT}/.ghcr-token"   # chmod 600, outside the repo
+# Fleet-wide shared store for the one Davros build token (every project on this
+# host uses the same PAT; Design-Reference.md 17.1/17.4). A fresh save below
+# goes here, not to GHCR_TOKEN_FILE directly, so rotating or re-entering the
+# token in any one project's run fixes it for all of them instead of forking
+# another local copy.
+DAVROS_GHCR_TOKEN_CANONICAL="/etc/davros/ghcr-token"
 STATE_FILE="${STATE_ROOT}/.publish-state"
 
 GHCR_REGISTRY="ghcr.io"
@@ -198,8 +203,8 @@ elif [[ -t 0 ]]; then
   read -srp "GitHub token (classic PAT, write:packages + repo scope): " GH_TOKEN_VAL
   echo
 else
-  error "No ${GHCR_TOKEN_FILE} and no TTY to prompt."
-  error "Create it (root, chmod 600) with the Davros build token, or run this once interactively."
+  error "No ${GHCR_TOKEN_FILE} and no TTY to prompt (unattended run before first interactive setup?)."
+  error "Run once interactively first, or: echo \"ghp_xxx\" > ${GHCR_TOKEN_FILE} && chmod 600 ${GHCR_TOKEN_FILE}"
   exit 1
 fi
 
@@ -227,14 +232,16 @@ fi
 ok "${GHCR_REGISTRY} login successful"
 
 if [[ ! -f "$GHCR_TOKEN_FILE" && -t 0 ]]; then
-  read -rp "Save at ${GHCR_TOKEN_FILE} for future runs (shared by every project on this host)? [y/N] " save_answer
+  read -rp "Save for future/repeat runs at ${GHCR_TOKEN_FILE}? [y/N] " save_answer
   if [[ "$save_answer" =~ ^[Yy] ]]; then
-    if install -d -m 700 -o root -g root "$(dirname "$GHCR_TOKEN_FILE")" \
-        && ( umask 077; printf '%s\n' "$GH_TOKEN_VAL" > "$GHCR_TOKEN_FILE" ) \
-        && chmod 600 "$GHCR_TOKEN_FILE"; then
-      info "Saved to ${GHCR_TOKEN_FILE}"
+    if ( umask 077; printf '%s\n' "$GH_TOKEN_VAL" > "$DAVROS_GHCR_TOKEN_CANONICAL" ) 2>/dev/null; then
+      chmod 600 "$DAVROS_GHCR_TOKEN_CANONICAL"
+      ln -sf "$DAVROS_GHCR_TOKEN_CANONICAL" "$GHCR_TOKEN_FILE"
+      info "Saved to the shared token store (${DAVROS_GHCR_TOKEN_CANONICAL}); ${GHCR_TOKEN_FILE} now symlinks to it"
     else
-      warn "Could not write ${GHCR_TOKEN_FILE}; the token was used for this run only."
+      ( umask 077; printf '%s\n' "$GH_TOKEN_VAL" > "$GHCR_TOKEN_FILE" )
+      chmod 600 "$GHCR_TOKEN_FILE"
+      warn "Could not write ${DAVROS_GHCR_TOKEN_CANONICAL} - saved a LOCAL copy at ${GHCR_TOKEN_FILE} instead. Move it into the shared store and symlink by hand."
     fi
   fi
 fi
