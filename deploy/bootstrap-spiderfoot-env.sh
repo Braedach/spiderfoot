@@ -57,9 +57,8 @@
 #     - SPIDERFOOT_TAG is written BLANK on purpose. The stacks require an exact
 #       published tag (see deploy/README.md) and refuse to start without one,
 #       so a stale default here could never be right. Set it by hand.
-#     - ANTHROPIC_API_KEY is written as CHANGE_ME. It cannot be generated;
-#       paste your own. (CHANGE_ME rather than free text so the re-run check
-#       below still notices it was never filled in.)
+#     - No LLM API key is written here: the provider and its key are set in the
+#       GUI (AI Connections), stored encrypted, and override the environment.
 #     - chmod 600 on the generated file - only root can read it directly
 #       on baden; the terminal printout is the one deliberate exception,
 #       since a human has to get the values out to store them elsewhere
@@ -162,10 +161,6 @@ SF_LOG_FORMAT=json
 SF_JWT_SECRET_KEY=${JWT_SECRET}
 SF_ADMIN_PASSWORD=${ADMIN_PASSWORD}
 
-# --- AI agents ---
-# sf-agents calls Claude directly; set your key here by hand.
-ANTHROPIC_API_KEY=CHANGE_ME
-
 # --- AI report generation ---
 SF_REPORT_MAX_EVENTS_PER_SCAN=2000
 
@@ -192,5 +187,5 @@ echo "  =========================================================="
 echo ""
 echo "  STILL TO DO BY HAND in ${ENV_FILE}:"
 echo "    - SPIDERFOOT_TAG       set to an exact published tag (e.g. v6.1.0-bd.1)"
-echo "    - ANTHROPIC_API_KEY    replace CHANGE_ME with your key"
+echo "    - AI provider and key: set them in the GUI under AI Connections after first login"
 echo ""

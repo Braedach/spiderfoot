@@ -84,9 +84,25 @@ def execute_agent_task(
                 api_base = f"{api_base}/v1"
             model_name = model or os.environ.get("SF_AGENT_MODEL", "openrouter/google/gemini-2.0-flash-001")
 
+        api_key = os.environ.get("SF_LLM_API_KEY", "")
+
+        # The provider chosen in AI Connections overrides the environment.
+        from spiderfoot.ai import llm_settings
+
+        effective = llm_settings.resolve()
+        if effective is not None:
+            provider = {
+                "anthropic": LLMProvider.ANTHROPIC,
+                "ollama": LLMProvider.OLLAMA,
+                "mock": LLMProvider.MOCK,
+            }.get(effective.provider, LLMProvider.OPENAI)
+            api_base = effective.api_base
+            api_key = effective.api_key
+            model_name = model or effective.model
+
         client = LLMClient(LLMConfig(
             api_base=api_base,
-            api_key=os.environ.get("SF_LLM_API_KEY", ""),
+            api_key=api_key,
             model=model_name,
             provider=provider,
             temperature=0.3,
