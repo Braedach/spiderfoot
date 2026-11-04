@@ -1,6 +1,6 @@
 # =============================================================================
 # deploy/stack-podman.yml  (was stack-spiderfoot-podman.yml in the repo root until 2.8.0)
-# Version: 2.10.0
+# Version: 2.12.0
 # Created: 2026-08-06
 # Updated: 2026-10-23
 #
@@ -100,6 +100,9 @@
 #     - IDS/IPS systems may go ballistic
 #
 # Changelog:
+#   2.12.0 (2026-11-04) - sf-api and sf-agents also join llm-net (Ollama's network on baden, external) so the Ollama provider in AI
+#     Connections is reachable as http://ollama:11434. Baden's firewall drops container-to-host traffic on 11434, so the host
+#     address does not work. Only these two services join it; the workers stay on spiderfoot-net only.
 #   2.11.0 (2026-11-05) - The LLM API key is no longer an environment variable. The provider and key are set in the GUI
 #     (AI Connections), stored encrypted and read per request; ANTHROPIC_API_KEY is no longer passed to any service. sf-agents and
 #     both Celery workers now receive the JWT secret (as SF_JWT_SECRET), which the key encryption derives from. Update this file in
@@ -302,6 +305,7 @@ services:
       spiderfoot-net:
         aliases:
           - api
+      llm-net:
 
   sf-celery-worker:
     image: ghcr.io/braedach/spiderfoot-scanner:${SPIDERFOOT_TAG:?set SPIDERFOOT_TAG to an exact published tag, e.g. v6.1.0-bd.1}
@@ -544,8 +548,15 @@ services:
       - ALL
     networks:
       - spiderfoot-net
+      - llm-net
 
 networks:
   spiderfoot-net:
     name: spiderfoot-net
     driver: bridge
+  # Ollama's own network on baden (a separate stack that must already be running). Only sf-api (model list) and
+  # sf-agents (chat) join it, so they reach Ollama by name (http://ollama:11434) without going through baden's host
+  # firewall. Remove both attachments if Ollama is not used; the stack will not deploy without this network existing.
+  llm-net:
+    name: llm-net
+    external: true
