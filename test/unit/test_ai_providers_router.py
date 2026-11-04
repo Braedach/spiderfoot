@@ -70,3 +70,18 @@ def test_unknown_provider_is_404():
     client = _client("admin")
     assert client.put("/api/ai/providers/skynet", json={}).status_code == 404
     assert client.put("/api/ai/providers/active", json={"provider": "skynet"}).status_code == 404
+
+
+def test_models_endpoint_is_admin_only_and_404s_unknown(monkeypatch):
+    from spiderfoot.ai import provider_models
+    monkeypatch.setattr(provider_models, "list_models",
+                        lambda pid: {"models": [{"id": "m1", "label": "M1"}], "error": None})
+    assert _client("viewer").get("/api/ai/providers/openai/models").status_code == 403
+    r = _client("admin").get("/api/ai/providers/openai/models")
+    assert r.status_code == 200 and r.json()["models"][0]["id"] == "m1"
+
+    def boom(pid):
+        raise ValueError("unknown provider")
+
+    monkeypatch.setattr(provider_models, "list_models", boom)
+    assert _client("admin").get("/api/ai/providers/skynet/models").status_code == 404

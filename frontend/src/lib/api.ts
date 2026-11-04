@@ -429,7 +429,12 @@ export interface AIProvidersResponse {
   active: string;
   source: 'gui' | 'environment';
   providers: AIProviderStatus[];
-  environment: { provider: string; model: string; key_set: boolean };
+}
+
+export interface AIModelsResponse {
+  models: Array<{ id: string; label: string }>;
+  /** Set (with an empty list) when the provider could not be asked; the message never contains a key. */
+  error: string | null;
 }
 
 /** Per-provider LLM settings. API keys are write-only: the server never returns them. */
@@ -439,6 +444,9 @@ export const aiProvidersApi = {
 
   update: (id: string, body: { api_key?: string; model?: string; api_base?: string }) =>
     api.put<AIProvidersResponse>(`/api/ai/providers/${id}`, body).then((r) => r.data),
+
+  models: (id: string, signal?: AbortSignal) =>
+    api.get<AIModelsResponse>(`/api/ai/providers/${id}/models`, { signal }).then((r) => r.data),
 
   clearKey: (id: string) =>
     api.delete<AIProvidersResponse>(`/api/ai/providers/${id}/key`).then((r) => r.data),
