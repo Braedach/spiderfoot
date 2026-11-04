@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { aiProvidersApi, type AIProviderStatus, type AIProvidersResponse } from '../lib/api';
-import { Sparkles, Loader2, Info, Check, Trash2, Save } from 'lucide-react';
+import { Sparkles, Loader2, Info, Check, Trash2, Save, RefreshCw } from 'lucide-react';
 import { PageHeader, Toast, type ToastType } from '../components/ui';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 
@@ -25,6 +25,18 @@ function ProviderCard({
   const [draft, setDraft] = useState<Draft>({ api_key: '', model: provider.model, api_base: provider.api_base });
   const dirty = draft.api_key !== '' || draft.model !== provider.model || draft.api_base !== provider.api_base;
   const canActivate = !provider.needs_key || provider.key_set;
+  const [customModel, setCustomModel] = useState(false);
+
+  // Ask the provider which models it offers, using the stored key (the key never reaches the browser).
+  const modelsQuery = useQuery({
+    queryKey: ['ai-models', provider.id, provider.key_set, provider.api_base],
+    queryFn: ({ signal }) => aiProvidersApi.models(provider.id, signal),
+    enabled: provider.id !== 'mock' && (provider.key_set || !provider.needs_key),
+    staleTime: 60_000,
+  });
+  const models = modelsQuery.data?.models ?? [];
+  const knownModel = models.some((m) => m.id === draft.model);
+  const showModelText = models.length === 0 || customModel || (draft.model !== '' && !knownModel);
 
   const run = useMutation({
     mutationFn: (fn: () => Promise<AIProvidersResponse>) => fn(),
@@ -75,12 +87,52 @@ function ProviderCard({
         {provider.id !== 'mock' && (
           <>
             <div>
-              <label className="text-xs text-dark-300 font-medium">Model</label>
-              <input
-                className="input-field text-sm font-mono mt-1" value={draft.model}
-                onChange={(e) => setDraft({ ...draft, model: e.target.value })}
-                placeholder={provider.default_model}
-              />
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-dark-300 font-medium">Model</label>
+                {provider.id !== 'mock' && (provider.key_set || !provider.needs_key) && (
+                  <button
+                    type="button" className="text-dark-500 hover:text-dark-300 transition-colors"
+                    onClick={() => modelsQuery.refetch()} title="Refresh the list from the provider"
+                  >
+                    {modelsQuery.isFetching ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                  </button>
+                )}
+              </div>
+              {models.length > 0 && (
+                <select
+                  className="input-field text-sm font-mono mt-1"
+                  value={showModelText && !knownModel ? '__custom__' : draft.model}
+                  onChange={(e) => {
+                    if (e.target.value === '__custom__') { setCustomModel(true); return; }
+                    setCustomModel(false);
+                    setDraft({ ...draft, model: e.target.value });
+                  }}
+                >
+                  <option value="">Default ({provider.default_model})</option>
+                  {models.map((m) => (
+                    <option key={m.id} value={m.id}>{m.label === m.id ? m.id : `${m.label} (${m.id})`}</option>
+                  ))}
+                  <option value="__custom__">Other (type a name)…</option>
+                </select>
+              )}
+              {showModelText && (
+                <input
+                  className="input-field text-sm font-mono mt-1" value={draft.model}
+                  onChange={(e) => setDraft({ ...draft, model: e.target.value })}
+                  placeholder={provider.default_model}
+                />
+              )}
+              <p className="mt-1 text-[11px] text-dark-500">
+                {modelsQuery.isError
+                  ? 'Could not load the model list; type a model name.'
+                  : modelsQuery.data?.error
+                    ? `${modelsQuery.data.error} Type a model name instead.`
+                    : provider.needs_key && !provider.key_set
+                      ? 'Save an API key to list the models this provider offers.'
+                      : models.length > 0
+                        ? `${models.length} models offered by ${provider.label}. Blank uses the default.`
+                        : 'Blank uses the default.'}
+              </p>
             </div>
             <div>
               <label className="text-xs text-dark-300 font-medium">API base URL</label>
@@ -166,8 +218,7 @@ export default function AIConnectionsPage() {
               </p>
             ) : (
               <p className="text-sm text-dark-300">
-                None chosen here, so the server environment is used
-                {data.environment.provider ? <> (<strong>{data.environment.provider}</strong>{data.environment.model ? `, ${data.environment.model}` : ''}; key {data.environment.key_set ? 'present' : 'missing'})</> : null}.
+                None chosen here, so the AI service uses its own environment settings.
               </p>
             )}
             <p className="mt-2 flex items-start gap-1.5 text-xs text-dark-500">
@@ -192,7 +243,7 @@ export default function AIConnectionsPage() {
               <li><strong className="text-dark-300">These settings override the server environment.</strong> If no provider is active here, the server&apos;s <code>SF_LLM_*</code> / <code>ANTHROPIC_API_KEY</code> settings are used, so an environment-only setup keeps working. A blank key on the active Anthropic provider also falls back to the environment key.</li>
               <li><strong className="text-dark-300">Keys are write-only.</strong> They are stored encrypted in the database and never displayed again; to change one, enter a new key. Only administrators can view or change this page.</li>
               <li><strong className="text-dark-300">If the server&apos;s <code>SF_JWT_SECRET_KEY</code> is rotated</strong>, stored keys can no longer be decrypted and show as &quot;No key&quot;; enter them again.</li>
-              <li><strong className="text-dark-300">One model per provider.</strong> Leave the model blank to use the provider&apos;s default.</li>
+              <li><strong className="text-dark-300">One model per provider, chosen from what it offers.</strong> Once a key is saved, the model list is fetched from the provider (the key never leaves the server). If the list can&apos;t be loaded you can type a model name; leave it blank for the provider&apos;s default.</li>
             </ul>
           </div>
 

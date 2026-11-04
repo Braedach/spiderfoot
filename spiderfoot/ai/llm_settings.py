@@ -220,6 +220,19 @@ def set_active(preset: str) -> None:
     _invalidate()
 
 
+def credentials(preset: str) -> tuple[str, str]:
+    """Server-side only: the stored (key, api_base) for a provider, never sent to a client.
+
+    The key is "" when none is stored or it cannot be decrypted.
+    """
+    _check_preset(preset)
+    rows = _rows(force=True)
+    stored = rows.get(f"{preset}.api_key", "")
+    key = (decrypt_secret(stored) or "") if stored else ""
+    base = rows.get(f"{preset}.api_base") or PRESETS[preset]["api_base"]
+    return key, base
+
+
 def resolve() -> EffectiveLLM | None:
     """The settings to use right now, or None when the GUI has not chosen a provider.
 
