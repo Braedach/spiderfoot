@@ -304,10 +304,11 @@ How it behaves:
 - **No automatic fallback between providers.** A failed request fails; it is never retried on another provider, so
   scan findings only go to the provider the administrator chose. (The server-side fallback described under "AI model"
   is within Anthropic and is unrelated.)
-- **GUI overrides the environment.** If a provider is active in the GUI it wins. If none is, the stack environment
-  (`SF_LLM_*`, `ANTHROPIC_API_KEY`) is used, so an environment-only deployment still works. A blank key on the active
-  Anthropic provider falls back to the environment key. The stacks no longer require `ANTHROPIC_API_KEY`, and the
-  bootstrap script no longer writes it.
+- **The key is not an environment variable.** This fork's stacks (`stack-podman.yml`, `stack-docker.yml`) no longer
+  pass `ANTHROPIC_API_KEY` to any service, the env templates no longer list it and the bootstrap script no longer
+  writes it. The provider and its key are entered only in the GUI. Until a provider and key are saved there, AI
+  reports fail with a message pointing at AI Connections. (Upstream's own compose layer under `docker/` keeps its
+  environment-based settings and is not changed by this.)
 - **Applied per request.** `sf-agents` and the Celery workers re-read the settings on each request (cached for a few
   seconds), so a change takes effect without a redeploy. Requests already running finish on the old provider.
 - **Keys are write-only and encrypted.** They are stored in `tbl_config` under scope `LLM`, encrypted with Fernet using
@@ -673,9 +674,10 @@ stripped, data attributes off) with unit tests. After the change the diagram ren
 previously saved global `_llm_*` settings that nothing read: `sf-agents` used only its container environment, so a key
 typed in the GUI had no effect. Each provider now keeps its own encrypted key, model and base URL, one provider is
 active at a time, and `sf-agents` and the Celery workers read the active one on every request (see "AI providers
-(AI Connections)"). `ANTHROPIC_API_KEY` is no longer required by either stack or written by the bootstrap script;
-it remains an optional fallback. Existing deployments keep working unchanged until a provider is chosen in the GUI.
-After the first GUI key is saved and a report is confirmed, remove `ANTHROPIC_API_KEY` from the stack environment.
+(AI Connections)"). `ANTHROPIC_API_KEY` is gone from the stack files, the env templates and the bootstrap script:
+the key lives only in the GUI. For an existing deployment, save a provider key in AI Connections, confirm a report,
+update the stack file, then delete `ANTHROPIC_API_KEY` from the stack environment (the old stack file requires it, so
+update the file first).
 
 ## Deploy
 
@@ -686,7 +688,7 @@ sequence. In short:
 ```bash
 mkdir -p /srv/spiderfoot/{postgres,redis,qdrant,embeddings-cache}
 ./deploy/bootstrap-spiderfoot-env.sh    # see "Generating the secrets" below
-# then set SPIDERFOOT_TAG and ANTHROPIC_API_KEY in the file it wrote, and deploy the stack
+# then set SPIDERFOOT_TAG in the file it wrote, deploy the stack, and set the AI provider and key in the GUI
 ```
 
 State is bind-mounted at an absolute `/srv/spiderfoot/<service>` path, not a
@@ -714,9 +716,9 @@ deployment. Each deployment gets its own secrets: the development host must
 never hold production credentials. It writes
 `/srv/spiderfoot/stack-spiderfoot-env.env` (chmod 600) and prints the generated
 secrets **once** — copy them into your password manager then. Re-running it is
-always safe: it never overwrites or rotates an existing file. It leaves two
-things for you: set `SPIDERFOOT_TAG` to an exact published tag, and replace
-`ANTHROPIC_API_KEY` (it cannot be generated). Rotating a generated secret later
+always safe: it never overwrites or rotates an existing file. It leaves one
+thing for you: set `SPIDERFOOT_TAG` to an exact published tag. There is no API key
+to set: the AI provider and key are entered in the GUI. Rotating a generated secret later
 has consequences, listed in `stack-podman.env.example`.
 
 The script was recovered from this project's earlier history (it had been
@@ -744,8 +746,8 @@ fork's own.
 - The stacks apply `no-new-privileges`, `cap_drop`, `read_only` and tmpfs
   where the services tolerate it (found by trial — see `stack-podman.yml`'s
   Warnings). `pids_limit`/`mem_limit` are not set yet.
-- AI features call Anthropic directly (Claude Sonnet 5.5, see "AI model") (`sf-agents`; `SF_LLM_PROVIDER=anthropic`,
-  `ANTHROPIC_API_KEY`). There is no LLM proxy: the LiteLLM gateway was removed
+- AI features call Anthropic directly (Claude Sonnet 5.5, see "AI model") (`sf-agents`; the provider and key are set in
+  the GUI, see "AI providers"). There is no LLM proxy: the LiteLLM gateway was removed
   after its supply-chain breach, and it had only relayed to Anthropic anyway.
 - This runs 300+ OSINT modules, including active recon tools that make
   outbound requests to third parties. Only scan targets you are authorised to

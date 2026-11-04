@@ -156,3 +156,15 @@ def test_agent_picks_up_gui_change_and_drops_stale_client(monkeypatch):
     asyncio.run(refresh(agent))
     assert (agent.config.llm_provider, agent.config.llm_api_key, agent.config.llm_model) == ("openai", "gui-key", "gpt-x")
     assert agent._anthropic_client is None and closed == [True]
+
+
+def test_anthropic_without_any_key_points_at_ai_connections(monkeypatch):
+    from spiderfoot.agents.base import AgentConfig, BaseAgent
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    agent = SimpleNamespace(
+        config=AgentConfig(name="t", llm_provider="anthropic", llm_api_key=""),
+        _anthropic_client=None,
+    )
+    with pytest.raises(RuntimeError, match="AI Connections"):
+        asyncio.run(BaseAgent._call_anthropic(agent, [{"role": "user", "content": "hi"}], "m", 10, None))

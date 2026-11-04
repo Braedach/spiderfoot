@@ -408,6 +408,11 @@ class BaseAgent(ABC):
 
         from spiderfoot.ai import anthropic_chat
 
+        if not self.config.llm_api_key and not os.environ.get("ANTHROPIC_API_KEY"):
+            raise RuntimeError(
+                "No Anthropic API key is configured. An administrator needs to add one under AI Connections."
+            )
+
         if self._anthropic_client is None:
             self._anthropic_client = anthropic.AsyncAnthropic(
                 api_key=self.config.llm_api_key or None,  # None -> ANTHROPIC_API_KEY

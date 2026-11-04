@@ -64,6 +64,8 @@
 #       since a human has to get the values out to store them elsewhere
 #
 # Changelog:
+#   1.4.0 (2026-11-05) - No longer writes or asks for ANTHROPIC_API_KEY: the LLM provider and key are set in the GUI
+#                        (AI Connections), not in the environment.
 #   1.3.0 (2026-10-24) - No longer generates SF_LLM_API_KEY: it only authenticated agents to the LiteLLM proxy, which is gone.
 #                        Existing env files keep the line harmlessly. ANTHROPIC_API_KEY is still set by hand.
 #   1.2.0 (2026-10-23) - Recovered into the fork's deploy/ (see Purpose).

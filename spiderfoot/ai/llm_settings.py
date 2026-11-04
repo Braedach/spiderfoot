@@ -7,9 +7,11 @@ which provider is active. They live in ``tbl_config`` under their own scope
 (``LLM``) so they never mix with the global options, and API keys are
 encrypted at rest.
 
-Precedence, resolved on every request so a change in the GUI takes effect
-without a restart: **GUI setting, then the stack environment** (``SF_LLM_*`` /
-``ANTHROPIC_API_KEY``), so an environment-only deployment keeps working.
+Resolved on every request so a change in the GUI takes effect without a
+restart. This fork's stacks no longer carry an LLM key in the environment: the
+provider and key live here. ``resolve()`` returns None only when no provider is
+active, and callers then fall back to whatever ``SF_LLM_*`` they were given
+(e.g. upstream's own compose layer, or a developer's shell).
 
 Encryption: Fernet, with a key derived (HKDF-SHA256) from the JWT secret (``SF_JWT_SECRET``),
 a secret every service already has. Rotating that secret makes stored keys

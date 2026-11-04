@@ -14,7 +14,7 @@
 #     See deploy/README.md for the build -> test -> release flow.
 #
 #     AI report generation (sf-agents) calls Anthropic's API (Claude Sonnet 5.5) directly through the official SDK.
-#     No proxy and no local Ollama. Needs ANTHROPIC_API_KEY.
+#     No proxy and no local Ollama. The provider and its API key are set in the GUI (AI Connections), not in the environment.
 #     Single network for isolation
 #
 #     110 of SpiderFoot's 310 modules need an API key; 80 of those are free (sign up, generate a key)
@@ -55,7 +55,7 @@
 #       1. Generate the runtime secrets (one time only, ever), on the host that runs the stack:
 #             - ./deploy/bootstrap-spiderfoot-env.sh
 #             - This writes /srv/spiderfoot/stack-spiderfoot-env.env (chmod 600) and prints the secrets ONCE.
-#               Then set SPIDERFOOT_TAG and ANTHROPIC_API_KEY in it by hand (it writes them blank / CHANGE_ME).
+#               Then set SPIDERFOOT_TAG in it by hand (it writes it blank). There is no API key to set: that is done in the GUI.
 #             - Re-running it is always safe and never rotates anything. If the secrets are lost later, read the file:
 #               cat /srv/spiderfoot/stack-spiderfoot-env.env
 #       2. Create the data directories:
@@ -100,8 +100,12 @@
 #     - IDS/IPS systems may go ballistic
 #
 # Changelog:
+#   2.11.0 (2026-11-05) - The LLM API key is no longer an environment variable. The provider and key are set in the GUI
+#     (AI Connections), stored encrypted and read per request; ANTHROPIC_API_KEY is no longer passed to any service. sf-agents and
+#     both Celery workers now receive the JWT secret (as SF_JWT_SECRET), which the key encryption derives from. Update this file in
+#     Dockhand, then remove ANTHROPIC_API_KEY from the stack environment.
 #   2.10.0 (2026-10-24) - sf-litellm removed. Its only job was relaying sf-agents' chat calls to Anthropic; sf-agents now calls Claude
-#     directly (SF_LLM_PROVIDER=anthropic, SF_LLM_MODEL=claude-sonnet-5-5, ANTHROPIC_API_KEY now required there). The old service ran
+#     directly (SF_LLM_PROVIDER=anthropic, SF_LLM_MODEL=claude-sonnet-5-5, the key was an environment variable then; it is now set in the GUI, see 2.11.0). The old service ran
 #     ghcr.io/berriai/litellm:main-latest, a floating tag, which is the wrong way to run a package that has had a supply-chain breach.
 #     /srv/spiderfoot/litellm and the database named litellm, if any, can be deleted after the cutover (kept as the rollback).
 #   2.9.0 (2026-10-23) - sf-celery-worker-active: tmpfs over /home/spiderfoot/.config, .cache and .pdcp (mode 1777). The active-scanner
@@ -500,8 +504,7 @@ services:
       # Claude is called directly through the official SDK (the LiteLLM proxy this replaced is gone).
       - SF_LLM_PROVIDER=anthropic
       - SF_LLM_MODEL=${SF_LLM_MODEL:-claude-sonnet-5-5}
-      # Optional fallback only: the provider and key are set in the GUI (AI Connections), which overrides this.
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # No LLM API key here: the provider and key are set in the GUI (AI Connections), stored encrypted.
       - SF_JWT_SECRET=${SF_JWT_SECRET_KEY}
       - SF_QDRANT_BACKEND=http
       - SF_QDRANT_HOST=qdrant
