@@ -6,9 +6,10 @@ An internal-use fork of [poppopjmp/spiderfoot](https://github.com/poppopjmp/spid
 
 ## Current state
 
-- **Latest build:** `v6.1.0-bd.1-rc.11`, deployed to production (Podman, managed through Dockhand). It passed the scan gate on all 5 images: no fixable critical or high vulnerability and no unallowed secret (Trivy), plus an `npm audit` of the frontend dependencies. No non-`rc` release has been cut yet.
+- **Latest published build:** `v6.1.0-bd.1-rc.15`. It passed the scan gate on all 5 images: no fixable critical or high vulnerability and no unallowed secret (Trivy), plus an `npm audit` of the frontend dependencies. **Production (Podman, managed through Dockhand) runs `rc.15`** and has been functionally tested there: login, scan data and exports, correlations, and AI reports with the key set in the GUI. No non-`rc` release has been cut yet; the first (`v6.1.0-bd.1`) follows once `rc.15` or a later build has soaked.
 - **Tag scheme:** `v<upstream base>-bd.<N>` for a release, `-rc.<M>` for a test build. An `-rc` tag never moves `:latest`.
 - **Vulnerabilities:** every Dependabot alert has been reviewed; the few that remain are accepted with reasons (see below).
+- **Long scans, fixed on `master`, ships in the next build (`rc.16`).** On a crawl-heavy target a scan could keep running for hours after new findings stopped (a test scan was at 5.5 hours with 32 events in its last hour). Causes: `gobuster` ran once per discovered URL with no cap (989 URLs at about 11 an hour) and discarded everything it had found whenever a run timed out; the sibling per-URL tools capped runs but counted every URL *seen*, so `dalfox`'s cap was used up by URLs without parameters and `nikto` scanned a whole host once per page; and a worker without an init process left about 1,100 zombie Chromium processes after a screenshot-heavy scan. Now each tool runs once per real target (`gobuster` and `ffuf` per directory, `nikto` per web server, `arjun` and `dalfox` per endpoint), caps count runs, `gobuster` keeps partial results on a timeout, and the worker has `init: true`. Until you are on `rc.16`, note that aborting a scan skips the correlation step, so let a scan finish or run correlations afterwards if you need them.
 - **Never push straight to `master`.** Work happens on a branch, goes through a pull request, and is tested as a release candidate before release.
 
 ## What is different from upstream
@@ -19,7 +20,7 @@ An internal-use fork of [poppopjmp/spiderfoot](https://github.com/poppopjmp/spid
 - A **scan gate** that blocks a push: Trivy fails the build on any fixable critical or high vulnerability or unallowed secret, Grype cross-checks, and `npm audit` covers the frontend's bundled dependencies (which the container scanner cannot see). Accepted findings live in `deploy/trivyignore.txt` with a justification; it is currently empty.
 - Images are scannable (the package list is kept, the package managers are removed), and unused binaries are removed rather than waited on.
 - The active-scanner image builds its Go tools from source with their vulnerable dependencies raised, and drops tools whose own dependencies could not be fixed.
-- Builds run on a dedicated build host with `deploy/publish.sh`; production only ever pulls the published images.
+- Builds run on a dedicated build host with `deploy/publish.sh`; production only ever pulls the published images. `publish.sh` reads the build token from one root-only file, removes its own project's local images before a build and on any exit, and refuses to start with under 12 GB free.
 
 **Scanning and correctness fixes**
 - **Correlation rules** were never loaded by the API, so no scan produced correlation results; they now load from the filesystem, verified end to end on a real scan.
@@ -32,7 +33,7 @@ An internal-use fork of [poppopjmp/spiderfoot](https://github.com/poppopjmp/spid
 - Report generation returned empty or generic output (nine stacked bugs across service access, database wiring, event mapping, vector indexing and timeouts). Reports are now persisted server-side, the analysed-event cap is configurable (`SF_REPORT_MAX_EVENTS_PER_SCAN`), and deleting a scan removes its vectors.
 - Local embeddings use `fastembed` (about 67 MB, no GPU needed) instead of `sentence-transformers` and `torch` (over 1 GB). GPU passthrough is supported but not built.
 - `sf-agents` calls Anthropic directly through the official SDK (no proxy), with a server-side fallback model for requests the primary model's safeguards decline.
-- **AI Connections:** the LLM provider (Anthropic, OpenAI, DeepSeek, Ollama or Mock), its API key and its model are set **only in the GUI**. There is no LLM API key in the environment variables any more: the stacks, env templates and bootstrap script no longer carry one. Keys are stored encrypted and never shown again; the model is chosen from the list the provider offers. One provider is active at a time, with no automatic fallback between providers, so scan findings only go to the one you chose. See [`deploy/README.md`](deploy/README.md) for the details.
+- **AI Connections:** the LLM provider (Anthropic, OpenAI, DeepSeek, Ollama or Mock), its API key and its model are set **only in the GUI**. There is no LLM API key in the environment variables any more: the stacks, env templates and bootstrap script no longer carry one. Keys are stored encrypted and never shown again; the model is chosen from the list the provider offers. One provider is active at a time, with no automatic fallback between providers, so scan findings only go to the one you chose. See [`deploy/README.md`](deploy/README.md) for the details. Ollama needs a network route from `sf-api` and `sf-agents`: see "Ollama and the LLM network" in [`deploy/README.md`](deploy/README.md), which also explains why the maintainer's production stack reuses an existing `llm-net`.
 
 **Frontend**
 - A dedicated Data Source Credentials page and an AI Connections page; Settings grouped by subsystem; SpiderFoot's own REST tokens renamed "Access Tokens" to stop clashing with module API keys.
@@ -41,7 +42,9 @@ An internal-use fork of [poppopjmp/spiderfoot](https://github.com/poppopjmp/spid
 
 ## Breaking change
 
-`requirements.txt` no longer installs `sentence-transformers` or `torch` at all. If `SF_EMBEDDING_PROVIDER=sentence_transformer` is set anywhere it will **silently** fall back to fake, hash-derived embeddings, with no error and quietly wrong report content. Set `SF_EMBEDDING_PROVIDER=fastembed` (the default in both stack files).
+**rc.15: the LLM API key is no longer an environment variable.** Upgrading from rc.14 or earlier requires: (1) replace the stack file (the old one *requires* `ANTHROPIC_API_KEY` and does not pass the JWT secret to `sf-agents` and the workers); (2) redeploy on `rc.15`; (3) sign in as an administrator, open **AI Connections**, enter the provider key, choose a model and make the provider active; (4) delete `ANTHROPIC_API_KEY` from the stack environment. Until a key is saved there, AI reports fail with a message pointing at AI Connections. Keys are encrypted using a key derived from `SF_JWT_SECRET_KEY`, so rotating that secret means entering them again.
+
+**Earlier:** `requirements.txt` no longer installs `sentence-transformers` or `torch` at all. If `SF_EMBEDDING_PROVIDER=sentence_transformer` is set anywhere it will **silently** fall back to fake, hash-derived embeddings, with no error and quietly wrong report content. Set `SF_EMBEDDING_PROVIDER=fastembed` (the default in both stack files).
 
 ## Deploying this fork
 
