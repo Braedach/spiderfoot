@@ -108,11 +108,11 @@ verifies each image's revision label equals the commit being shipped, pushes
 - roughly 30GB free disk and 6GB RAM: `active-scanner` compiles Go and C tools
   from source, and a cache-cold build can take over 20 minutes
 
-The token is prompted for the first time, or read from
-`../.spiderfoot-publish/.ghcr-token` — a directory **beside** the clone, never
-inside it (chmod 600). `publish.sh` refuses to run if that state directory is
-inside the repo. Never pass the token as an argument or env var, and never
-commit it.
+The token is read from `/etc/davros/ghcr-token`, the build host's one shared token file (root-only, `chmod 600`,
+outside every repository and Docker build context, and shared by every project built there). `publish.sh` prompts
+for it if the file is absent, and drops the file and prompts again if GitHub rejects it. It still refuses to run if
+its state directory (log and publish state) is inside the repo. Never pass the token as an argument or env var, and
+never commit it.
 
 **Token scope.** A classic PAT with `repo` can read and write *every*
 repository the account can reach, private ones included; it cannot be narrowed
