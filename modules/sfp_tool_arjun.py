@@ -15,6 +15,7 @@ import tempfile
 
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
 from spiderfoot import SpiderFootEvent
+from spiderfoot.url_targets import endpoint_key
 
 
 class sfp_tool_arjun(SpiderFootAsyncPlugin):
@@ -37,6 +38,8 @@ class sfp_tool_arjun(SpiderFootAsyncPlugin):
             "description": "HTTP parameter discovery tool.",
         },
     }
+
+    _runs = 0  # runs started so far this scan (reset in setup); the cap counts these, not URLs seen
 
     opts = {
         "arjun_path": "",
@@ -66,6 +69,7 @@ class sfp_tool_arjun(SpiderFootAsyncPlugin):
         super().setup(sfc, userOpts or {})
         self.errorState = False
         self.results = self.tempStorage()
+        self._runs = 0
 
     def watchedEvents(self):
         return ["LINKED_URL_INTERNAL", "URL_FORM"]
@@ -92,15 +96,16 @@ class sfp_tool_arjun(SpiderFootAsyncPlugin):
         data = event.data
         if self.errorState:
             return
-        if data in self.results:
-            return
-        self.results[data] = True
-
         if not data.startswith("http"):
             return
-
-        if sum(1 for v in self.results.values() if v) > self.opts["max_targets"]:
+        # parameter discovery is per endpoint: page.jsp?id=1 and page.jsp?id=2 are the same endpoint
+        key = endpoint_key(data)
+        if key is None or key in self.results:
             return
+        self.results[key] = True
+        if self._runs >= self.opts["max_targets"]:
+            return
+        self._runs += 1
 
         binary = self._find_binary()
         if not binary:

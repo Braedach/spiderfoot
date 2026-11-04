@@ -355,6 +355,9 @@ services:
     container_name: sf-celery-worker-active
     hostname: sf-celery-worker-active
     restart: always
+    # PID 1 reaps orphaned child processes. Without it, the headless Chromium trees that gowitness leaves behind
+    # stay as zombies (about 1,100 after one screenshot-heavy scan) until the container restarts.
+    init: true
     profiles:
       - scan
     user: "1000:1000"

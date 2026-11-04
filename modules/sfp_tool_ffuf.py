@@ -16,6 +16,7 @@ import tempfile
 
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
 from spiderfoot import SpiderFootEvent
+from spiderfoot.url_targets import directory_base
 
 
 class sfp_tool_ffuf(SpiderFootAsyncPlugin):
@@ -38,6 +39,8 @@ class sfp_tool_ffuf(SpiderFootAsyncPlugin):
             "description": "Fast web fuzzer for directory, file, and parameter discovery.",
         },
     }
+
+    _runs = 0  # runs started so far this scan (reset in setup); the cap counts these, not URLs seen
 
     opts = {
         "ffuf_path": "",
@@ -82,6 +85,7 @@ class sfp_tool_ffuf(SpiderFootAsyncPlugin):
         super().setup(sfc, userOpts or {})
         self.errorState = False
         self.results = self.tempStorage()
+        self._runs = 0
 
     def watchedEvents(self):
         return ["DOMAIN_NAME", "LINKED_URL_INTERNAL"]
@@ -109,12 +113,19 @@ class sfp_tool_ffuf(SpiderFootAsyncPlugin):
         data = event.data
         if self.errorState:
             return
-        if data in self.results:
+        # one run per directory: a crawl finds many URLs in the same few directories
+        if event.eventType == "DOMAIN_NAME":
+            directory = f"https://{data.lower()}/"
+        else:
+            directory = directory_base(data)
+            if directory is None:
+                return
+        if directory in self.results:
             return
-        self.results[data] = True
-
-        if sum(1 for v in self.results.values() if v) > self.opts["max_targets"]:
+        self.results[directory] = True
+        if self._runs >= self.opts["max_targets"]:
             return
+        self._runs += 1
 
         binary = self._find_binary()
         if not binary:
@@ -128,11 +139,7 @@ class sfp_tool_ffuf(SpiderFootAsyncPlugin):
             self.errorState = True
             return
 
-        if event.eventType == "DOMAIN_NAME":
-            base_url = f"https://{data}/FUZZ"
-        else:
-            # For URLs, append FUZZ to the path
-            base_url = data.rstrip("/") + "/FUZZ"
+        base_url = directory + "FUZZ"
 
         output_path = tempfile.mktemp(suffix=".json")
 
