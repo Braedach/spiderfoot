@@ -43,9 +43,11 @@
 #       to one repository - it can read and write every repo the account can
 #       reach, private ones included. Use a token created only for this, kept
 #       only on the build host, and rotate it. See deploy/README.md "Token
-#       scope". Prompted for on first run, cached beside the clone at
-#       ../.spiderfoot-publish/.ghcr-token (chmod 600, OUTSIDE the repo).
-#       Never pass it as an argument or env var.
+#       scope". Read from /etc/davros/ghcr-token, the build host's one shared
+#       token file (root-only, chmod 600, OUTSIDE the repo; Design-Reference
+#       17.1). Prompted for when that file is absent, and dropped and
+#       re-prompted for when GitHub rejects it. Never pass it as an argument
+#       or env var.
 #     - the tag must already exist on origin (create it on the commit you
 #       mean to ship: the tip of the tested branch for -rc, the merged
 #       commit for a release).
@@ -107,7 +109,9 @@ case "$(realpath -m "$STATE_ROOT")/" in
     exit 1 ;;
 esac
 LOG_FILE="${STATE_ROOT}/publish.log"
-GHCR_TOKEN_FILE="${STATE_ROOT}/.ghcr-token"   # chmod 600, outside the repo
+# The one Davros build token, shared by every project built on this host
+# (Design-Reference.md 17.1). Root-only, outside every repo and Docker build context.
+GHCR_TOKEN_FILE="/etc/davros/ghcr-token"
 STATE_FILE="${STATE_ROOT}/.publish-state"
 
 GHCR_REGISTRY="ghcr.io"
@@ -194,8 +198,8 @@ elif [[ -t 0 ]]; then
   read -srp "GitHub token (classic PAT, write:packages + repo scope): " GH_TOKEN_VAL
   echo
 else
-  error "No ${GHCR_TOKEN_FILE} and no TTY to prompt (unattended run before first interactive setup?)."
-  error "Run once interactively first, or: install -m 600 /dev/null ${GHCR_TOKEN_FILE} and write the token into it."
+  error "No ${GHCR_TOKEN_FILE} and no TTY to prompt."
+  error "Create it (root, chmod 600) with the Davros build token, or run this once interactively."
   exit 1
 fi
 
@@ -223,11 +227,15 @@ fi
 ok "${GHCR_REGISTRY} login successful"
 
 if [[ ! -f "$GHCR_TOKEN_FILE" && -t 0 ]]; then
-  read -rp "Save for future/repeat runs at ${GHCR_TOKEN_FILE}? [y/N] " save_answer
+  read -rp "Save at ${GHCR_TOKEN_FILE} for future runs (shared by every project on this host)? [y/N] " save_answer
   if [[ "$save_answer" =~ ^[Yy] ]]; then
-    ( umask 077; printf '%s\n' "$GH_TOKEN_VAL" > "$GHCR_TOKEN_FILE" )
-    chmod 600 "$GHCR_TOKEN_FILE"
-    info "Saved to ${GHCR_TOKEN_FILE} (chmod 600)"
+    if install -d -m 700 -o root -g root "$(dirname "$GHCR_TOKEN_FILE")" \
+        && ( umask 077; printf '%s\n' "$GH_TOKEN_VAL" > "$GHCR_TOKEN_FILE" ) \
+        && chmod 600 "$GHCR_TOKEN_FILE"; then
+      info "Saved to ${GHCR_TOKEN_FILE}"
+    else
+      warn "Could not write ${GHCR_TOKEN_FILE}; the token was used for this run only."
+    fi
   fi
 fi
 GH_PAT="$GH_TOKEN_VAL"
