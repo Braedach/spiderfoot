@@ -36,3 +36,17 @@ export function sanitizeHTML(dirty: string): string {
     ALLOW_DATA_ATTR: false,
   });
 }
+
+/**
+ * Sanitize a trusted-renderer SVG string (e.g. Mermaid output) for injection.
+ * `sanitizeHTML` allows no SVG elements and strips the whole <svg>, so diagram
+ * output needs its own profile. Mermaid's HTML labels live in <foreignObject>.
+ */
+export function sanitizeSVG(dirty: string): string {
+  return DOMPurify.sanitize(dirty, {
+    USE_PROFILES: { svg: true, svgFilters: true, html: true },
+    ADD_TAGS: ['foreignObject'],
+    HTML_INTEGRATION_POINTS: { foreignobject: true },
+    ALLOW_DATA_ATTR: false,
+  });
+}
