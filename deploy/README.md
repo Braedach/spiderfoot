@@ -111,11 +111,13 @@ verifies each image's revision label equals the commit being shipped, pushes
   tags of the five services) before a build and again on any exit, so a run that stops at the scan gate or the
   push no longer leaves about 4 GB behind. Other projects' images are never touched.
 
-The token is read from `/etc/davros/ghcr-token`, the build host's one shared token file (root-only, `chmod 600`,
-outside every repository and Docker build context, and shared by every project built there). `publish.sh` prompts
-for it if the file is absent, and drops the file and prompts again if GitHub rejects it. It still refuses to run if
-its state directory (log and publish state) is inside the repo. Never pass the token as an argument or env var, and
-never commit it.
+The build token lives in one shared file, `/etc/davros/ghcr-token` (root-only, `chmod 600`, outside every repository
+and Docker build context, shared by every project built on that host). Each project reaches it through a symlink in
+its own state directory (`../.spiderfoot-publish/.ghcr-token`), and `publish.sh` reads the token through that link.
+If GitHub rejects the token, `publish.sh` removes only that project's symlink, never the shared file, and prompts
+for a replacement; a freshly entered token is saved to the shared file and the symlink is recreated, so there is
+never a second copy. It refuses to run if its state directory (log and publish state) is inside the repo. Never
+pass the token as an argument or env var, and never commit it.
 
 **Token scope.** A classic PAT with `repo` can read and write *every*
 repository the account can reach, private ones included; it cannot be narrowed
@@ -688,7 +690,7 @@ the scan gate or the push (rc.1, rc.8, rc.10, rc.14 and the failed rc.15) left a
 saving the 3.2 GB `active-scanner` image for scanning ran out of space. The stale images were removed by hand
 (24 GB free afterwards) and `publish.sh` now removes this project's local images before a build and on any exit,
 and refuses to start with under 12 GB free (see "Prerequisites"). The same run also confirmed the build token
-now read from `/etc/davros/ghcr-token` works (GHCR login succeeded).
+now kept in `/etc/davros/ghcr-token` works (GHCR login succeeded).
 
 ## Deploy
 
