@@ -106,7 +106,7 @@ class LLMConfig:
             "mock": LLMProvider.MOCK,
         }
 
-        return cls(
+        config = cls(
             api_base=os.environ.get("SF_LLM_API_BASE", ""),
             api_key=os.environ.get("SF_LLM_API_KEY", ""),
             model=os.environ.get("SF_LLM_MODEL", "gpt-4o-mini"),
@@ -115,6 +115,17 @@ class LLMConfig:
             max_tokens=int(os.environ.get("SF_LLM_MAX_TOKENS", "4096")),
             timeout=float(os.environ.get("SF_LLM_TIMEOUT", "120.0")),
         )
+
+        # The provider chosen in AI Connections overrides the environment.
+        from spiderfoot.ai import llm_settings
+
+        effective = llm_settings.resolve()
+        if effective is not None:
+            config.api_base = effective.api_base
+            config.api_key = effective.api_key
+            config.model = effective.model
+            config.provider = provider_map.get(effective.provider, LLMProvider.OPENAI)
+        return config
 
     @property
     def endpoint(self) -> str:

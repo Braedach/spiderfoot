@@ -414,6 +414,39 @@ export const dataApi = {
 };
 
 // ── Config API ────────────────────────────────────────────────
+export interface AIProviderStatus {
+  id: string;
+  label: string;
+  needs_key: boolean;
+  key_set: boolean;
+  model: string;
+  api_base: string;
+  default_model: string;
+  default_api_base: string;
+}
+
+export interface AIProvidersResponse {
+  active: string;
+  source: 'gui' | 'environment';
+  providers: AIProviderStatus[];
+  environment: { provider: string; model: string; key_set: boolean };
+}
+
+/** Per-provider LLM settings. API keys are write-only: the server never returns them. */
+export const aiProvidersApi = {
+  list: (signal?: AbortSignal) =>
+    api.get<AIProvidersResponse>('/api/ai/providers', { signal }).then((r) => r.data),
+
+  update: (id: string, body: { api_key?: string; model?: string; api_base?: string }) =>
+    api.put<AIProvidersResponse>(`/api/ai/providers/${id}`, body).then((r) => r.data),
+
+  clearKey: (id: string) =>
+    api.delete<AIProvidersResponse>(`/api/ai/providers/${id}/key`).then((r) => r.data),
+
+  setActive: (provider: string) =>
+    api.put<AIProvidersResponse>('/api/ai/providers/active', { provider }).then((r) => r.data),
+};
+
 export const configApi = {
   get: (signal?: AbortSignal) =>
     api.get<{ summary: object; config: Record<string, unknown>; version: string }>('/api/config', { signal }).then((r) => r.data),

@@ -317,6 +317,7 @@ services:
       - TZ=${TZ}
       - SF_DEPLOYMENT_MODE=${SF_DEPLOYMENT_MODE}
       - SF_POSTGRES_DSN=${SF_DATABASE_URL}
+      - SF_JWT_SECRET=${SF_JWT_SECRET_KEY}
       - SF_REDIS_URL=${SF_REDIS_URL}
       - SF_LOG_FORMAT=${SF_LOG_FORMAT}
       # Real-time Qdrant indexing via EventBus - CURRENTLY INERT. The
@@ -363,6 +364,7 @@ services:
       - TZ=${TZ}
       - SF_DEPLOYMENT_MODE=${SF_DEPLOYMENT_MODE}
       - SF_POSTGRES_DSN=${SF_DATABASE_URL}
+      - SF_JWT_SECRET=${SF_JWT_SECRET_KEY}
       - SF_REDIS_URL=${SF_REDIS_URL}
       - SF_LOG_FORMAT=${SF_LOG_FORMAT}
       # Real-time Qdrant indexing via EventBus - CURRENTLY INERT, same as
@@ -498,7 +500,9 @@ services:
       # Claude is called directly through the official SDK (the LiteLLM proxy this replaced is gone).
       - SF_LLM_PROVIDER=anthropic
       - SF_LLM_MODEL=${SF_LLM_MODEL:-claude-sonnet-5-5}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY}
+      # Optional fallback only: the provider and key are set in the GUI (AI Connections), which overrides this.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - SF_JWT_SECRET=${SF_JWT_SECRET_KEY}
       - SF_QDRANT_BACKEND=http
       - SF_QDRANT_HOST=qdrant
       - SF_QDRANT_PORT=6333

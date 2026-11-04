@@ -279,6 +279,23 @@ class BaseAgent(ABC):
             await self._anthropic_client.close()
             self._anthropic_client = None
 
+    async def _refresh_llm_settings(self) -> None:
+        """Apply the provider chosen in AI Connections (GUI overrides the environment)."""
+        from spiderfoot.ai import llm_settings
+
+        effective = llm_settings.resolve()
+        if effective is None:
+            return
+        cfg = self.config
+        current = (cfg.llm_provider, cfg.llm_model, cfg.llm_api_key, cfg.llm_endpoint)
+        wanted = (effective.provider, effective.model, effective.api_key, effective.api_base)
+        if current == wanted:
+            return
+        cfg.llm_provider, cfg.llm_model, cfg.llm_api_key, cfg.llm_endpoint = wanted
+        if self._anthropic_client is not None:
+            await self._anthropic_client.close()
+            self._anthropic_client = None
+
     async def call_llm(
         self,
         messages: List[Dict[str, str]],
@@ -302,7 +319,10 @@ class BaseAgent(ABC):
         Returns:
             LLM response text
         """
+        await self._refresh_llm_settings()
         model = model or self.config.llm_model
+        if self.config.llm_provider == "mock":
+            return "[mock response] No real model is selected in AI Connections."
         if self.config.llm_provider == "anthropic":
             return await self._call_anthropic(messages, model, max_tokens, response_format)
 

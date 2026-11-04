@@ -294,6 +294,31 @@ and checksum-verified; Python tools live in their own hash-locked venv.
   packages in Qdrant's SBOM file: neither is ours to patch; revisit when the
   maintainers ship. Grype's openssl findings are Debian-backport false positives.
 
+### AI providers (AI Connections)
+
+The provider behind AI reports and analysis is set in the GUI, under **AI Connections** (administrators only).
+How it behaves:
+
+- **One active provider.** Anthropic, OpenAI, DeepSeek, Ollama and Mock each keep their own key, model and base URL,
+  but a single setting chooses the active one. Every report and agent call uses it; there is no routing between them.
+- **No automatic fallback between providers.** A failed request fails; it is never retried on another provider, so
+  scan findings only go to the provider the administrator chose. (The server-side fallback described under "AI model"
+  is within Anthropic and is unrelated.)
+- **GUI overrides the environment.** If a provider is active in the GUI it wins. If none is, the stack environment
+  (`SF_LLM_*`, `ANTHROPIC_API_KEY`) is used, so an environment-only deployment still works. A blank key on the active
+  Anthropic provider falls back to the environment key. The stacks no longer require `ANTHROPIC_API_KEY`, and the
+  bootstrap script no longer writes it.
+- **Applied per request.** `sf-agents` and the Celery workers re-read the settings on each request (cached for a few
+  seconds), so a change takes effect without a redeploy. Requests already running finish on the old provider.
+- **Keys are write-only and encrypted.** They are stored in `tbl_config` under scope `LLM`, encrypted with Fernet using
+  a key derived (HKDF-SHA256) from the stack's `SF_JWT_SECRET_KEY`; the API only ever reports "key set". **Rotating
+  `SF_JWT_SECRET_KEY` makes stored keys undecryptable**; they then show as "No key" and must be entered again. The
+  API, `sf-agents` and both Celery workers all receive that secret (as `SF_JWT_SECRET`) for this reason.
+- **One model per provider**; a blank model uses the provider's default.
+
+Code: `spiderfoot/ai/llm_settings.py` (storage, encryption, resolution), `spiderfoot/api/routers/ai_providers.py`
+(admin-only API), `frontend/src/pages/AIConnections.tsx`.
+
 ### AI model
 
 `sf-agents` uses `claude-sonnet-5-5` (`SF_LLM_MODEL`). Anthropic's safeguards on it can decline a request
@@ -643,6 +668,14 @@ workspace IaC Map diagram **rendered blank on master too**. `WorkspaceIaCTab` pa
 (DOMPurify SVG profile, `foreignObject` as an HTML integration point, scripts and handlers still
 stripped, data attributes off) with unit tests. After the change the diagram renders on mermaid 12
 (6 nodes, 12 edges, correct labels and colours, no script or handler attributes in the output).
+
+**2026-11-05: AI providers are managed in the GUI and override the environment.** The AI Connections page
+previously saved global `_llm_*` settings that nothing read: `sf-agents` used only its container environment, so a key
+typed in the GUI had no effect. Each provider now keeps its own encrypted key, model and base URL, one provider is
+active at a time, and `sf-agents` and the Celery workers read the active one on every request (see "AI providers
+(AI Connections)"). `ANTHROPIC_API_KEY` is no longer required by either stack or written by the bootstrap script;
+it remains an optional fallback. Existing deployments keep working unchanged until a provider is chosen in the GUI.
+After the first GUI key is saved and a report is confirmed, remove `ANTHROPIC_API_KEY` from the stack environment.
 
 ## Deploy
 
