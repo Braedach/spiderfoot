@@ -96,18 +96,19 @@ See the PR for full detail on each.
 
 ## Dependabot and vulnerability review
 
-Every Dependabot alert on this repository has been reviewed, and corrective action has been taken wherever a fix exists. Reviewed **2026-11-03/04**; 233 alerts were open when Dependabot was enabled, **7 remain**, none critical and none high in anything that ships.
+Every Dependabot alert on this repository has been reviewed, and corrective action has been taken wherever a fix exists. Reviewed **2026-11-03/04**; 233 alerts were open when Dependabot was enabled, **9 remain**, none critical and none high in anything that ships.
 
 What was done:
 - Frontend npm dependencies (143 alerts) were patched with the 14-day cool-down respected, plus two named security exceptions (`follow-redirects`, `vite`). They were an unscanned gap, because the container scanner cannot see inside the minified JS bundle, so `deploy/publish.sh` now runs `npm audit` against the lockfile and fails the build on a high or critical runtime finding.
 - Upstream's stale `Pipfile`/`Pipfile.lock` (86 alerts; no image has ever installed from them) were removed. The images install from the hash-locked `deploy/requirements.lock`.
 - Python image dependencies are gated by Trivy on every build; nothing is published with a fixable critical or high finding. See `deploy/README.md` for the build history.
 
-The 7 that remain are real advisories, not false positives, and are accepted for these reasons:
+The 9 that remain are real advisories, not false positives, and are accepted for these reasons:
 
 | Alerts | Package | Severity | Why accepted |
 |---|---|---|---|
 | 6 | `js-yaml`, `@hey-api/openapi-ts`, `minimatch` | 3 high, 3 medium | Frontend **dev tooling only** (API client generator, linter). Never copied into the image: the frontend image contains only the built static assets. The generator is also a required peer of the generated API client, so it can only move together with a regenerate-and-compare migration (to 0.99); the linter fix needs eslint 10. Tracked as separate work. |
+| 2 | `setuptools` | 1 low, 1 medium | Build tooling pinned at 82.0.1 in the image lock. The advisories are Windows (`namespace_packages.txt` path escape) and macOS (sdist `MANIFEST.in` Unicode collision) specific, so they do not apply to the Linux images. The fix (84.1.0) is now old enough for the cool-down, but is a two-major jump in build tooling: to be done as its own tested change, not bundled in. |
 | 1 | `paramiko` | low | `rsakey.py` permits SHA-1 for RSA signatures. No patched version exists upstream. Revisit when one is published. |
 
 The test runner (`vitest` 5, which cleared the two critical `tinypool` alerts) and `mermaid` 12 (which cleared the `katex` alert) were upgraded on 2026-11-04.
