@@ -25,6 +25,8 @@
 #   - Upgrades brotli-libs from Alpine before apk is removed (1.0.2, 2026-10-24): the pinned nginx
 #     image carried brotli-libs 1.2.0-r1 (CVE-2026-111497, fixed in 1.2.1-r0) and upstream had not
 #     rebuilt it. The digest pins the base; this one package comes from the distro.
+#   - Likewise upgrades libexpat (2026-11-03): the newest nginx:1.30-alpine still carried 2.9.0-r0
+#     (CVE-2026-117610, CVE-2026-118370, fixed in 2.10.0-r0).
 #   - Dropped `apk add gettext`: the official nginx image already ships
 #     envsubst (gettext-envsubst + libintl), so it was a redundant package and
 #     an unpinned network fetch at build time.
@@ -80,7 +82,7 @@ ENV SF_AGENTS_URL=http://sf-agents:8100
 # uses busybox wget, and Grype flagged curl 8.22.0 with a HIGH finding that has
 # no fix yet - an unfixable CVE in an unused binary is best removed, not
 # waited on) and apk, to prevent in-container installs.
-RUN apk --no-cache upgrade brotli-libs && apk --no-cache del curl apk-tools
+RUN apk --no-cache upgrade brotli-libs libexpat && apk --no-cache del curl apk-tools
 
 # Create non-root nginx user directories and fix ownership
 RUN mkdir -p /var/cache/nginx /var/run /var/log/nginx && \
