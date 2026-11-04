@@ -15,6 +15,7 @@ import tempfile
 
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
 from spiderfoot import SpiderFootEvent
+from spiderfoot.url_targets import endpoint_key
 
 
 class sfp_tool_dalfox(SpiderFootAsyncPlugin):
@@ -37,6 +38,8 @@ class sfp_tool_dalfox(SpiderFootAsyncPlugin):
             "description": "XSS vulnerability scanner and parameter analysis tool.",
         },
     }
+
+    _runs = 0  # runs started so far this scan (reset in setup); the cap counts these, not URLs seen
 
     opts = {
         "dalfox_path": "",
@@ -68,6 +71,7 @@ class sfp_tool_dalfox(SpiderFootAsyncPlugin):
         super().setup(sfc, userOpts or {})
         self.errorState = False
         self.results = self.tempStorage()
+        self._runs = 0
 
     def watchedEvents(self):
         return ["URL_FORM", "LINKED_URL_INTERNAL"]
@@ -100,16 +104,17 @@ class sfp_tool_dalfox(SpiderFootAsyncPlugin):
         data = event.data
         if self.errorState:
             return
-        if data in self.results:
-            return
-        self.results[data] = True
-
         # Only scan URLs with parameters
         if not self._has_params(data):
             return
-
-        if sum(1 for v in self.results.values() if v) > self.opts["max_targets"]:
+        # one run per endpoint and parameter-name set: ?id=1 and ?id=2 are the same test
+        key = endpoint_key(data, with_param_names=True)
+        if key is None or key in self.results:
             return
+        self.results[key] = True
+        if self._runs >= self.opts["max_targets"]:
+            return
+        self._runs += 1
 
         binary = self._find_binary()
         if not binary:

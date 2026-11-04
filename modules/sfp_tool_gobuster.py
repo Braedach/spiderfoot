@@ -27,6 +27,7 @@ import io
 
 from spiderfoot import SpiderFootEvent
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
+from spiderfoot.url_targets import directory_base
 
 
 class sfp_tool_gobuster(SpiderFootAsyncPlugin):
@@ -54,6 +55,8 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
         },
     }
 
+    _runs = 0  # directories brute-forced so far this scan (reset in setup)
+
     # Default options
     opts = {
         "gobuster_path": "/tools/bin/gobuster",
@@ -65,6 +68,7 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
         "extensions": "php,asp,aspx,jsp,html,htm,js",
         "use_proxy": False,
         "soft_404_detection": True,
+        "max_targets": 25,
         # Remote execution options
         "remote_enabled": False,
         "remote_host": "",
@@ -91,6 +95,8 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
         "for every path (Angular/React/Vue client-side routing) makes EVERY wordlist entry a false "
         "'hit', each spawning its own crawl/probe downstream - confirmed live: a scan that should "
         "take minutes ran for 16+ hours against OWASP Juice Shop.",
+        "max_targets": "Maximum number of distinct directories to brute-force per scan. Each URL is reduced to "
+        "its directory (query string and file name dropped), so page.jsp?id=1 and page.jsp?id=2 are one target.",
         "remote_enabled": "Enable remote execution via SSH (true/false)",
         "remote_host": "Remote SSH host (IP or hostname)",
         "remote_user": "Remote SSH username",
@@ -109,6 +115,7 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
         super().setup(sfc, userOpts or {})
         self.errorState = False
         self.results = self.tempStorage()
+        self._runs = 0
     # What events is this module interested in for input
     def watchedEvents(self) -> list:
         """Return the list of events this module watches."""
@@ -189,8 +196,19 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
 
         return length
 
+    @staticmethod
+    def _discard(path: str) -> None:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
     def execute_command(self, cmd: list[str]):
-        """Execute an external command safely (no shell) and return the output file path."""
+        """Execute an external command safely (no shell) and return the output file path.
+
+        gobuster writes each hit to the output file as it finds it, so a run that hits the wall-clock limit still
+        leaves usable results; those are returned instead of being thrown away.
+        """
         self.debug(f"Executing command: {cmd}")
         output_file = tempfile.NamedTemporaryFile(mode="w+", delete=False, suffix=".json")
         output_file.close()
@@ -203,24 +221,23 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
                 text=True,
                 timeout=self.opts.get("timeout", 30) * 10,  # generous wall-clock limit
             )
-
-            if result.returncode != 0:
-                self.error(f"Failed to execute gobuster (exit {result.returncode}): {result.stderr.strip()}")
-                return None
-
-            return output_file.name
         except subprocess.TimeoutExpired:
+            if os.path.getsize(output_file.name) > 0:
+                self.error("Gobuster execution timed out; using the results found before the limit")
+                return output_file.name
             self.error("Gobuster execution timed out")
+            self._discard(output_file.name)
             return None
         except Exception as e:
             self.error(f"Failed to execute gobuster: {e}")
+            self._discard(output_file.name)
             return None
-        finally:
-            try:
-                if not os.path.isfile(output_file.name):
-                    os.unlink(output_file.name)
-            except OSError:
-                pass
+
+        if result.returncode != 0:
+            self.error(f"Failed to execute gobuster (exit {result.returncode}): {result.stderr.strip()}")
+            self._discard(output_file.name)
+            return None
+        return output_file.name
 
     def run_remote_tool(self, target_url: str) -> dict | None:
         """Run remote tool."""
@@ -290,10 +307,19 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
         if self.errorState:
             return
 
-        if eventData in self.results:
+        # Brute-force each directory once: a URL's query string and file name are not a directory, and a crawl finds
+        # hundreds of URLs in the same few directories.
+        target = directory_base(eventData)
+        if target is None or target in self.results:
             return
-
-        self.results[eventData] = True
+        self.results[target] = True
+        if self._runs >= self.opts["max_targets"]:
+            if self._runs == self.opts["max_targets"]:
+                self._runs += 1
+                self.info(f"gobuster: reached max_targets ({self.opts['max_targets']}); skipping further directories.")
+            return
+        self._runs += 1
+        eventData = target
 
         # Remote execution support (exclusive)
         if self.opts.get("remote_enabled"):

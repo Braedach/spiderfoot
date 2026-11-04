@@ -15,6 +15,7 @@ import tempfile
 
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
 from spiderfoot import SpiderFootEvent
+from spiderfoot.url_targets import host_key
 
 
 class sfp_tool_nikto(SpiderFootAsyncPlugin):
@@ -37,6 +38,8 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
             "description": "Web server vulnerability scanner.",
         },
     }
+
+    _runs = 0  # runs started so far this scan (reset in setup); the cap counts these, not URLs seen
 
     opts = {
         "nikto_path": "",
@@ -66,6 +69,7 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
         super().setup(sfc, userOpts or {})
         self.errorState = False
         self.results = self.tempStorage()
+        self._runs = 0
 
     def watchedEvents(self):
         return ["DOMAIN_NAME", "IP_ADDRESS", "LINKED_URL_INTERNAL"]
@@ -97,24 +101,27 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
         data = event.data
         if self.errorState:
             return
-        if data in self.results:
+        # nikto scans a whole web server, so run it once per server rather than once per page
+        if data.startswith("http"):
+            target = host_key(data)
+            if target is None:
+                return
+            key = target
+        else:
+            target = data
+            key = f"http://{data.lower()}"
+        if key in self.results:
             return
-        self.results[data] = True
-
-        if sum(1 for v in self.results.values() if v) > self.opts["max_targets"]:
+        self.results[key] = True
+        if self._runs >= self.opts["max_targets"]:
             return
+        self._runs += 1
 
         binary = self._find_binary()
         if not binary:
             self.error("nikto not found. Install with: apt install nikto")
             self.errorState = True
             return
-
-        # Determine target
-        if data.startswith("http"):
-            target = data
-        else:
-            target = data
 
         output_path = tempfile.mktemp(suffix=".csv")
 
