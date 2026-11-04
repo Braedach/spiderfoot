@@ -198,7 +198,7 @@ export default function AIConnectionsPage() {
     <div className="space-y-6">
       <PageHeader
         title="AI Connections"
-        subtitle="The model behind AI reports and analysis. Keys are stored encrypted and never shown again. Settings here override the server environment."
+        subtitle="The model behind AI reports and analysis. Keys are entered here only, stored encrypted and never shown again."
       />
 
       {isLoading && (
@@ -218,7 +218,7 @@ export default function AIConnectionsPage() {
               </p>
             ) : (
               <p className="text-sm text-dark-300">
-                None chosen here, so the AI service uses its own environment settings.
+                No provider is active yet, so AI reports and analysis cannot run. Save a key for a provider below and make it active.
               </p>
             )}
             <p className="mt-2 flex items-start gap-1.5 text-xs text-dark-500">
@@ -228,7 +228,7 @@ export default function AIConnectionsPage() {
             </p>
             {activeProvider && (
               <button className="btn-secondary mt-3" onClick={() => aiProvidersApi.setActive('').then(onChanged)}>
-                Use the server environment instead
+                Deactivate the current provider
               </button>
             )}
           </div>
@@ -240,7 +240,7 @@ export default function AIConnectionsPage() {
             <ul className="space-y-1.5 text-xs text-dark-400 list-disc pl-4">
               <li><strong className="text-dark-300">One active provider.</strong> You can save settings for several providers, but all AI reports and analysis use the active one only. Switching takes effect within a few seconds, and requests already running finish on the old provider.</li>
               <li><strong className="text-dark-300">No automatic fallback.</strong> If the active provider fails, the request fails; it is never retried on a different provider. Scan findings (hosts, credentials, vulnerabilities) go only to the provider you chose.</li>
-              <li><strong className="text-dark-300">These settings override the server environment.</strong> If no provider is active here, the server&apos;s <code>SF_LLM_*</code> / <code>ANTHROPIC_API_KEY</code> settings are used, so an environment-only setup keeps working. A blank key on the active Anthropic provider also falls back to the environment key.</li>
+              <li><strong className="text-dark-300">The key is not stored in the server environment.</strong> Provider keys are entered here and nowhere else. Until a provider and key are saved, AI reports and analysis cannot run.</li>
               <li><strong className="text-dark-300">Keys are write-only.</strong> They are stored encrypted in the database and never displayed again; to change one, enter a new key. Only administrators can view or change this page.</li>
               <li><strong className="text-dark-300">If the server&apos;s <code>SF_JWT_SECRET_KEY</code> is rotated</strong>, stored keys can no longer be decrypted and show as &quot;No key&quot;; enter them again.</li>
               <li><strong className="text-dark-300">One model per provider, chosen from what it offers.</strong> Once a key is saved, the model list is fetched from the provider (the key never leaves the server). If the list can&apos;t be loaded you can type a model name; leave it blank for the provider&apos;s default.</li>

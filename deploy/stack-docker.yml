@@ -23,7 +23,7 @@
 #
 #   Usage:
 #     ./deploy/bootstrap-spiderfoot-env.sh      # once: generates the secrets file
-#     # then edit /srv/spiderfoot/stack-spiderfoot-env.env: set SPIDERFOOT_TAG and ANTHROPIC_API_KEY
+#     # then edit /srv/spiderfoot/stack-spiderfoot-env.env: set SPIDERFOOT_TAG (the AI provider and key are set in the GUI, not here)
 #     mkdir -p /srv/spiderfoot/{postgres,redis,qdrant,embeddings-cache}
 #     docker compose -f stack-docker.yml --env-file /srv/spiderfoot/stack-spiderfoot-env.env up -d
 #
@@ -35,7 +35,7 @@
 #     - /srv/spiderfoot/* exist. Docker has no ":U" flag, so ownership is set
 #       on the host: postgres data dir owned by uid 70 (the postgres:alpine
 #       user). Docker will create missing directories root-owned on first up.
-#     - ANTHROPIC_API_KEY in the env file (sf-agents calls Claude Sonnet 5.5 directly)
+#     - An AI provider and key, entered in the GUI under AI Connections after first login (not an environment variable)
 #
 #   Warnings:
 #     - SPIDERFOOT_TAG is REQUIRED and has no default; -rc tags never move
@@ -357,8 +357,7 @@ services:
       # Claude is called directly through the official SDK (the LiteLLM proxy this replaced is gone).
       - SF_LLM_PROVIDER=anthropic
       - SF_LLM_MODEL=${SF_LLM_MODEL:-claude-sonnet-5-5}
-      # Optional fallback only: the provider and key are set in the GUI (AI Connections), which overrides this.
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # No LLM API key here: the provider and key are set in the GUI (AI Connections), stored encrypted.
       - SF_JWT_SECRET=${SF_JWT_SECRET_KEY}
       - SF_QDRANT_BACKEND=http
       - SF_QDRANT_HOST=qdrant
