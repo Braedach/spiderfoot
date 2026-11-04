@@ -168,3 +168,37 @@ def test_anthropic_without_any_key_points_at_ai_connections(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="AI Connections"):
         asyncio.run(BaseAgent._call_anthropic(agent, [{"role": "user", "content": "hi"}], "m", 10, None))
+
+
+def test_gui_model_wins_over_a_stale_model_passed_by_the_caller(monkeypatch):
+    import types
+
+    from spiderfoot.agents.base import AgentConfig, BaseAgent
+
+    seen = []
+
+    async def fake_anthropic(messages, model, max_tokens, response_format):
+        seen.append(model)
+        return "ok"
+
+    agent = SimpleNamespace(
+        config=AgentConfig(name="t", llm_provider="anthropic", llm_model="claude-env", llm_api_key="k"),
+        _anthropic_client=None,
+        _call_anthropic=fake_anthropic,
+    )
+    agent._refresh_llm_settings = types.MethodType(BaseAgent._refresh_llm_settings, agent)
+    call = BaseAgent.call_llm
+
+    llm_settings.set_provider("anthropic", api_key="gui-key", model="claude-gui")
+    llm_settings.set_active("anthropic")
+    msgs = [{"role": "user", "content": "hi"}]
+
+    # report_generator passes model=self.config.llm_model, read before the refresh: it must not pin the old model
+    asyncio.run(call(agent, msgs, model="claude-env"))
+    assert seen[-1] == "claude-gui"
+    # no model passed: the GUI model
+    asyncio.run(call(agent, msgs))
+    assert seen[-1] == "claude-gui"
+    # an explicit, different model is respected
+    asyncio.run(call(agent, msgs, model="a-specific-model"))
+    assert seen[-1] == "a-specific-model"

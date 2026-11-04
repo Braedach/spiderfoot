@@ -319,8 +319,12 @@ class BaseAgent(ABC):
         Returns:
             LLM response text
         """
+        stale_default = self.config.llm_model
         await self._refresh_llm_settings()
-        model = model or self.config.llm_model
+        # A caller that passes model=self.config.llm_model read it before the refresh above, so it would pin the
+        # old model over the one chosen in AI Connections. An explicit, different model is still respected.
+        if model is None or model == stale_default:
+            model = self.config.llm_model
         if self.config.llm_provider == "mock":
             return "[mock response] No real model is selected in AI Connections."
         if self.config.llm_provider == "anthropic":
