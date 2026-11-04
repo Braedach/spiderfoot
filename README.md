@@ -6,9 +6,10 @@ An internal-use fork of [poppopjmp/spiderfoot](https://github.com/poppopjmp/spid
 
 ## Current state
 
-- **Latest build:** `v6.1.0-bd.1-rc.11`, deployed to production (Podman, managed through Dockhand). It passed the scan gate on all 5 images: no fixable critical or high vulnerability and no unallowed secret (Trivy), plus an `npm audit` of the frontend dependencies. No non-`rc` release has been cut yet.
+- **Latest published build:** `v6.1.0-bd.1-rc.15`. It passed the scan gate on all 5 images: no fixable critical or high vulnerability and no unallowed secret (Trivy), plus an `npm audit` of the frontend dependencies. **Production (Podman, managed through Dockhand) is still on `rc.11`** while a long comparison scan finishes; production moves to `rc.15` after that. No non-`rc` release has been cut yet.
 - **Tag scheme:** `v<upstream base>-bd.<N>` for a release, `-rc.<M>` for a test build. An `-rc` tag never moves `:latest`.
 - **Vulnerabilities:** every Dependabot alert has been reviewed; the few that remain are accepted with reasons (see below).
+- **Known issue, under investigation: long scans.** On a crawl-heavy target, the per-URL tool modules (`gobuster`, `nikto`, `arjun`) run one URL at a time and give up on each after a few minutes, so a scan can keep running for hours after new findings have stopped (a test scan was at 5.5 hours with 32 events in its last hour). The findings are produced early; the tail is mostly timeouts. Aborting a scan skips the correlation step, so let a scan finish, or run correlations afterwards, if you need correlation results.
 - **Never push straight to `master`.** Work happens on a branch, goes through a pull request, and is tested as a release candidate before release.
 
 ## What is different from upstream
