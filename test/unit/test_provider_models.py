@@ -107,3 +107,18 @@ def test_non_http_base_is_refused():
     llm_settings.set_provider("openai", api_key="sk", api_base="file:///etc/passwd")
     out = provider_models.list_models("openai")
     assert out["models"] == [] and "http" in out["error"]
+
+
+def test_login_page_instead_of_json_gives_a_clear_message(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+    monkeypatch.setattr("requests.get", lambda *a, **k: FakeResponse())
+    llm_settings.set_provider("ollama", api_base="https://ollama.example.com")
+    out = provider_models.list_models("ollama")
+    assert out["models"] == []
+    assert "did not return a model list" in out["error"] and "Expecting value" not in out["error"]

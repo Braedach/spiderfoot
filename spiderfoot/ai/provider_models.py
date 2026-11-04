@@ -14,6 +14,7 @@ from spiderfoot.ai import llm_settings
 log = logging.getLogger("sf.ai.provider_models")
 
 _TIMEOUT = 10
+_NOT_JSON = "That address did not return a model list. If it is behind a login page or proxy, use the service's direct address."
 _OPENAI_BASE = "https://api.openai.com/v1"
 # The OpenAI models endpoint also lists embedding, audio and image models, which cannot answer reports.
 _NOT_CHAT = re.compile(r"embedding|whisper|tts|dall-e|moderation|audio|realtime|transcribe|image|davinci|babbage", re.I)
@@ -39,15 +40,23 @@ def _anthropic(key: str) -> dict[str, Any]:
     return _result(models)
 
 
+class _BadAddress(ValueError):
+    """The API base URL itself is unusable (shown to the administrator as-is)."""
+
+
 def _http_json(url: str, key: str) -> Any:
     import requests
 
     if not re.match(r"^https?://", url):
-        raise ValueError("The API base URL must start with http:// or https://")
+        raise _BadAddress("The API base URL must start with http:// or https://")
     headers = {"Authorization": f"Bearer {key}"} if key else {}
     response = requests.get(url, headers=headers, timeout=_TIMEOUT)
     response.raise_for_status()
-    return response.json()
+    try:
+        return response.json()
+    except ValueError:
+        # A 200 that is not JSON is almost always a login or proxy page in front of the API.
+        raise _BadAddress(_NOT_JSON) from None
 
 
 def _openai_compatible(preset: str, key: str, base: str) -> dict[str, Any]:
@@ -56,7 +65,7 @@ def _openai_compatible(preset: str, key: str, base: str) -> dict[str, Any]:
     base = (base or _OPENAI_BASE).rstrip("/")
     try:
         data = _http_json(f"{base}/models", key)
-    except ValueError as exc:
+    except _BadAddress as exc:
         return _result([], str(exc))
     except requests.HTTPError as exc:
         code = exc.response.status_code if exc.response is not None else "unknown"
@@ -74,7 +83,7 @@ def _ollama(base: str) -> dict[str, Any]:
 
     try:
         data = _http_json(f"{base.rstrip('/')}/api/tags", "")
-    except ValueError as exc:
+    except _BadAddress as exc:
         return _result([], str(exc))
     except requests.RequestException:
         return _result([], "Could not reach Ollama at that address.")

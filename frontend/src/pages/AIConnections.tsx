@@ -8,6 +8,7 @@ import { useDocumentTitle } from '../hooks/useDocumentTitle';
 // DeepSeek is not its own backend provider type: its API is wire-compatible
 // with OpenAI's, so it is the OpenAI provider with DeepSeek's base URL.
 const NOTES: Record<string, string> = {
+  ollama: 'Use an address the SpiderFoot containers can reach directly, such as http://<host-ip>:11434. A reverse-proxy address with a login page in front will not work.',
   deepseek: 'Uses the OpenAI-compatible provider with DeepSeek’s endpoint.',
   mock: 'No real model: returns canned responses, for testing without spending API credits.',
 };
