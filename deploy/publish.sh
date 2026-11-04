@@ -266,8 +266,29 @@ SHA=$(git -C "$REPO_ROOT" rev-parse --short HEAD)
 info "Source at ${TAG} (${SHA})"
 
 # ---- build ------------------------------------------------------------------
-info "Pruning stale build cache before starting (active-scanner fills it fast)"
+# Local images of this project (every tag, including the old repo-scoped names). A run that stops at
+# the scan gate or the push never reaches the cleanup at the end, and each one leaves about 4 GB
+# (active-scanner alone is 3.2 GB), so they are removed before a build and again on ANY exit.
+# Other projects' images on this host are never touched.
+remove_local_images() {
+  docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null \
+    | grep -E '^(ghcr\.io/braedach/)?spiderfoot(-(base|api|scanner|active-scanner|frontend)|/spiderfoot-[a-z-]+):' \
+    | xargs -r docker rmi >/dev/null 2>&1 || true
+}
+info "Removing local SpiderFoot images left by earlier runs, and pruning stale build cache"
+remove_local_images
 docker builder prune -af >>"$LOG_FILE" 2>&1 || true
+trap remove_local_images EXIT
+
+# A build needs room for the images, their layers, and the tar the scan gate saves each image to.
+MIN_FREE_GB=12
+DOCKER_ROOT=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)
+FREE_GB=$(df -BG --output=avail "$DOCKER_ROOT" 2>/dev/null | tail -1 | tr -dc '0-9')
+if [[ -n "$FREE_GB" && "$FREE_GB" -lt "$MIN_FREE_GB" ]]; then
+  error "Only ${FREE_GB} GB free under ${DOCKER_ROOT}; a build needs about ${MIN_FREE_GB} GB. Free space (other projects' old images?) and rerun."
+  exit 1
+fi
+info "Free space under ${DOCKER_ROOT}: ${FREE_GB:-unknown} GB"
 
 build_service() {   # $1 = service
   local svc="$1" local_ref="spiderfoot-$1:${TAG}" dockerfile ctx
