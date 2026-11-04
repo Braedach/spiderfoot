@@ -12,7 +12,7 @@ import {
   XCircle, AlertTriangle, ChevronDown, ChevronRight,
   Code2, RefreshCw, Bot, Shield, ThumbsUp,
 } from 'lucide-react';
-import { sanitizeHTML } from '../../lib/sanitize';
+import { sanitizeSVG } from '../../lib/sanitize';
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -773,7 +773,7 @@ function WorkspaceIaCTab({ workspace, workspaceId, targets, scans }: WorkspaceIa
     const diagramId = `ws-iac-${workspaceId.replace(/[^a-zA-Z0-9]/g, '')}`;
     (mermaid.render(diagramId, source) as Promise<{ svg: string }>)
       .then(({ svg }) => {
-        if (alive) { setSvgContent(sanitizeHTML(svg)); setLoading(false); }
+        if (alive) { setSvgContent(sanitizeSVG(svg)); setLoading(false); }
       })
       .catch((err: Error) => {
         if (alive) { setRenderErr(err.message); setLoading(false); }

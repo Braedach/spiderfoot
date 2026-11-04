@@ -635,6 +635,15 @@ does not work, because it is a required peer of `@hey-api/client-axios`, whose g
 `src/api/client.ts` and `src/api/index.ts` import. Its fix (0.99) needs a regenerate-and-compare
 migration, and the inputs for that (`openapi.json`, `dump_openapi.py`) are not in the repository.
 
+**2026-11-04: `mermaid` upgraded to 12.2.0** (pulls `katex` 0.18.10), clearing the last runtime
+`katex` alert; 12.2.0 was published 2026-10-13, inside the normal cool-down. Checked in a real
+browser against the local stack, not just unit tests, and compared with master (mermaid 11): the
+workspace IaC Map diagram **rendered blank on master too**. `WorkspaceIaCTab` passed the SVG to
+`sanitizeHTML`, whose HTML-only allow-list stripped the whole `<svg>`. Added `sanitizeSVG`
+(DOMPurify SVG profile, `foreignObject` as an HTML integration point, scripts and handlers still
+stripped, data attributes off) with unit tests. After the change the diagram renders on mermaid 12
+(6 nodes, 12 edges, correct labels and colours, no script or handler attributes in the output).
+
 ## Deploy
 
 Production (Podman, `stack-podman.yml`) and development (Docker,
