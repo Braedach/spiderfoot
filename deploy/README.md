@@ -625,6 +625,16 @@ The `setuptools` floor raised in the previous entry was reverted: 84.x is outsid
 window and a two-major jump for build tooling isn't worth low/medium findings in a file
 no image uses. The new `npm audit` gate passed on this run.
 
+**2026-11-04: frontend test runner upgraded to vitest 5.1.0 (and `@types/node` 24).**
+Clears both critical `tinypool` alerts and the `vitest`/`@vitest/mocker` advisories. vitest 5.1.0
+(published 2026-11-02) is a named security exception to the 14-day cool-down; 5.0.x itself
+carries a moderate advisory fixed in 5.1.0. `@types/node` moves to 24 because vitest 5 needs 22 or
+newer and the build image is Node 24. `tsc`, the 300 frontend tests, the build and `npm ci` pass;
+the runtime `npm audit` gate still passes. Left alone on purpose: removing `@hey-api/openapi-ts`
+does not work, because it is a required peer of `@hey-api/client-axios`, whose generated client
+`src/api/client.ts` and `src/api/index.ts` import. Its fix (0.99) needs a regenerate-and-compare
+migration, and the inputs for that (`openapi.json`, `dump_openapi.py`) are not in the repository.
+
 ## Deploy
 
 Production (Podman, `stack-podman.yml`) and development (Docker,
