@@ -1,98 +1,59 @@
-# braedach/spiderfoot — fix fork
+# braedach/spiderfoot — hardened fork
 
-This is a fork of [poppopjmp/spiderfoot](https://github.com/poppopjmp/spiderfoot) holding a specific set of bug fixes to the AI report-generation and scanning pipeline, pending merge upstream.
+An internal-use fork of [poppopjmp/spiderfoot](https://github.com/poppopjmp/spiderfoot) (the microservices SpiderFoot, v6.1.0), kept public for licence reasons. It fixes bugs in the scanning and AI-report pipeline, replaces the build and deployment with a hardened, scanned, reproducible one, and is run by its maintainer for authorised OSINT and security testing.
 
-**→ For the actual project — docs, issues, general use — go to [poppopjmp/spiderfoot](https://github.com/poppopjmp/spiderfoot).**
+**For the actual project — documentation, issues, general use — go to [poppopjmp/spiderfoot](https://github.com/poppopjmp/spiderfoot).** The one upstream PR ([#393](https://github.com/poppopjmp/spiderfoot/pull/393)) was closed unmerged: it had grown to 53 files mixing fork-specific infrastructure with genuine fixes, which is not reviewable as a single PR.
 
-**Upstream PRs:** [poppopjmp/spiderfoot#393](https://github.com/poppopjmp/spiderfoot/pull/393) (closed unmerged — grew to 53 files mixing fork-specific infra with genuine fixes, not realistically reviewable as one PR) has been superseded by smaller, focused PRs raised per fix as they're ready.
+## Current state
 
-## ✅ Known good build
+- **Latest build:** `v6.1.0-bd.1-rc.11`, deployed to production (Podman, managed through Dockhand). It passed the scan gate on all 5 images: no fixable critical or high vulnerability and no unallowed secret (Trivy), plus an `npm audit` of the frontend dependencies. No non-`rc` release has been cut yet.
+- **Tag scheme:** `v<upstream base>-bd.<N>` for a release, `-rc.<M>` for a test build. An `-rc` tag never moves `:latest`.
+- **Vulnerabilities:** every Dependabot alert has been reviewed; the few that remain are accepted with reasons (see below).
+- **Never push straight to `master`.** Work happens on a branch, goes through a pull request, and is tested as a release candidate before release.
 
-> **Tagging changed (2026-10-23).** The `<version>-g<sha>` scheme below is retired.
-> Images are now published by `deploy/publish.sh` as `v<base>-bd.<N>` (release) or
-> `v<base>-bd.<N>-rc.<M>` (test build), e.g. `v6.1.0-bd.1`. No `-bd` build has been
-> verified known-good yet; the entry below is the last one under the old scheme and
-> is kept for the incident history. See `deploy/README.md`.
+## What is different from upstream
 
-**`6.1.0-g95d573f9`** (commit `95d573f9`), **2026-09-22**.
+**Build and supply chain** (details in [`deploy/README.md`](deploy/README.md))
+- Fork-owned Dockerfiles. Base images pinned by digest; Python dependencies hash-locked and installed with `--require-hashes`; every tool pinned by version and checksum. Rebuilding a tag gives the same image.
+- A **14-day cool-down** on individually maintained software, with named, written exceptions for published security fixes. Official OS base images are exempt and refreshed deliberately.
+- A **scan gate** that blocks a push: Trivy fails the build on any fixable critical or high vulnerability or unallowed secret, Grype cross-checks, and `npm audit` covers the frontend's bundled dependencies (which the container scanner cannot see). Accepted findings live in `deploy/trivyignore.txt` with a justification; it is currently empty.
+- Images are scannable (the package list is kept, the package managers are removed), and unused binaries are removed rather than waited on.
+- The active-scanner image builds its Go tools from source with their vulnerable dependencies raised, and drops tools whose own dependencies could not be fixed.
+- Builds run on a dedicated build host with `deploy/publish.sh`; production only ever pulls the published images.
 
-**Important correction:** `6.1.0-gb05e98c3` (this section's previous entry,
-dated 2026-09-17) was never actually good — the fix it described never
-shipped. The real code change lived on a `development`-branch commit, but
-the PR that brought it into `master` was built fresh off `master` instead
-of merging that commit, so it carried only the changelog/docs *claiming*
-the fix — `report_storage.py` itself was untouched. Every build after it
-(`6.1.0-ga4599e3f`, `6.1.0-gfeede62f`) silently carried the same unfixed
-code forward for 5 days despite changelogs saying otherwise, until it
-recurred live: a `list_reports(scan_id=...)` call held a Postgres
-transaction open for 2h13m, five subsequent connection attempts piled up
-behind it trying to run the schema-check, and the `reports` table — and
-with it the whole API — went down. Confirmed via `pg_stat_activity`,
-cleared with `pg_terminate_backend`.
+**Scanning and correctness fixes**
+- **Correlation rules** were never loaded by the API, so no scan produced correlation results; they now load from the filesystem, verified end to end on a real scan.
+- **Tool modules:** five tool modules (gobuster, testssl.sh, whatweb, wafw00f, snallygaster) had no binary path configured anywhere, and gobuster had no default wordlist; both now default to the paths baked into the image. A single-page app's catch-all `200` no longer turns every wordlist entry into a hit (`ffuf` auto-calibration, a soft-404 probe for gobuster). `naabu`, `dnsx`, `httpx` and the spider now work against internal hostnames and non-default ports.
+- **Core URL helpers** (`urlBaseUrl`, `urlRelativeToAbsolute`) were dropping explicit ports and mangling `scheme://`, corrupting every link a crawl discovered.
+- **Scan engine and API:** the scan-progress API returned 404 for every scan; the "modules running" count was always 0 because the engine's own running-module check was blind to every module; the export endpoints crashed or silently returned nothing; configuration saved on one API worker was not visible from the others.
+- **Database:** Postgres connections were leaked by reads that never committed (`ConfigManager`, `AuthService`, `ReportStore` and 17 more methods in the core database layer), eventually blocking the whole API.
 
-`6.1.0-g4899644a` (2026-09-22) then genuinely fixed it this time — verified
-by reading the actual committed diff and, after building, by pulling the
-image and grepping the file *inside the container*, not by trusting the
-build log or commit message.
+**AI reports**
+- Report generation returned empty or generic output (nine stacked bugs across service access, database wiring, event mapping, vector indexing and timeouts). Reports are now persisted server-side, the analysed-event cap is configurable (`SF_REPORT_MAX_EVENTS_PER_SCAN`), and deleting a scan removes its vectors.
+- Local embeddings use `fastembed` (about 67 MB, no GPU needed) instead of `sentence-transformers` and `torch` (over 1 GB). GPU passthrough is supported but not built.
+- `sf-agents` calls Anthropic directly through the official SDK (no proxy), with a server-side fallback model for requests the primary model's safeguards decline.
 
-While verifying that fix live, the exact same pattern turned up in 17 more
-methods across the core `SpiderFootDb` layer (`db_scan.py`, `db_event.py`,
-`db_correlation.py`, `db_core.py`, `db_performance.py`, `db_diagnostics.py`,
-`db_utils.py`) — not just `ReportStore`. These back essentially every
-ordinary page load: scan results, dashboard, scan list, log viewer,
-correlation tab. This is very plausibly the actual root cause behind the
-pattern of GUI/API hangs this project has hit repeatedly, of which the
-`ReportStore` bug was only the most recently diagnosed instance. Fixed the
-same way, following the convention `db_config.py`'s `configGet()` already
-established elsewhere in this codebase.
+**Frontend**
+- A dedicated Data Source Credentials page and an AI Connections page; Settings grouped by subsystem; SpiderFoot's own REST tokens renamed "Access Tokens" to stop clashing with module API keys.
+- New Scan dims modules that cannot run against the chosen target type.
+- The workspace IaC Map diagram renders (it was blank, a sanitiser stripped the SVG), and several authorisation-redirect and race-condition bugs are fixed.
 
-**`6.1.0-g95d573f9`** is that fix. Verified live in production, 2026-09-22:
-stress-tested the exact previously-buggy methods (105 calls across the 7
-highest-traffic ones) directly against baden with zero connections left
-idle-in-transaction afterward, versus one leaked per call before.
+## Breaking change
 
-`6.1.0-g4b0231b2` itself was fully tested end-to-end on both Podman and
-Docker deployments, **2026-09-13**: all services healthy, AI report
-generation confirmed working, reports correctly persisted server-side
-(scan-level and workspace-level) rather than only in the requesting
-browser's `localStorage`, delete confirmed working, and the
-scanner/active-scanner queue split confirmed correct on the Docker side
-after a real bug was found and fixed there (a stale locally-cached base
-image had silently been feeding 10-day-old code to three services despite
-every build reporting success with zero errors). Tested via this fork's
-own stack files (at the time `stack-spiderfoot-podman.yml` on
-Podman and `stack-spiderfoot-docker.yml` on Docker; now `deploy/stack-podman.yml`
-and `deploy/stack-docker.yml`) — the connection-leak bug
-above was only found afterward, live on production, once real usage
-actually exercised the code path.
+`requirements.txt` no longer installs `sentence-transformers` or `torch` at all. If `SF_EMBEDDING_PROVIDER=sentence_transformer` is set anywhere it will **silently** fall back to fake, hash-derived embeddings, with no error and quietly wrong report content. Set `SF_EMBEDDING_PROVIDER=fastembed` (the default in both stack files).
 
-## ⚠️ Breaking change
+## Deploying this fork
 
-`requirements.txt` no longer installs `sentence-transformers`/`torch` **at all**, as
-of image tag `6.1.0-g529d9da2` and every commit/build after it. If you have
-`SF_EMBEDDING_PROVIDER=sentence_transformer` set anywhere, it will **silently**
-degrade to mock (fake, hash-derived) embeddings via that backend's existing
-`ImportError` fallback — no error, no warning, just quietly wrong report content.
-Set `SF_EMBEDDING_PROVIDER=fastembed` instead (the new default in both compose
-files below) — same job, no torch, ~67MB instead of ~1GB+.
+Two layers, deliberately separate:
 
-## What's fixed here
+- **Upstream's own deployment**: `docker-compose.yml` and `docker/compose/*.yml` build every image from source, Traefik-fronted and feature-profiled (`--profile full` for everything, or pick `ai`, `scan`, `storage`, `monitor`, `scheduler`, `sso`). Build the base image first (`docker compose build base`); see that file's header for why. This fork patches some of these files but otherwise leaves them alone.
+- **`deploy/`**: this fork's own tooling, in its own folder so pulling upstream never conflicts with it.
+  - `deploy/publish.sh` builds the 5 images from an explicit tag on the build host, runs the scan gate, pushes `ghcr.io/braedach/spiderfoot-<service>:<tag>`, and creates a GitHub Release.
+  - `deploy/stack-podman.yml` is the production deployment: it pulls the published images and builds nothing.
+  - `deploy/stack-docker.yml` is the Docker development mirror, where release candidates are tested first.
+  - Both stacks require an exact `SPIDERFOOT_TAG` and never follow `:latest`.
 
-- AI report generation returning empty/generic output (nine stacked bugs — service registry access, DB wiring, event-column mapping, Qdrant never populated, timeouts too short)
-- Scan progress API (`/progress`, `/progress/stream`) returning 404 for every scan
-- Local embeddings switched from `sentence-transformers`+`torch` (~1GB+, mandatory regardless of backend choice, per PyPI's own metadata) to `fastembed` (onnxruntime-backed, ~67MB, no torch anywhere) — real semantic search at a fraction of the size, with an optional `fastembed-gpu` build for deployments with GPU passthrough - NOT yet built as I dont need it - yet.
-- Two Postgres connection leaks (`ConfigManager`, `AuthService`) — reads that never committed, leaving connections stuck open indefinitely
-- Deleting a scan never cleaned up its vectors in Qdrant — fixed to delete by `scan_id` from the shared events collection
-- AI reports silently capped at 500 analysed events per scan regardless of how many were actually indexed — now configurable (`SF_REPORT_MAX_EVENTS_PER_SCAN`), and both stack files now actually set it (`2000`) — the cap was configurable since 2026-09-13 but never actually raised anywhere, so it kept defaulting back to 500 regardless
-- The generic `docker-compose.yml` + `docker/compose/*.yml` reference deployment had a real bug of its own: its general-purpose Celery worker still listened on the `scan` queue alongside the dedicated active-scanner worker, even though it lacks the recon tooling — scans could silently lose active modules depending on which worker claimed them
-- AI reports generated via `sf-agents`' `/report` endpoint (the only path the frontend actually calls) were never persisted server-side — only ever reached the requesting browser's own `localStorage`, invisible from any other browser/device
-- `ReportStore`'s read-only methods (`get`, `list_reports`, `count`) never committed after a `SELECT`, leaking a Postgres connection idle-in-transaction on every call — eventually blocks the whole `reports` table, surfacing as AI report generation appearing to hang. **Genuinely fixed 2026-09-22** — see the "Known good build" section above for why this same line previously overstated the state of things.
-- The same missing-commit connection leak found in 17 more methods across the core `SpiderFootDb` layer, not just `ReportStore` — `scanResultEvent`, `scanResultSummary`, `scanInstanceGet`, `scanInstanceList`, `scanLogs`, `scanErrors`, `search`, `scanCorrelationList`/`Summary`, `eventTypes`, and others. These back essentially every ordinary page load, not an edge case — fixed and verified live, **2026-09-22**.
-- The scan-summary "modules running" count always showed 0 regardless of actual scan state, because the field never existed anywhere in the progress pipeline — wired through end to end from the scan engine's existing internal module-tracking
-- That alone wasn't enough: the scan engine's own "is this module running" check was blind to every module in the codebase (310/310), since the base check watches a shared thread pool that the actual per-module dispatch path never uses — not just cosmetic, since the same signal drives the scan-completion decision itself, not only the progress UI. Both confirmed live, **2026-09-18**.
-- The webui's export button (`/scans/{id}/events/export`) crashed with an unhandled `IndexError` for **every** filetype — CSV, XLSX, JSON, and GEXF alike, GEXF was just the one that got noticed. It indexed a false-positive flag (`row[13]`) that the underlying query never selects (`scanResultEvent()` only returns 9 columns — `generated, data, module, hash, type, source_event_hash, confidence, visibility, risk`). The search-results export (`/scans/{id}/search/export`) had the identical wrong assumption, silently reporting "no results found" for every search instead of crashing. Fixed and confirmed live, **2026-09-26** — GEXF now downloads a real graph, openable directly in [Gephi](https://gephi.org/) for link analysis (layout, centrality, clustering) beyond what the in-browser graph tab can handle.
-
-See the PR for full detail on each.
+See [`deploy/README.md`](deploy/README.md) for the build, test and release flow, the tag scheme, how each secret is generated, and the dated record of what was fixed in each build.
 
 ## Dependabot and vulnerability review
 
@@ -112,32 +73,3 @@ The 9 that remain are real advisories, not false positives, and are accepted for
 | 1 | `paramiko` | low | `rsakey.py` permits SHA-1 for RSA signatures. No patched version exists upstream. Revisit when one is published. |
 
 The test runner (`vitest` 5, which cleared the two critical `tinypool` alerts) and `mermaid` 12 (which cleared the `katex` alert) were upgraded on 2026-11-04.
-
-## Deploying this fork
-
-Two layers, deliberately separate:
-
-- **Upstream's own deployment** — `docker-compose.yml` + `docker/compose/*.yml`
-  build every image from source, Traefik-fronted and feature-profiled (`--profile full`
-  for everything, or pick `ai`, `scan`, `storage`, `monitor`, `scheduler`, `sso`). Build
-  the base image first (`docker compose build base`), then everything else — see that
-  file's own header comment for why. This fork patches some of these files with its
-  fixes but otherwise leaves them alone.
-- **`deploy/`** — this fork's own build and deployment tooling, kept in its own
-  subfolder so pulling upstream never conflicts with it:
-  - **`deploy/publish.sh`** builds the 5 images from an explicit release tag on a
-    build host, pushes `ghcr.io/braedach/spiderfoot-<service>:<tag>`, and creates a
-    GitHub Release. Replaces the old untracked build script.
-  - **`deploy/stack-podman.yml`** — the maintainer's production Podman deployment.
-    Pulls the published images; builds nothing. No Traefik, no profiles: just the 9
-    services needed to run scans and generate AI reports.
-  - **`deploy/stack-docker.yml`** — the Docker development/sandbox mirror of the
-    same stack, where branch builds are tested as `-rc` tags before release.
-  - Work happens on a branch and is tested as a release candidate before it is
-    merged; nothing is pushed to `master`. Both stacks require an exact
-    `SPIDERFOOT_TAG` and never follow `:latest`.
-
-See **`deploy/README.md`** for the build, test and release flow, the tag scheme,
-and how each secret is generated. All stacks default local embeddings to
-`fastembed` — no API key, no GPU needed, though GPU passthrough is supported if
-you have it.
