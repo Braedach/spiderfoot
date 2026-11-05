@@ -16,7 +16,8 @@ paths. This is specifically how *this* deployment builds and runs it.
 ```
 deploy/
 ├── publish.sh                  # build + push + release — run on the build host only
-├── stack-podman.yml            # PRODUCTION deployment (Podman host)
+├── stack-podman.yml            # PRODUCTION deployment (Podman host) — use podman-compose, see below
+├── stack-podman.llm-external.yml # optional override: join an existing llm-net rather than create one
 ├── stack-podman.env.example    # tracked template — names only, no real values
 ├── stack-docker.yml            # DEVELOPMENT / sandbox deployment (Docker host)
 ├── stack-docker.env.example    # tracked template — names only, no real values
@@ -25,6 +26,12 @@ deploy/
 ├── docker/                     # fork-owned Dockerfiles (base, frontend, active-scanner, go-build.sh)
 └── requirements*.in / .lock    # hash-locked Python: the app, and the active scanner's tools
 ```
+
+**`stack-podman.yml` must be run with `podman-compose`, not Docker Compose's own CLI (`docker-compose`/`docker compose`,
+even when it is the plugin configured to talk to the podman socket).** `sf-agents`'s GPU passthrough uses Podman's own
+CDI device syntax (`devices: - nvidia.com/gpu=all`); Docker Compose's device handling treats that string as a literal
+host device path and fails with `stat nvidia.com/gpu=all: no such file or directory` — confirmed live on baden
+2026-11-05 trying to deploy `rc.18`. `podman-compose` is the one that understands it.
 
 Both stacks run the same 8 services (7, plus the active-scan worker under the `scan` profile) and only ever **pull** images. They never
 build anything. The development stack mirrors production on purpose: what is
@@ -335,19 +342,17 @@ providers (Anthropic, OpenAI, DeepSeek) do not need it at all.
 **Why baden uses an existing network called `llm-net`.** On baden, Ollama is a separate Podman stack that owns a network
 named `llm-net` (shared only with Open WebUI). SpiderFoot cannot reach Ollama any other way there: baden's host firewall
 drops container-to-host traffic on port 11434, so the host's address times out, and the public address is behind a login
-page, which a server-side call cannot pass. So baden's stack environment sets two variables so the SpiderFoot stack joins
-the network Ollama already lives on:
+page, which a server-side call cannot pass. So baden's stack joins the network Ollama already lives on by setting
+`SF_LLM_NETWORK=llm-net` and adding `deploy/stack-podman.llm-external.yml` as a second `-f` to every `podman-compose`
+invocation (see that file's header for why a templated `external:` in the base file is not used instead — it is a
+real podman-compose bug, not a style choice).
 
-```
-SF_LLM_NETWORK=llm-net
-SF_LLM_NETWORK_EXTERNAL=true
-```
-
-**Everyone else: you need to set nothing.** With the variables unset, the stack creates its own empty network,
+**Everyone else: you need to add nothing.** With just `stack-podman.yml`, the stack creates its own empty network,
 `spiderfoot-llm-net`, which does no harm if you do not use Ollama. If you run Ollama in a container, either attach that
-container to `spiderfoot-llm-net`, or set the two variables to the name of the network your Ollama already uses (as baden
-does). Then, in **AI Connections**, set Ollama's API base URL to `http://<ollama container name>:11434`. If Ollama runs on
-another host, skip all of this and use an address the containers can reach.
+container to `spiderfoot-llm-net`, or use `stack-podman.llm-external.yml` + `SF_LLM_NETWORK` to join the network your
+Ollama already uses (as baden does). Then, in **AI Connections**, set Ollama's API base URL to
+`http://<ollama container name>:11434`. If Ollama runs on another host, skip all of this and use an address the
+containers can reach.
 
 **Security: who can reach what.**
 - Every container on this network can reach `sf-api` (8001) and `sf-agents` (8100). Attach only the Ollama container, and
