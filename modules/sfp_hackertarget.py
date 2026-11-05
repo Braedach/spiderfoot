@@ -314,9 +314,20 @@ class sfp_hackertarget(SpiderFootAsyncPlugin):
         qrylist = list()
         if eventName.startswith("NETBLOCK_"):
             for ipaddr in IPNetwork(eventData):
-                if str(ipaddr) not in self.results:
-                    qrylist.append(str(ipaddr))
-                    self.results[str(ipaddr)] = True
+                ipstr = str(ipaddr)
+                if ipstr in self.results:
+                    continue
+                # A netblock-ownership fact (e.g. "this /24 belongs to the same
+                # organisation as the target") does not make every address in it
+                # in scope. Only expand addresses that are actually within the
+                # target's own scope (the target itself, or - if the target IS
+                # a netblock/ASN - within that netblock); otherwise this fans
+                # out into active lookups (reverse DNS, HTTP headers) against
+                # unrelated third-party infrastructure.
+                if not self.getTarget().matches(ipstr, includeChildren=True, includeParents=True):
+                    continue
+                qrylist.append(ipstr)
+                self.results[ipstr] = True
         else:
             qrylist.append(eventData)
             self.results[eventData] = True

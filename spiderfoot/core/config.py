@@ -40,6 +40,7 @@ class ConfigManager:
         '_socks3port': '',
         '_socks4user': '',
         '_socks5pwd': '',
+        '_strict_scope': True,
     }
 
     # Configuration descriptions
@@ -70,7 +71,16 @@ class ConfigManager:
         '_socks3port': 'SOCKS Server TCP Port. Usually 1080 for 4/5, 8080 for HTTP and 9050 for TOR.',
         '_socks4user': 'SOCKS Username. Valid only for SOCKS4 and SOCKS5 servers.',
         '_socks5pwd': "SOCKS Password. Valid only for SOCKS5 servers.",
-        '_modulesenabled': "Modules enabled for the scan."
+        '_modulesenabled': "Modules enabled for the scan.",
+        '_strict_scope': (
+            "Block events from reaching invasive tool modules (port scanners, web/TLS"
+            " probes, etc.) unless the event's data is within the scan target's own"
+            " scope (the target itself, its resolved hosts/addresses, or its own"
+            " subnet). Prevents discovery modules (netblock/affiliate/co-hosted-site"
+            " lookups) from causing active scans of unrelated third-party"
+            " infrastructure. Leave this on unless you have a specific, authorised"
+            " reason to scan beyond the target's own scope."
+        ),
     }
 
     def __init__(self) -> None:
