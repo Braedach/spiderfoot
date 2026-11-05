@@ -1,0 +1,25 @@
+# deploy/stack-podman.llm-external.yml
+#
+# Optional override for stack-podman.yml: join an EXISTING external network
+# for llm-net (Ollama reachability for sf-api/sf-agents) instead of the
+# default empty network the base file creates. Add this file with a second
+# `-f` on every podman-compose invocation, and set SF_LLM_NETWORK in the
+# stack's env file to the existing network's name - see deploy/README.md,
+# "Ollama and the LLM network".
+#
+#   podman-compose -f stack-podman.yml -f stack-podman.llm-external.yml \
+#       --env-file .env up -d
+#
+# Kept as a separate file, not a templated `external:` in the base file,
+# because podman-compose 1.3.0 cannot parse a templated value there for a
+# container on more than one network (sf-api, sf-agents) - see the comment
+# above llm-net in stack-podman.yml for the exact bug. A literal boolean,
+# which this file has, does not hit it.
+#
+# Dockhand-managed deployments (baden): Dockhand stores one compose file per
+# stack, not a base + override pair, so there the override is merged by hand
+# into the single deployed copy instead of passed as a second -f.
+
+networks:
+  llm-net:
+    external: true
