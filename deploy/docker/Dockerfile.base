@@ -63,8 +63,10 @@ FROM python:3.12-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a
 LABEL org.opencontainers.image.title="SpiderFoot Base" \
       org.opencontainers.image.description="Shared base for SpiderFoot microservices"
 
-# Runtime-only system libraries
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Runtime-only system libraries. apt-get upgrade patches packages already
+# present in the base layer (e.g. apt itself) - installing new packages alone
+# does not touch those, and apt is purged below, so this is the only chance.
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     libxml2 libxslt1.1 libjpeg62-turbo zlib1g \
     dnsutils ca-certificates \
     && apt-get clean && rm -rf /var/lib/apt/lists/*

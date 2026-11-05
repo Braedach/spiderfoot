@@ -184,7 +184,9 @@ FROM python:3.12-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a
 LABEL org.opencontainers.image.title="SpiderFoot Active Scanner" \
       org.opencontainers.image.description="Celery worker for active scanning with the recon toolkit"
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# apt-get upgrade patches packages already present in this stage's own base
+# layer (e.g. apt itself) - see Dockerfile.base for why this is needed.
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     libxml2 libxslt1.1 libjpeg62-turbo zlib1g dnsutils ca-certificates openssl \
     nmap nbtscan onesixtyone whatweb sslscan bsdmainutils \
     libpcap0.8t64 libcap2-bin \
