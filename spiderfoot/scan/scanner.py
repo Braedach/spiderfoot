@@ -690,7 +690,8 @@ class SpiderFootScanner():
                     if not mod.errorState and mod.incomingEventQueue is not None:
                         watchedEvents = mod.watchedEvents()
                         if sfEvent.eventType in watchedEvents or "*" in watchedEvents:
-                            mod.incomingEventQueue.put(deepcopy(sfEvent))
+                            if self.shouldDispatchToModule(mod, sfEvent):
+                                mod.incomingEventQueue.put(deepcopy(sfEvent))
 
                 # Forward to real-time event bridge (WebSocket relay)
                 try:
@@ -705,6 +706,38 @@ class SpiderFootScanner():
                 mod._stopScanning = True
             self.__sharedThreadPool.shutdown(wait=True)
             _running_module_counts.pop(self.__scanId, None)
+
+    def shouldDispatchToModule(self, mod: SpiderFootPlugin, sfEvent: SpiderFootEvent) -> bool:
+        """Scope gate for the event dispatch loop in waitForThreads().
+
+        A discovery module (netblock/affiliate/co-hosted-site lookups) may
+        produce events for hosts/addresses that are not actually related to
+        the scan target. Active ("invasive") tool modules must not act on
+        those - this is what caused the scope-escape incident documented in
+        README.md. Modules not flagged "invasive", and non-IP/hostname
+        target types where scope has no meaning, are unaffected.
+
+        Args:
+            mod (SpiderFootPlugin): the module about to receive the event.
+            sfEvent (SpiderFootEvent): the event under consideration.
+
+        Returns:
+            bool: True if the event should be queued for this module.
+        """
+        if not self.__config.get('_strict_scope', True):
+            return True
+
+        if "invasive" not in getattr(mod, "meta", {}).get("flags", []):
+            return True
+
+        if self.__target.matches(sfEvent.data, includeParents=True, includeChildren=True):
+            return True
+
+        self.__sf.debug(
+            f"strict_scope: dropping {sfEvent.eventType} ({sfEvent.data}) for"
+            f" invasive module {mod.__name__} - out of target scope."
+        )
+        return False
 
     def threadsFinished(self, log_status: bool = False) -> bool:
         """Check whether all module queues are empty and no modules are running."""
