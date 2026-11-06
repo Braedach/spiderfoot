@@ -71,7 +71,7 @@ Nothing is pushed to `master`. Work happens on a branch, is tested as a
 **release candidate** on the development host, and only then merged and
 released.  An AI does the grunt work under human supervision.  It is fast & efficient,
 but follows guidelines set within another repository.  The AI model employed is mid-level
-and has proven itself to be very competant.
+and has proven itself to be very competant, and is capable of push-back on development decisions.
 
 | Step | Where | Command / action |
 |---|---|---|
