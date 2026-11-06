@@ -69,7 +69,9 @@ this fork does not modify.
 
 Nothing is pushed to `master`. Work happens on a branch, is tested as a
 **release candidate** on the development host, and only then merged and
-released.
+released.  An AI does the grunt work under human supervision.  It is fast & efficient,
+but follows guidelines set within another repository.  The AI model employed is mid-level
+and has proven itself to be very competant.
 
 | Step | Where | Command / action |
 |---|---|---|
