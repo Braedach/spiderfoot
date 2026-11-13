@@ -12,7 +12,7 @@ them.
 
 import uuid
 
-from spiderfoot import SpiderFootEvent
+from spiderfoot import SpiderFootEvent, cdn_ranges
 from spiderfoot.scan.scanner import SpiderFootScanner
 from test.unit.utils.test_scanner_base import TestScannerBase
 
@@ -150,3 +150,53 @@ class TestStrictScopeGate(TestScannerBase):
         self.assertEqual(extract("151.101.3.7:443/tcp (https)"), "151.101.3.7")
         self.assertIsNone(extract("example.com"))
         self.assertIsNone(extract("2606:4700:3037::ac43:ac5f"))
+
+    def test_invasive_module_rejects_owned_subdomain_on_shared_cdn_edge(self):
+        # The structural gap found live 2026-11-13, distinct from the
+        # markIPShared() race above: the target's own subdomain resolves
+        # DIRECTLY to a Cloudflare anycast edge. matches() is correctly
+        # True (it's a real alias) and markIPShared() is NEVER called -
+        # there is no affiliate hop, no co-hosted-site discovery, nothing
+        # for the reactive mechanism to key off at all. Only the static
+        # CDN-range check (independent of any other module having run)
+        # can catch this.
+        scanner = self._build_scanner("braedach.com", "INTERNET_NAME")
+        scanner._SpiderFootScanner__target.setAlias("104.21.71.238", "IP_ADDRESS")
+        scanner._SpiderFootScanner__cdnRanges = dict(cdn_ranges.FALLBACK_RANGES)
+        invasive = _FakeModule("sfp_nmap", flags=["invasive"])
+        event = SpiderFootEvent("IP_ADDRESS", "104.21.71.238", "sfp_dnsresolve", None)
+
+        self.assertFalse(scanner.shouldDispatchToModule(invasive, event))
+        # Confirms it really was the static check, not the reactive one.
+        self.assertFalse(scanner._SpiderFootScanner__target.isSharedIP("104.21.71.238"))
+
+    def test_invasive_module_rejects_shared_cdn_ip_with_port_suffix(self):
+        scanner = self._build_scanner("braedach.com", "INTERNET_NAME")
+        scanner._SpiderFootScanner__target.setAlias("151.101.3.7", "IP_ADDRESS")
+        scanner._SpiderFootScanner__cdnRanges = dict(cdn_ranges.FALLBACK_RANGES)
+        invasive = _FakeModule("sfp_httpx", flags=["invasive"])
+        event = SpiderFootEvent("TCP_PORT_OPEN", "151.101.3.7:443", "sfp_internetdb", None)
+
+        self.assertFalse(scanner.shouldDispatchToModule(invasive, event))
+
+    def test_invasive_module_accepts_own_literal_ip_target_even_if_in_cdn_range(self):
+        # The exemption must hold: if the user's own directly-authorised
+        # target IP genuinely falls within a published CDN range, the
+        # static check must never block their own authorised scan.
+        scanner = self._build_scanner("151.101.3.7", "IP_ADDRESS")
+        scanner._SpiderFootScanner__cdnRanges = dict(cdn_ranges.FALLBACK_RANGES)
+        invasive = _FakeModule("sfp_nmap", flags=["invasive"])
+        event = SpiderFootEvent("IP_ADDRESS", "151.101.3.7", "sfp_hackertarget", None)
+
+        self.assertTrue(scanner.shouldDispatchToModule(invasive, event))
+
+    def test_invasive_module_accepts_ip_not_in_any_cdn_range(self):
+        # Baseline: an ordinary dedicated IP, not in any known CDN range
+        # and never marked shared, is unaffected by either check.
+        scanner = self._build_scanner("example.com", "INTERNET_NAME")
+        scanner._SpiderFootScanner__target.setAlias("203.0.113.5", "IP_ADDRESS")
+        scanner._SpiderFootScanner__cdnRanges = dict(cdn_ranges.FALLBACK_RANGES)
+        invasive = _FakeModule("sfp_nmap", flags=["invasive"])
+        event = SpiderFootEvent("IP_ADDRESS", "203.0.113.5", "sfp_dnsresolve", None)
+
+        self.assertTrue(scanner.shouldDispatchToModule(invasive, event))

@@ -25,6 +25,7 @@ import dns.resolver
 
 from spiderfoot.sflib import SpiderFoot
 from spiderfoot import SpiderFootEvent, SpiderFootPlugin, SpiderFootTarget, SpiderFootHelpers, SpiderFootThreadPool
+from spiderfoot import cdn_ranges
 from spiderfoot.observability.logger import logWorkerSetup
 from spiderfoot import SpiderFootDb
 from .scan_state_map import (
@@ -294,6 +295,20 @@ class SpiderFootScanner():
             self.__sf.status(f"Scan [{self.__scanId}] failed to set up TLDs: {e}")
             self.__setStatus(DB_STATUS_ERROR_FAILED, None, time.time() * 1000)
             raise
+
+        # Known CDN/anycast provider IP ranges, for the deterministic
+        # shared-edge dispatch check in shouldDispatchToModule(). Same
+        # cache-then-fetch pattern as the TLD list above, but non-fatal on
+        # failure - cdn_ranges.refreshCdnRanges() already falls back to its
+        # own static snapshot, so a scan should never abort over this.
+        try:
+            self.__cdnRanges = cdn_ranges.refreshCdnRanges(
+                self.__sf, self.__config.get('_cdn_ranges_cache', 24))
+        except Exception as e:
+            self.__sf.status(
+                f"Scan [{self.__scanId}] failed to refresh CDN ranges, using"
+                f" static fallback: {e}")
+            self.__cdnRanges = dict(cdn_ranges.FALLBACK_RANGES)
 
         self.__setStatus("INITIALIZING", time.time() * 1000, None)
 
@@ -751,16 +766,35 @@ class SpiderFootScanner():
         README.md. Modules not flagged "invasive", and non-IP/hostname
         target types where scope has no meaning, are unaffected.
 
-        Beyond plain relatedness, an address can be *marked shared* (see
-        SpiderFootTarget.markIPShared()) - known, from positive evidence a
-        discovery module found during this same scan, to also serve a host
-        that is NOT the target (a CDN edge IP also used by an unrelated
-        customer, for instance). A shared address still matches() (it's
-        legitimately related - e.g. the target's own hostname really does
-        resolve there, so discovery and hostname-scoped checks are
-        unaffected), but invasive modules must not act on the bare address
-        directly, since that means probing someone else's traffic on it
-        too. Found live 2026-11-13, see markIPShared()'s docstring.
+        Beyond plain relatedness, an address can be shared with a host that
+        is NOT the target, via two independent signals:
+
+        1. *Statically known* (see SpiderFootTarget.isKnownCdnIP()) - the
+           address falls within a known CDN/anycast provider's own
+           published IP range (Cloudflare, Fastly). Deterministic and
+           dispatch-order-independent: catches the case where the
+           target's own, legitimately-owned subdomain resolves directly
+           to a shared anycast edge - matches() is correctly True for
+           that address (it really is the target's), but the address is
+           not the target's exclusively. Found live 2026-11-13: owned
+           braedach.com subdomains resolving straight to Cloudflare's
+           anycast edge, with no affiliate hop at all for the reactive
+           check below to ever catch.
+        2. *Marked shared* (see SpiderFootTarget.markIPShared()) - known,
+           from positive evidence a discovery module found during this
+           same scan, to also serve a host that is NOT the target (e.g.
+           a co-hosted-site lookup's own hostname list). This is reactive
+           and depends on some module having processed that evidence
+           before this dispatch check runs - under scan concurrency that
+           race is not always won (confirmed live 2026-11-13: sfp_dnsresolve's
+           own classification trailed sfp_nmap's dispatch by over a
+           minute), which is exactly why signal 1 exists as a
+           non-reactive backstop for the providers it covers.
+
+        Either way, a shared address still matches() (it's legitimately
+        related - discovery and hostname-scoped checks are unaffected),
+        but invasive modules must not act on the bare address directly,
+        since that means probing someone else's traffic on it too.
 
         Args:
             mod (SpiderFootPlugin): the module about to receive the event.
@@ -783,13 +817,23 @@ class SpiderFootScanner():
             return False
 
         sharedIP = self._extractIPForSharedCheck(sfEvent.data)
-        if sharedIP and self.__target.isSharedIP(sharedIP):
-            self.__sf.debug(
-                f"strict_scope: dropping {sfEvent.eventType} ({sfEvent.data}) for"
-                f" invasive module {mod.__name__} - address is known-shared"
-                f" with a non-target host."
-            )
-            return False
+        if sharedIP:
+            cdnProvider = self.__target.isKnownCdnIP(sharedIP, self.__cdnRanges)
+            if cdnProvider:
+                self.__sf.debug(
+                    f"strict_scope: dropping {sfEvent.eventType} ({sfEvent.data}) for"
+                    f" invasive module {mod.__name__} - address is within"
+                    f" {cdnProvider}'s published CDN range (shared anycast edge)."
+                )
+                return False
+
+            if self.__target.isSharedIP(sharedIP):
+                self.__sf.debug(
+                    f"strict_scope: dropping {sfEvent.eventType} ({sfEvent.data}) for"
+                    f" invasive module {mod.__name__} - address is known-shared"
+                    f" with a non-target host."
+                )
+                return False
 
         return True
 
