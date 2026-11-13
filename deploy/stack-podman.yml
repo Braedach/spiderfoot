@@ -109,6 +109,9 @@
 #     - IDS/IPS systems may go ballistic
 #
 # Changelog:
+#   2.13.0 (2026-11-14) - sf-agents: the NVIDIA CDI device (nvidia.com/gpu=all) is removed, matching stack-docker.yml. The image is CPU-only
+#     (fastembed), so it was never used, and it failed to resolve on a compose redeploy, which forced a hand-edited stack on every deploy.
+#     With it gone the whole stack can be stopped, SPIDERFOOT_TAG changed, and started again as one unit.
 #   2.12.0 (2026-11-04) - sf-api and sf-agents also join a second network, llm-net, so the Ollama provider in AI Connections can
 #     reach a containerised Ollama as http://ollama:11434. By default this stack creates it (spiderfoot-llm-net, empty; attach your
 #     Ollama container to it). To reuse an existing network, set SF_LLM_NETWORK=<name> and SF_LLM_NETWORK_EXTERNAL=true (baden:
@@ -495,12 +498,11 @@ services:
     user: "0:0"
     entrypoint: ["/usr/local/bin/docker-entrypoint.sh"]
     command: ["python", "-m", "spiderfoot.agents.service"]
-    devices:
-      # Podman CDI - NVIDIA RTX 3070 passthrough (configured via
-      # setup-lxc-gpu.sh). Needs read_only removed (see below) - the
-      # nvidia-cdi-hook writes into the container's filesystem at startup
-      # and fails outright if it can't.
-      - nvidia.com/gpu=all
+    # No GPU device here, deliberately (as in stack-docker.yml). The base image
+    # is CPU-only (fastembed), so a GPU buys nothing, and the Podman CDI device
+    # (nvidia.com/gpu=all) failed to resolve on a compose redeploy, forcing a
+    # hand-edited workaround on every deploy. Add it back only alongside a
+    # GPU-capable base image.
     labels:
       - com.docker.compose.project=spiderfoot
       - com.docker.compose.service=sf-agents
