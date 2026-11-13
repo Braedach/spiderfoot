@@ -36,6 +36,7 @@ Built-in profiles:
     - infrastructure: DNS, ports, hosting analysis
     - api-powered: All modules requiring API keys
     - minimal: Bare minimum modules
+    - phone-number: Phone-number intelligence, key-free only
     - custom: User-defined template
 """
 
@@ -341,6 +342,32 @@ class ProfileManager:
             include_categories=["Social Media", "Secondary Networks"],
             exclude_flags=["tor", "invasive"],
             tags=["social", "osint", "profiles"],
+        ))
+
+        self.register(ScanProfile(
+            name="phone-number",
+            display_name="Phone Number Intelligence",
+            description=(
+                "Carrier, region, country, and infostealer-breach lookups "
+                "for a phone-number target. Key-free only - none of these "
+                "modules need an API key configured. sfp_callername's "
+                "caller-ID lookup is US numbers only; other modules work "
+                "for any country. For keyed phone lookups (numverify, "
+                "abstractapi, neutrinoapi, Twilio) use api-powered instead, "
+                "once those keys are configured."
+            ),
+            category=ProfileCategory.RECONNAISSANCE,
+            include_modules=[
+                "sfp_phone",          # phonenumbers lib: carrier/region/timezone/validity
+                "sfp_countryname",    # country from phone/IP/etc.
+                "sfp_callername",     # caller-ID lookup - US numbers only
+                "sfp_hudsonrock",     # Hudson Rock Cavalier: free infostealer-breach intel
+                "sfp_gravatar",       # Gravatar presence check
+            ],
+            exclude_flags=["errorprone"],
+            max_threads=3,
+            timeout_minutes=15,
+            tags=["phone", "osint", "key-free"],
         ))
 
         self.register(ScanProfile(
