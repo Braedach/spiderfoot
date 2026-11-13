@@ -223,5 +223,9 @@ def is_celery_available() -> bool:
         conn.ensure_connection(max_retries=1, timeout=3)
         conn.close()
         return True
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "Celery broker unreachable (%s): %s: %s",
+            _CELERY_BROKER, type(exc).__name__, exc,
+        )
         return False

@@ -81,6 +81,14 @@ async def _lifespan(application: FastAPI):
     except Exception as e:
         _log.warning("Auth service init failed (non-fatal): %s", e)
 
+    # Mark scans whose executor died (no live heartbeat) as failed instead of
+    # leaving them RUNNING forever.
+    try:
+        from spiderfoot.scan.liveness import start_reaper_thread
+        start_reaper_thread()
+    except Exception as e:
+        _log.warning("Scan reaper not started (non-fatal): %s", e)
+
     # Initialize core SpiderFoot DB schema (creates tbl_scan_instance etc.)
     # Also warm up the global RepositoryFactory singleton so every request
     # reuses the same ThreadedConnectionPool instead of creating a new one.
