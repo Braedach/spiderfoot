@@ -74,7 +74,12 @@ def startSpiderFootScanner(loggingQueue: Any, *args, **kwargs) -> SpiderFootScan
     if modules_dir not in sys.path:
         sys.path.insert(0, modules_dir)
     logWorkerSetup(loggingQueue)
-    return SpiderFootScanner(*args, **kwargs)
+    scan_id = kwargs.get("scanId") or (args[1] if len(args) > 1 else None)
+    if not scan_id:
+        return SpiderFootScanner(*args, **kwargs)
+    from spiderfoot.scan.liveness import ScanHeartbeat
+    with ScanHeartbeat(str(scan_id)):
+        return SpiderFootScanner(*args, **kwargs)
 
 
 class SpiderFootScanner():

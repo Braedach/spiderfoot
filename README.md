@@ -42,6 +42,55 @@ An internal-use fork of [poppopjmp/spiderfoot](https://github.com/poppopjmp/spid
 - New Scan dims modules that cannot run against the chosen target type.
 - The workspace IaC Map diagram renders (it was blank, a sanitiser stripped the SVG), and several authorisation-redirect and race-condition bugs are fixed.
 
+## How a scan flows
+
+There is no fixed module call order. A target seeds one event, and the scan is this loop running in parallel across every loaded module until all queues are empty. (Diagrams are Mermaid and render on GitHub.)
+
+```mermaid
+flowchart TD
+    T["Target<br/>IP, domain, netblock, ASN, email, phone, name, username"] -->|seeds one root event| Q(["Central event queue<br/>waitForThreads() pulls one event at a time"])
+    Q --> W{"event type in module's<br/>watchedEvents()?"}
+    W -->|no| X1["module never sees it"]
+    W -->|yes| I{"module flagged<br/>invasive?"}
+    I -->|no| MQ
+    I -->|yes| G
+    subgraph G["shouldDispatchToModule() scope gate"]
+        direction TB
+        G1["1. target.matches(hostname)<br/>URLs reduced to FQDN first"] --> G2["2. target.isKnownCdnIP(ip)<br/>static Cloudflare / Fastly ranges"] --> G3["3. target.isSharedIP(ip)<br/>reactive, set by other modules"]
+    end
+    G -->|any check fails| X2["event dropped, debug log only"]
+    G -->|all pass| MQ["module's own FIFO queue"]
+    MQ --> MT["module's dedicated thread<br/>threadWorker(), one per module"]
+    MT --> P["shared thread pool<br/>poolExecute(), _maxthreads workers, round-robin<br/>handleEvent() runs here"]
+    P --> E["new events emitted<br/>zero, one or many"]
+    E -->|back onto the queue| Q
+    Q -.->|"all queues empty AND every module idle<br/>(3 consecutive passes)"| F["FINISHED sentinel to every module"]
+```
+
+Bottlenecks this design had, and how they are handled:
+
+- **Shared pool.** Every module competes for the same `_maxthreads` workers, so a module sweeping thousands of lookups (TLD search, subdomain brute force) can starve the rest. Bulk modules size their own batches with `batch_size`, not `_maxthreads` (a module option named like a global config key is silently overwritten by the global value; `test_module_opt_global_collision.py` guards this).
+- **Waits on raw threads.** Modules that spawn their own threads must bound their wait. An unbounded wait never clears the module's `.running` flag, so `threadsFinished()` never returns true and the scan hangs without any error. The eight modules that did this now use a deadline and daemon threads.
+- **Scope gate.** Only invasive modules go through it; it is deterministic and does no I/O.
+
+### Where a scan executes
+
+Scans never run inside an API worker. uvicorn's supervisor kills any worker that is slow to answer its health ping, and a scan running in that worker used to die with it, silently, leaving the scan `RUNNING` forever.
+
+```mermaid
+flowchart LR
+    C["client"] -->|"POST /api/scans"| A["sf-api worker<br/>creates the scan row, returns 201"]
+    A --> D{"Celery broker<br/>reachable?"}
+    D -->|yes| Q[("Redis 'scan' queue")] --> W["sf-celery-worker-active<br/>runs the scan"]
+    D -->|"no (logged as a warning)"| R["detached process<br/>spiderfoot.scan.isolated_runner<br/>own session, survives API restarts"]
+    W --> H["heartbeat thread<br/>sf:scan:alive:ID, 90s TTL, refreshed every 15s"]
+    R --> H
+    H -.->|key vanishes| X["scan reaper in every API worker<br/>RUNNING with no heartbeat for 180s -> ERROR-FAILED<br/>ABORT-REQUESTED -> ABORTED"]
+```
+
+- The API workers' health-check timeout is `SF_API_WORKER_HEALTHCHECK_TIMEOUT` (default 120s, uvicorn's own default is 5s).
+- Reaper tuning: `SF_SCAN_REAP_GRACE` (180s), `SF_SCAN_HEARTBEAT_INTERVAL` (15s), `SF_SCAN_HEARTBEAT_TTL` (90s), `SF_SCAN_STARTING_MAX_AGE` (6h, a scan may legitimately wait in the Celery queue). With Redis down the reaper does nothing rather than reaping blind.
+
 ## Breaking change
 
 **rc.15: the LLM API key is no longer an environment variable.** Upgrading from rc.14 or earlier requires: (1) replace the stack file (the old one *requires* `ANTHROPIC_API_KEY` and does not pass the JWT secret to `sf-agents` and the workers); (2) redeploy on `rc.15`; (3) sign in as an administrator, open **AI Connections**, enter the provider key, choose a model and make the provider active; (4) delete `ANTHROPIC_API_KEY` from the stack environment. Until a key is saved there, AI reports fail with a message pointing at AI Connections. Keys are encrypted using a key derived from `SF_JWT_SECRET_KEY`, so rotating that secret means entering them again.

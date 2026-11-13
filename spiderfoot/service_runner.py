@@ -217,6 +217,10 @@ def _run_api(port: int, config: dict) -> None:
         workers=int(os.environ.get("SF_API_WORKERS", "4")),
         log_level=os.environ.get("SF_LOG_LEVEL", "info").lower(),
         access_log=True,
+        # uvicorn's supervisor SIGKILLs a worker that does not answer its
+        # health ping within this many seconds (default 5). A busy worker was
+        # being killed mid-request and logged only "Child process died".
+        timeout_worker_healthcheck=int(os.environ.get("SF_API_WORKER_HEALTHCHECK_TIMEOUT", "120")),
     )
 
 

@@ -162,15 +162,33 @@ def start_scan_background(
     config: dict,
     stealth_level: str | None = None,
 ) -> None:
-    """Launch a SpiderFoot scan in the background for the given target and modules.
+    """Launch a SpiderFoot scan for the given target and modules.
 
     NOTE: This is intentionally a sync function (not async) so that FastAPI's
     BackgroundTasks runs it in a thread pool instead of blocking the event loop.
-
-    If Celery is available, dispatches to the Celery worker instead of running
-    in-process.  Falls back to multiprocessing if Celery is unreachable.
     """
-    # Try Celery-based execution first (v5.4.0+)
+    dispatch_scan(scan_id, scan_name, target, target_type, modules, config, stealth_level)
+
+
+def dispatch_scan(
+    scan_id: str,
+    scan_name: str,
+    target: str,
+    target_type: str,
+    modules: list,
+    config: dict,
+    stealth_level: str | None = None,
+) -> str:
+    """Hand a scan to an executor that is isolated from the API workers.
+
+    Prefers the Celery ``scan`` queue. If Celery cannot take it, the scan runs
+    in its own detached process. A scan is never run inside an API worker: the
+    uvicorn supervisor SIGKILLs a worker that is slow to answer its health
+    ping, and that used to take any scan running in it down silently.
+
+    Returns "celery" or "process".
+    """
+    celery_error = None
     try:
         from spiderfoot.celery_app import is_celery_available
         if is_celery_available():
@@ -185,32 +203,43 @@ def start_scan_background(
             }
             if stealth_level:
                 kwargs["stealth_level"] = stealth_level
-            run_scan.apply_async(
-                kwargs=kwargs,
-                task_id=scan_id,
-                queue="scan",
-            )
+            run_scan.apply_async(kwargs=kwargs, task_id=scan_id, queue="scan")
             log.info("Scan %s dispatched to Celery worker (stealth=%s)", scan_id, stealth_level or "none")
-            return
+            return "celery"
+        celery_error = "broker unreachable (see sf.celery warning)"
     except Exception as e:
-        log.warning("Celery dispatch failed for scan %s, falling back to in-process: %s", scan_id, e)
+        celery_error = f"{type(e).__name__}: {e}"
 
-    # Fallback: run in-process via multiprocessing
-    import multiprocessing as mp
-    from spiderfoot.observability.logger import logListenerSetup
-
-    # Inject stealth level into config so the scanner can pick it up
+    log.warning("Celery dispatch unavailable for scan %s (%s) - running it in a detached process", scan_id, celery_error)
     if stealth_level:
         config = {**config, "_stealth_level": stealth_level}
+    _spawn_isolated_scan(scan_id, scan_name, target, target_type, modules, config)
+    return "process"
 
-    try:
-        logging_queue = mp.Queue()
-        logListenerSetup(logging_queue, config)
-        startSpiderFootScanner(
-            logging_queue, scan_name, scan_id, target, target_type, modules, config,
-        )
-    except Exception as e:
-        log.error("Failed to start scan %s: %s", scan_id, e)
+
+def _spawn_isolated_scan(
+    scan_id: str, scan_name: str, target: str, target_type: str, modules: list, config: dict,
+) -> None:
+    """Run a scan in a new session-leader process that outlives the API worker."""
+    import json
+    import subprocess
+    import sys
+    import threading
+
+    payload = json.dumps({
+        "scan_name": scan_name, "scan_id": scan_id, "target": target,
+        "target_type": target_type, "modules": modules, "config": config,
+    }, default=str)
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "spiderfoot.scan.isolated_runner"],
+        stdin=subprocess.PIPE, start_new_session=True,
+    )
+    assert proc.stdin is not None
+    proc.stdin.write(payload.encode())
+    proc.stdin.close()
+    # Reap the child when it exits so it does not linger as a zombie.
+    threading.Thread(target=proc.wait, daemon=True, name=f"scan-wait-{scan_id}").start()
+    log.info("Scan %s started in detached process pid=%d", scan_id, proc.pid)
 
 
 # -----------------------------------------------------------------------
@@ -355,34 +384,7 @@ async def rerun_scan_multi(
             continue
         new_scan_id = SpiderFootHelpers.genScanInstanceId()
         try:
-            # Try Celery first (v5.4.0+)
-            celery_dispatched = False
-            try:
-                from spiderfoot.celery_app import is_celery_available
-                if is_celery_available():
-                    from spiderfoot.tasks.scan import run_scan
-                    run_scan.apply_async(
-                        kwargs={
-                            "scan_name": record.name,
-                            "scan_target": record.target,
-                            "module_list": modlist,
-                            "type_list": [],
-                            "global_opts": cfg,
-                        },
-                        task_id=new_scan_id,
-                        queue="scan",
-                    )
-                    celery_dispatched = True
-            except Exception:
-                pass
-
-            if not celery_dispatched:
-                p = mp.Process(
-                    target=startSpiderFootScanner,
-                    args=(None, record.name, new_scan_id, record.target, target_type, modlist, cfg),
-                )
-                p.daemon = True
-                p.start()
+            dispatch_scan(new_scan_id, record.name, record.target, target_type, modlist, cfg)
         except Exception as e:
             continue
         while dbh.scanInstanceGet(new_scan_id) is None:
@@ -2079,35 +2081,7 @@ async def rerun_scan(
 
     new_scan_id = SpiderFootHelpers.genScanInstanceId()
     try:
-        # Try Celery first (v5.4.0+)
-        celery_dispatched = False
-        try:
-            from spiderfoot.celery_app import is_celery_available
-            if is_celery_available():
-                from spiderfoot.tasks.scan import run_scan
-                run_scan.apply_async(
-                    kwargs={
-                        "scan_name": record.name,
-                        "scan_target": scantarget,
-                        "module_list": modlist,
-                        "type_list": [],
-                        "global_opts": cfg,
-                    },
-                    task_id=new_scan_id,
-                    queue="scan",
-                )
-                celery_dispatched = True
-                log.info("Scan rerun %s dispatched to Celery worker", new_scan_id)
-        except Exception as e:
-            log.warning("Celery dispatch failed for rerun %s, using mp.Process: %s", new_scan_id, e)
-
-        if not celery_dispatched:
-            p = mp.Process(
-                target=startSpiderFootScanner,
-                args=(None, record.name, new_scan_id, scantarget, target_type, modlist, cfg),
-            )
-            p.daemon = True
-            p.start()
+        dispatch_scan(new_scan_id, record.name, scantarget, target_type, modlist, cfg)
     except Exception as e:
         log.error("Scan rerun failed for %s: %s", new_scan_id, e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to start scan rerun")
