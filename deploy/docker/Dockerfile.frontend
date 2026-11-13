@@ -82,7 +82,7 @@ ENV SF_AGENTS_URL=http://sf-agents:8100
 # uses busybox wget, and Grype flagged curl 8.22.0 with a HIGH finding that has
 # no fix yet - an unfixable CVE in an unused binary is best removed, not
 # waited on) and apk, to prevent in-container installs.
-RUN apk --no-cache upgrade brotli-libs libexpat && apk --no-cache del curl apk-tools
+RUN apk --no-cache upgrade brotli-libs libexpat libxslt && apk --no-cache del curl apk-tools
 
 # Create non-root nginx user directories and fix ownership
 RUN mkdir -p /var/cache/nginx /var/run /var/log/nginx && \
