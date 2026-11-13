@@ -212,6 +212,26 @@ class TestProfileManager(unittest.TestCase):
         self.assertIn("api-powered", names)
         self.assertIn("minimal", names)
         self.assertIn("investigate", names)
+        self.assertIn("email-address", names)
+        self.assertIn("person-name", names)
+
+    def test_person_name_profile_is_key_free(self):
+        p = self.pm.get("person-name")
+        self.assertIsNotNone(p)
+        self.assertEqual(
+            set(p.include_modules),
+            {"sfp_accounts", "sfp_arin", "sfp_wikileaks"},
+        )
+
+    def test_email_address_profile_is_key_free(self):
+        p = self.pm.get("email-address")
+        self.assertIsNotNone(p)
+        self.assertEqual(
+            set(p.include_modules),
+            {"sfp_email", "sfp_emailformat", "sfp_debounce", "sfp_trumail",
+             "sfp_pgp", "sfp_gravatar", "sfp_hudsonrock", "sfp_grep_app",
+             "sfp_searchcode", "sfp_accounts", "sfp_wikileaks"},
+        )
 
     def test_get_profile(self):
         p = self.pm.get("quick-recon")

@@ -160,7 +160,7 @@ def _threat_intel() -> ScanTemplate:
         category=TemplateCategory.THREAT_INTEL,
         modules={
             "sfp_virustotal", "sfp_abuseipdb", "sfp_alienvault",
-            "sfp_threatcrowd", "sfp_urlhaus",
+            "sfp_urlhaus",
         },
         event_types={
             "MALICIOUS_IPADDR", "MALICIOUS_INTERNET_NAME",

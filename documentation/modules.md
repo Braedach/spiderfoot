@@ -26,7 +26,6 @@ Modules are plugins that collect, enrich, or analyze data from various sources. 
 - **sfp_banner**: Service banner grabbing
 
 ### Threat Intelligence
-- **sfp_threatcrowd**: ThreatCrowd API queries
 - **sfp_virustotal**: VirusTotal API integration
 - **sfp_alienvault**: AlienVault OTX integration
 - **sfp_malwarepatrol**: Malware analysis platforms
@@ -149,7 +148,6 @@ Below is a complete list of all documented modules. Click a module name to view 
 | [sfp_shodan](modules/sfp_shodan.md) | Queries Shodan for open ports, banners, vulnerabilities, and geolocation. |
 | [sfp_social](modules/sfp_social.md) | Searches social media platforms for mentions, profiles, and activity. |
 | [sfp_sslcert](modules/sfp_sslcert.md) | Analyzes SSL/TLS certificates for the target host. |
-| [sfp_threatcrowd](modules/sfp_threatcrowd.md) | Queries ThreatCrowd for information about domains, IPs, and emails. |
 | [sfp_tiktok_osint](modules/sfp_tiktok_osint.md) | Comprehensive TikTok intelligence gathering including user profiles and content analysis. |
 | sfp_tool_amass | Advanced subdomain enumeration via OWASP Amass. |
 | sfp_tool_arjun | HTTP parameter discovery and enumeration. |
@@ -198,7 +196,7 @@ Below is a complete list of all documented modules. Click a module name to view 
 ## Module Selection Strategies
 
 - **By Use Case:**
-  - Passive: sfp_dnsresolve, sfp_whois, sfp_sslcert, sfp_threatcrowd, sfp_virustotal
+  - Passive: sfp_dnsresolve, sfp_whois, sfp_sslcert, sfp_virustotal
   - Active: sfp_subfinder, sfp_httpx, sfp_nuclei, sfp_tool_katana
   - Network: sfp_tool_naabu, sfp_tool_masscan, sfp_tool_sslscan, sfp_whois
   - Internet Exposure: sfp_shodan, sfp_censys, sfp_binaryedge
