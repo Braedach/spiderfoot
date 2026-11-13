@@ -145,6 +145,74 @@ class TestSpiderFootTarget(TestModuleBase):
         self.assertFalse(self.target.matches(
             "sub.example.com", includeChildren=False))
 
+    def test_mark_ip_shared_does_not_affect_matches(self):
+        # markIPShared() must leave matches() entirely alone - it's a
+        # separate, invasive-dispatch-only signal (see
+        # SpiderFootScanner.shouldDispatchToModule() and its own tests).
+        self.target.setAlias("151.101.3.7", "IP_ADDRESS")
+        self.assertTrue(self.target.matches("151.101.3.7"))
+        self.target.markIPShared("151.101.3.7")
+        self.assertTrue(self.target.matches("151.101.3.7"))
+
+    def test_is_shared_ip(self):
+        self.assertFalse(self.target.isSharedIP("151.101.3.7"))
+        self.target.markIPShared("151.101.3.7")
+        self.assertTrue(self.target.isSharedIP("151.101.3.7"))
+        # Case-insensitive, consistent with alias storage.
+        self.target.markIPShared("2606:4700::1")
+        self.assertTrue(self.target.isSharedIP("2606:4700::1"))
+
+    def test_mark_ip_shared_invalid_input_ignored(self):
+        self.target.markIPShared("")
+        self.target.markIPShared(None)
+        self.assertFalse(self.target.isSharedIP(""))
+        self.assertFalse(self.target.isSharedIP(None))
+
+    def test_is_shared_ip_unmarked_dedicated_ip_unaffected(self):
+        # Baseline: an alias never marked shared (the common, single-tenant
+        # case) must never be reported as shared.
+        self.target.setAlias("203.0.113.5", "IP_ADDRESS")
+        self.assertFalse(self.target.isSharedIP("203.0.113.5"))
+
+    def test_mark_ip_shared_never_demotes_the_literal_ip_target(self):
+        # The exact use case this must never break: a user explicitly
+        # searches an IP address (e.g. the scope-guard validation's own
+        # 101.189.0.149) and a historical/passive-DNS-style discovery
+        # module reports a stale prior-occupant hostname for it - common
+        # on residential/dynamic IPs. That must never block scanning the
+        # address the user actually authorised.
+        target = SpiderFootTarget("101.189.0.149", "IP_ADDRESS")
+        target.markIPShared("101.189.0.149")
+        self.assertFalse(target.isSharedIP("101.189.0.149"))
+
+    def test_mark_ip_shared_never_demotes_an_address_in_the_owned_netblock(self):
+        target = SpiderFootTarget("203.0.113.0/24", "NETBLOCK_OWNER")
+        target.markIPShared("203.0.113.42")
+        self.assertFalse(target.isSharedIP("203.0.113.42"))
+        # An address genuinely outside the owned block is unaffected by
+        # the exemption and can still be marked.
+        target.markIPShared("198.51.100.1")
+        self.assertTrue(target.isSharedIP("198.51.100.1"))
+
+    def test_mark_ip_shared_is_a_noop_for_asn_targets(self):
+        # BGP_AS_OWNER has no netblock-membership check in matches() at
+        # all - an ASN's scope is entirely its registered aliases, by
+        # construction. Exempted for the same reason as NETBLOCK_OWNER.
+        # UNTESTED against a real ASN scan - no authorised ASN scope
+        # exists to validate this against (2026-11-13).
+        target = SpiderFootTarget("AS64512", "BGP_AS_OWNER")
+        target.markIPShared("203.0.113.5")
+        self.assertFalse(target.isSharedIP("203.0.113.5"))
+
+    def test_mark_ip_shared_still_works_for_a_secondary_ip_on_a_domain_target(self):
+        # The actual bug this fix addresses: a domain target's subdomain
+        # resolves to a secondary (non-literal-target) IP that turns out
+        # to be a shared CDN edge. This must still work.
+        target = SpiderFootTarget("example.com", "INTERNET_NAME")
+        target.setAlias("151.101.3.7", "IP_ADDRESS")
+        target.markIPShared("151.101.3.7")
+        self.assertTrue(target.isSharedIP("151.101.3.7"))
+
     def tearDown(self):
         """Clean up after each test."""
         super().tearDown()

@@ -23,7 +23,17 @@ class ConfigManager:
     # Default configuration options
     DEFAULT_CONFIG = {
         '_debug': False,
-        '_maxthreads': 3,
+        # Was 3. A domain scan with heavy co-hosted-site discovery (~100
+        # third parties) ran 14+ hours producing only ~25k events at this
+        # default - not CPU/memory/WAN-bound (confirmed: baden had headroom
+        # throughout), just badly serialised: this is almost entirely
+        # I/O-bound work (DNS/HTTP waits), and 3 concurrent module-dispatch
+        # slots for the whole scan starves a large discovery backlog.
+        # Validated live 2026-11-13 against braedach.com at 12: ~10x
+        # throughput (~40k events/hour, sustained, not declining like the
+        # old run's tail), zero rate-limit/429/connection-refused signals
+        # from any third party. See deploy/README.md for the full note.
+        '_maxthreads': 12,
         '__logging': True,
         '__outputfilter': None,
         '_useragent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:62.0) Gecko/20100101 Firefox/62.0',

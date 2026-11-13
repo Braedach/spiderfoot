@@ -92,3 +92,61 @@ class TestStrictScopeGate(TestScannerBase):
         event = SpiderFootEvent("IP_ADDRESS", "198.51.100.9", "sfp_phone", None)
 
         self.assertTrue(scanner.shouldDispatchToModule(invasive, event))
+
+    # -- Shared/CDN IP gate (found 2026-11-13: a legitimately-registered --
+    # -- alias IP can still be a shared CDN edge serving unrelated sites --
+
+    def test_invasive_module_rejects_shared_ip_even_if_aliased(self):
+        # www.example.com (a real alias) resolves to a Fastly edge IP that
+        # also serves an unrelated site - a discovery module proved that by
+        # calling markIPShared(). The IP is still a registered alias (so
+        # matches() is True, discovery/passive modules are unaffected), but
+        # invasive modules must not act on the bare address directly.
+        scanner = self._build_scanner("example.com", "INTERNET_NAME")
+        scanner._SpiderFootScanner__target.setAlias("151.101.3.7", "IP_ADDRESS")
+        scanner._SpiderFootScanner__target.markIPShared("151.101.3.7")
+        invasive = _FakeModule("sfp_nmap", flags=["invasive"])
+        event = SpiderFootEvent("IP_ADDRESS", "151.101.3.7", "sfp_dnsresolve", None)
+
+        self.assertFalse(scanner.shouldDispatchToModule(invasive, event))
+
+    def test_non_invasive_module_still_gets_shared_ip(self):
+        # Discovery must still see it - only action is blocked.
+        scanner = self._build_scanner("example.com", "INTERNET_NAME")
+        scanner._SpiderFootScanner__target.setAlias("151.101.3.7", "IP_ADDRESS")
+        scanner._SpiderFootScanner__target.markIPShared("151.101.3.7")
+        passive = _FakeModule("sfp_passive_lookup", flags=[])
+        event = SpiderFootEvent("IP_ADDRESS", "151.101.3.7", "sfp_dnsresolve", None)
+
+        self.assertTrue(scanner.shouldDispatchToModule(passive, event))
+
+    def test_invasive_module_rejects_shared_ip_with_port_suffix(self):
+        # TCP_PORT_OPEN-style "ip:port" data must also be caught, not just
+        # the bare IP_ADDRESS event.
+        scanner = self._build_scanner("example.com", "INTERNET_NAME")
+        scanner._SpiderFootScanner__target.setAlias("151.101.3.7", "IP_ADDRESS")
+        scanner._SpiderFootScanner__target.markIPShared("151.101.3.7")
+        invasive = _FakeModule("sfp_httpx", flags=["invasive"])
+        event = SpiderFootEvent("TCP_PORT_OPEN", "151.101.3.7:443", "sfp_internetdb", None)
+
+        self.assertFalse(scanner.shouldDispatchToModule(invasive, event))
+
+    def test_invasive_module_accepts_aliased_ip_not_marked_shared(self):
+        # Baseline: a dedicated, single-tenant alias IP (never marked
+        # shared, since nothing ever found a non-matching co-tenant on it)
+        # is completely unaffected - this is the common case the original
+        # scope guard already validated and must not regress.
+        scanner = self._build_scanner("example.com", "INTERNET_NAME")
+        scanner._SpiderFootScanner__target.setAlias("203.0.113.5", "IP_ADDRESS")
+        invasive = _FakeModule("sfp_nmap", flags=["invasive"])
+        event = SpiderFootEvent("IP_ADDRESS", "203.0.113.5", "sfp_dnsresolve", None)
+
+        self.assertTrue(scanner.shouldDispatchToModule(invasive, event))
+
+    def test_extract_ip_for_shared_check(self):
+        extract = SpiderFootScanner._extractIPForSharedCheck
+        self.assertEqual(extract("151.101.3.7"), "151.101.3.7")
+        self.assertEqual(extract("151.101.3.7:443"), "151.101.3.7")
+        self.assertEqual(extract("151.101.3.7:443/tcp (https)"), "151.101.3.7")
+        self.assertIsNone(extract("example.com"))
+        self.assertIsNone(extract("2606:4700:3037::ac43:ac5f"))

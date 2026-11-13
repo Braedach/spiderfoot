@@ -96,7 +96,7 @@ class TestConfigService(unittest.TestCase):
     def test_load_defaults(self):
         self.svc.load_defaults()
         self.assertFalse(self.svc.get("_debug"))
-        self.assertEqual(self.svc.get("_maxthreads"), 3)
+        self.assertEqual(self.svc.get("_maxthreads"), 12)
 
     def test_load_dict(self):
         self.svc.load_dict({"_custom": "value"})
