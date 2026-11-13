@@ -79,6 +79,15 @@
 #    - The tag you deploy has been published by deploy/publish.sh (see deploy/README.md)
 #
 #   Warnings:
+#     - Bumped sf-qdrant v1.19.1 -> v1.20.0 (2026-11-13), one minor version. Checked Qdrant's own
+#       1.20 release notes and blog upgrade guide first: no storage/snapshot format change (unlike
+#       the 1.12.4->1.19.1 jump below), and the breaking items in 1.20 (internal cluster auth
+#       defaulting on when api_key is set, alt_api_key-only clusters needing 1.19.2 first, inline
+#       storage needing hnsw_config.memory) are all cluster/inline-storage specific - this is a
+#       single-node deployment with no api_key/alt_api_key/cluster config, and create_collection()
+#       (spiderfoot/ai/qdrant_client.py) never sets on_disk/inline storage. Plain tag bump, no
+#       volume wipe needed. Same reasoning as below still applies if this turns out wrong: nothing
+#       stored in Qdrant is anything other than a reconstructable derivative of Postgres scan data.
 #     - BREAKING CHANGE (2.3.0, 2026-09-16): sf-qdrant jumped v1.12.4 -> v1.19.1, a 7-minor-version bump.
 #       Qdrant's own upgrade docs are explicit that a single-node deployment cannot skip minor versions with
 #       existing data on disk. Confirmed the hard way here: bumping the tag and restarting in place crash-looped
@@ -447,7 +456,7 @@ services:
       - spiderfoot-net
 
   sf-qdrant:
-    image: qdrant/qdrant:v1.19.1
+    image: qdrant/qdrant:v1.20.0
     container_name: sf-qdrant
     hostname: sf-qdrant
     restart: always
