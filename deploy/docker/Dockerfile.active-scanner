@@ -74,7 +74,7 @@ COPY deploy/docker/go-build.sh /usr/local/bin/go-build
 # finding the scan gate raised against these tools on 2026-10-23, and each is more than 14
 # days old. grpc is pinned to a commit: its fix is on master, not yet in a release.
 # Re-derive this list from the gate's report when it changes (deploy/README.md).
-ENV GO_FLOORS="golang.org/x/net@v0.60.0 golang.org/x/crypto@v0.55.0 golang.org/x/text@v0.41.0 \
+ENV GO_FLOORS="golang.org/x/net@v0.62.0 golang.org/x/crypto@v0.55.0 golang.org/x/text@v0.41.0 \
  golang.org/x/mod@v0.40.0 github.com/klauspost/compress@v1.18.7 github.com/jackc/pgx/v5@v5.9.0 \
  github.com/getkin/kin-openapi@v0.149.0 github.com/go-git/go-git/v5@v5.19.2 \
  github.com/sirupsen/logrus@v1.9.3 github.com/valyala/fasthttp@v1.34.0 \
