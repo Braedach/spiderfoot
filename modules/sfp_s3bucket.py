@@ -119,9 +119,21 @@ class sfp_s3bucket(SpiderFootAsyncPlugin):
                     args=(site,),
                 )
             )
+            # daemon=True: an abandoned-on-timeout thread (see the deadline
+            # below) must never block process shutdown.
+            t[i].daemon = True
             t[i].start()
 
-        # Block until all threads are finished
+        # Block until all threads are finished, bounded by an overall
+        # deadline - a single hung bucket check (no response, dropped by a
+        # firewall, a slow-loris-style stall) must never be able to block
+        # this forever, since handleEvent() won't return until this does,
+        # which stalls the WHOLE SCAN forever (confirmed live 2026-11-13:
+        # exactly this pattern, shared by 6 other modules, silently
+        # stalled a scan overnight with no error, no crash, no symptom
+        # beyond the scan never finishing). Abandoned daemon threads exit
+        # on their own eventually and are not reused.
+        deadline = time.monotonic() + max(30, self.opts.get('_fetchtimeout', 15) * 4)
         while running:
             found = False
             for rt in threading.enumerate():
@@ -129,6 +141,11 @@ class sfp_s3bucket(SpiderFootAsyncPlugin):
                     found = True
 
             if not found:
+                running = False
+            elif time.monotonic() > deadline:
+                self.error(
+                    "Timed out waiting for S3 bucket checks - abandoning"
+                    " this batch (a bucket host may be unresponsive).")
                 running = False
 
             time.sleep(0.25)

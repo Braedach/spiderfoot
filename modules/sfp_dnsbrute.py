@@ -120,10 +120,20 @@ class sfp_dnsbrute(SpiderFootAsyncPlugin):
                 str(random.SystemRandom().randint(1, 999999999))
             t.append(threading.Thread(
                 name=tn, target=self.tryHost, args=(name,)))
+            # daemon=True: an abandoned-on-timeout thread (see the deadline
+            # below) must never block process shutdown.
+            t[i].daemon = True
             t[i].start()
             i += 1
 
-        # Block until all threads are finished
+        # Block until all threads are finished, bounded by an overall
+        # deadline - a single hung resolution (dropped by a firewall, no
+        # response) must never be able to block this forever, which stalls
+        # the WHOLE SCAN forever since handleEvent() won't return until
+        # this does. Confirmed live 2026-11-13: this pattern, shared by 6
+        # other modules, silently stalled a scan overnight with no error,
+        # no crash, no symptom beyond the scan never finishing.
+        deadline = time.monotonic() + max(30, self.opts.get('_fetchtimeout', 15) * 4)
         while running:
             found = False
             for rt in threading.enumerate():
@@ -131,6 +141,11 @@ class sfp_dnsbrute(SpiderFootAsyncPlugin):
                     found = True
 
             if not found:
+                running = False
+            elif time.monotonic() > deadline:
+                self.error(
+                    "Timed out waiting for dnsbrute resolutions -"
+                    " abandoning this batch (a host may be unresponsive).")
                 running = False
 
             time.sleep(0.05)
