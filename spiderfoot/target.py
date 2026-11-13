@@ -192,19 +192,43 @@ class SpiderFootTarget():
 
         value = value.lower()
 
-        if self.targetType in ("IP_ADDRESS", "IPV6_ADDRESS"):
-            if value == self.targetValue.lower():
-                return
-        elif self.targetType in ("NETBLOCK_OWNER", "NETBLOCKV6_OWNER"):
-            try:
-                if netaddr.IPAddress(value) in netaddr.IPNetwork(self.targetValue):
-                    return
-            except netaddr.AddrFormatError:
-                pass
-        elif self.targetType == "BGP_AS_OWNER":
+        if self.isDirectlyAuthorisedScope(value):
             return
 
         self._sharedIPs.add(value)
+
+    def isDirectlyAuthorisedScope(self, value: str) -> bool:
+        """Return True if value is the target's own directly-authorised
+        literal scope - the exact searched IP/IPv6 address, an address
+        within the owned netblock, or (for an ASN target) any address at
+        all, since matches() has no netblock-membership check for
+        BGP_AS_OWNER and treats the whole ASN as the target's own alias
+        set by construction.
+
+        This authorisation can never be overridden by any shared/CDN
+        signal, reactive (markIPShared()) or static (cdn_ranges.py) - the
+        user explicitly authorised scanning this exact scope, and a
+        third-party signal (noisy passive-DNS history, or the address
+        happening to fall in a provider's published CDN range) is not
+        grounds to silently stop. See markIPShared()'s docstring for the
+        live incident and reasoning behind each case below.
+
+        Args:
+            value (str): the IP or IPv6 address to check (expected lowercase).
+
+        Returns:
+            bool: True if value is within the target's own authorised scope.
+        """
+        if self.targetType in ("IP_ADDRESS", "IPV6_ADDRESS"):
+            return value == self.targetValue.lower()
+        if self.targetType in ("NETBLOCK_OWNER", "NETBLOCKV6_OWNER"):
+            try:
+                return netaddr.IPAddress(value) in netaddr.IPNetwork(self.targetValue)
+            except netaddr.AddrFormatError:
+                return False
+        if self.targetType == "BGP_AS_OWNER":
+            return True
+        return False
 
     def isSharedIP(self, value: str) -> bool:
         """Return True if this address has been flagged via markIPShared().
@@ -218,6 +242,36 @@ class SpiderFootTarget():
         if not isinstance(value, str):
             return False
         return value.lower() in self._sharedIPs
+
+    def isKnownCdnIP(self, value: str, cdnRanges: dict[str, list[str]] | None = None) -> str | None:
+        """Return the CDN/anycast provider name if value falls within a
+        known provider's published IP range, UNLESS value is the target's
+        own directly-authorised scope (see isDirectlyAuthorisedScope()).
+
+        Deterministic and dispatch-order-independent, unlike isSharedIP():
+        it needs no other module to have observed and reported the sharing
+        first. Complementary to isSharedIP(), not a replacement - shared
+        hosting on a provider not in cdn_ranges.py still needs markIPShared().
+
+        Args:
+            value (str): the IP or IPv6 address to check.
+            cdnRanges (dict[str, list[str]] | None): provider -> CIDR list,
+                as returned by cdn_ranges.refreshCdnRanges(). Falls back to
+                the static snapshot in cdn_ranges.FALLBACK_RANGES if omitted.
+
+        Returns:
+            str | None: the matching provider's name, or None.
+        """
+        if not isinstance(value, str) or not value:
+            return None
+
+        value = value.lower()
+
+        if self.isDirectlyAuthorisedScope(value):
+            return None
+
+        from spiderfoot.cdn_ranges import isKnownCdnIP as _isKnownCdnIP
+        return _isKnownCdnIP(value, cdnRanges)
 
     def _getEquivalents(self, typeName: str) -> list[str]:
         """Get all aliases of the specfied target data type.

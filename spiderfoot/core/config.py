@@ -50,6 +50,12 @@ class ConfigManager:
         '_fetchtimeout': 5,
         '_internettlds': 'https://publicsuffix.org/list/effective_tld_names.dat',
         '_internettlds_cache': 72,
+        # Hours to cache fetched Cloudflare/Fastly CDN IP ranges (see
+        # spiderfoot/cdn_ranges.py) before the next scan re-fetches them.
+        # Security-relevant list, so refreshed more often than the TLD
+        # list above; a failed fetch falls back to the last good cache or
+        # the static snapshot, never blocks or fails scan startup.
+        '_cdn_ranges_cache': 24,
         '_genericusers': '',
         '__database': '',
         '__modules__': None,
@@ -80,6 +86,11 @@ class ConfigManager:
         '_internettlds_cache': (
             "Hours to cache the Internet TLD list. This can safely be quite a long"
             " time given that the list doesn't change too often."
+        ),
+        '_cdn_ranges_cache': (
+            "Hours to cache fetched Cloudflare/Fastly CDN IP ranges, used to"
+            " stop invasive modules scanning a shared anycast edge even when"
+            " it's the target's own, legitimately-resolved address."
         ),
         '_genericusers': (
             "List of usernames that if found as usernames or as part of e-mail addresses,"

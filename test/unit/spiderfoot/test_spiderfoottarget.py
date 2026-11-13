@@ -213,6 +213,59 @@ class TestSpiderFootTarget(TestModuleBase):
         target.markIPShared("151.101.3.7")
         self.assertTrue(target.isSharedIP("151.101.3.7"))
 
+    def test_is_directly_authorised_scope_ip_target(self):
+        target = SpiderFootTarget("101.189.0.149", "IP_ADDRESS")
+        self.assertTrue(target.isDirectlyAuthorisedScope("101.189.0.149"))
+        self.assertFalse(target.isDirectlyAuthorisedScope("101.189.0.150"))
+
+    def test_is_directly_authorised_scope_netblock_target(self):
+        target = SpiderFootTarget("203.0.113.0/24", "NETBLOCK_OWNER")
+        self.assertTrue(target.isDirectlyAuthorisedScope("203.0.113.42"))
+        self.assertFalse(target.isDirectlyAuthorisedScope("198.51.100.1"))
+
+    def test_is_directly_authorised_scope_asn_target_is_always_true(self):
+        target = SpiderFootTarget("AS64512", "BGP_AS_OWNER")
+        self.assertTrue(target.isDirectlyAuthorisedScope("203.0.113.5"))
+
+    def test_is_directly_authorised_scope_domain_target_is_always_false(self):
+        # A domain target has no literal IP/netblock/ASN scope of its own -
+        # every address reaches it only via alias, never direct authorisation.
+        target = SpiderFootTarget("example.com", "INTERNET_NAME")
+        self.assertFalse(target.isDirectlyAuthorisedScope("151.101.3.7"))
+
+    def test_is_known_cdn_ip_detects_published_range(self):
+        # Real braedach.com incident IP (Fastly/Ghost.io edge).
+        target = SpiderFootTarget("example.com", "INTERNET_NAME")
+        self.assertEqual(target.isKnownCdnIP("151.101.3.7"), "Fastly")
+        # Real incident IP (Cloudflare anycast edge).
+        self.assertEqual(target.isKnownCdnIP("104.21.71.238"), "Cloudflare")
+
+    def test_is_known_cdn_ip_returns_none_for_non_cdn_address(self):
+        target = SpiderFootTarget("example.com", "INTERNET_NAME")
+        self.assertIsNone(target.isKnownCdnIP("203.0.113.5"))
+
+    def test_is_known_cdn_ip_never_overridden_by_own_scope(self):
+        # This is the whole point of the exemption: even if the user's own
+        # directly-authorised IP genuinely falls within a published CDN
+        # range (e.g. they run infrastructure behind Cloudflare/Fastly
+        # themselves), the static check must never block their own target.
+        target = SpiderFootTarget("151.101.3.7", "IP_ADDRESS")
+        self.assertIsNone(target.isKnownCdnIP("151.101.3.7"))
+
+        netblock_target = SpiderFootTarget("104.21.71.0/24", "NETBLOCK_OWNER")
+        self.assertIsNone(netblock_target.isKnownCdnIP("104.21.71.238"))
+
+    def test_is_known_cdn_ip_still_works_for_an_owned_subdomain_on_a_shared_edge(self):
+        # The exact structural gap found live 2026-11-13: a domain
+        # target's OWN subdomain correctly matches() scope and resolves
+        # directly to a CDN anycast edge, with no affiliate hop and no
+        # markIPShared() call ever involved. isKnownCdnIP() must catch
+        # this independently of the reactive mechanism.
+        target = SpiderFootTarget("braedach.com", "INTERNET_NAME")
+        target.setAlias("104.21.71.238", "IP_ADDRESS")
+        self.assertFalse(target.isSharedIP("104.21.71.238"))
+        self.assertEqual(target.isKnownCdnIP("104.21.71.238"), "Cloudflare")
+
     def tearDown(self):
         """Clean up after each test."""
         super().tearDown()
