@@ -295,7 +295,7 @@ services:
       - spiderfoot-net
 
   sf-qdrant:
-    image: qdrant/qdrant:v1.19.1
+    image: qdrant/qdrant:v1.20.0
     container_name: sf-qdrant
     hostname: sf-qdrant
     restart: always
