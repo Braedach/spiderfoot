@@ -78,7 +78,7 @@ class TestSectionDefaults:
     def test_core_defaults(self):
         c = CoreConfig()
         assert c.debug is False
-        assert c.max_threads == 12
+        assert c.max_threads == 24
         assert c.logging_enabled is True
         assert c.output_filter is None
         assert "Firefox" in c.user_agent
@@ -569,7 +569,7 @@ class TestDictAccess:
     def test_getitem_core(self):
         cfg = AppConfig()
         assert cfg["_debug"] is False
-        assert cfg["_maxthreads"] == 12
+        assert cfg["_maxthreads"] == 24
 
     def test_getitem_modules(self):
         cfg = AppConfig()

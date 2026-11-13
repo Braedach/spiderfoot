@@ -56,6 +56,23 @@ class sfp_dnsresolve(SpiderFootAsyncPlugin):
     domresults = None
     hostresults = None
 
+    # Default (plugin.py) is 10, shared equally by every module regardless
+    # of how much work it actually has queued. This module is a structural
+    # outlier: it's the single highest-fan-in module in the catalog - nearly
+    # every discovery module's hostname/IP classification converges through
+    # processHost() here, and since the scope-guard fix it also carries
+    # markIPShared() dispatch for every affiliate IP found. A heavy
+    # co-hosted-site discovery burst can queue hundreds of hostnames for
+    # this module alone; capping it at the generic default-10 share of the
+    # shared thread pool (spiderfoot/threadpool.py round-robins fairly
+    # across all ~290 modules) starved it badly under load - confirmed live
+    # 2026-11-13 (rc.25 scope re-test): a 28+ minute scan stall while this
+    # module ground through a large backlog with dozens of other modules
+    # also mid-scan contending for the same pool. DNS lookups are I/O-wait,
+    # not CPU, so a higher in-flight cap here is cheap. Raised alongside the
+    # global _maxthreads bump (see spiderfoot/core/config.py).
+    maxThreads = 30
+
     def setup(self, sfc: SpiderFoot, userOpts: dict = None) -> None:
         """Set up the module."""
         super().setup(sfc, userOpts or {})
