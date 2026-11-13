@@ -30,6 +30,25 @@ class TestModuleAccounts(TestModuleBase):
         module = sfp_accounts()
         self.assertIsInstance(module.producedEvents(), list)
 
+    def test_checkSites_normal_case_still_works(self):
+        """Baseline regression check: checkSites()'s new overall deadline
+        (added 2026-11-13 - see sfp_s3bucket's test for the full incident
+        this guards against, the same pattern applied via sequential
+        thread.join() here instead of a threading.enumerate() busy-wait)
+        must not change behaviour for the common case where every check
+        returns quickly.
+        """
+        sf = SpiderFoot(self.default_options)
+        module = sfp_accounts()
+        module.setup(sf, {'_fetchtimeout': 5, 'batch_size': 2})
+
+        module.checkSite = lambda name, site: None  # returns immediately
+
+        result = module.checkSites(
+            'testuser', sites=[{'name': 'site-a'}, {'name': 'site-b'}])
+
+        self.assertEqual(result, [])
+
     def setUp(self):
         """Set up before each test."""
         super().setUp()

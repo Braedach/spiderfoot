@@ -207,9 +207,27 @@ class sfp_accounts(SpiderFootAsyncPlugin):
             thread.start()
             threads.append(thread)
 
-        # wait for all scan threads to finish
+        # wait for all scan threads to finish, bounded by an overall
+        # deadline - a single hung site check (no response, dropped by a
+        # firewall) must never be able to block this forever, which stalls
+        # the WHOLE SCAN forever since handleEvent() won't return until
+        # this does. Confirmed live 2026-11-13: this exact class of
+        # unbounded wait, shared by 6 other modules (a threading.enumerate()
+        # busy-wait rather than this sequential .join(), but the same risk),
+        # silently stalled a scan overnight with no error, no crash, no
+        # symptom beyond the scan never finishing.
+        deadline = time.monotonic() + max(30, self.opts.get('_fetchtimeout', 15) * 4)
+        timed_out = False
         while threads:
-            threads.pop(0).join()
+            thread = threads.pop(0)
+            thread.join(timeout=max(0, deadline - time.monotonic()))
+            if thread.is_alive():
+                timed_out = True
+        if timed_out:
+            self.error(
+                "Timed out waiting for account-site checks - abandoning"
+                " remaining checks for this username (a site may be"
+                " unresponsive).")
 
         duration = time.monotonic() - startTime
         scanRate = len(sites) / duration
