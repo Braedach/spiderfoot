@@ -132,7 +132,7 @@ The REST API allows you to manage scans, retrieve results, and interact with Spi
 # Basic scan with new modules
 curl -X POST http://127.0.0.1:8001/api/scans \
   -H "Content-Type: application/json" \
-  -d '{"name": "example.com recon", "target": "example.com", "modules": ["sfp_dnsresolve", "sfp_sslcert", "sfp_performance_optimizer"]}'
+  -d '{"name": "example.com recon", "target": "example.com", "modules": ["sfp_dnsresolve", "sfp_sslcert"]}'
 
 # TikTok OSINT scan
 curl -X POST http://127.0.0.1:8001/api/scans \
@@ -160,7 +160,7 @@ sf = SpiderFoot()
 scanner = startSpiderFootScanner(
     target="example.com",
     targetType="DOMAIN_NAME",
-    modules=["sfp_dnsresolve", "sfp_ssl", "sfp_performance_optimizer"]
+    modules=["sfp_dnsresolve", "sfp_ssl"]
 )
 
 # Enhanced TikTok OSINT
@@ -176,12 +176,6 @@ blockchain_scanner = startSpiderFootScanner(
     targetType="BITCOIN_ADDRESS", 
     modules=["sfp_blockchain_analytics"]
 )
-
-# Performance monitoring
-from modules.sfp_performance_optimizer import sfp_performance_optimizer
-optimizer = sfp_performance_optimizer()
-cache_stats = optimizer.get_cache_stats()
-performance_metrics = optimizer.get_performance_stats()
 
 # Advanced correlation
 from modules.sfp_advanced_correlation import sfp_advanced_correlation

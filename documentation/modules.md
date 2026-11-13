@@ -2,7 +2,7 @@
 
 *Author: poppopjmp*
 
-SpiderFoot includes **309 modules** for data gathering, enrichment, and analysis, including **36 external tool integrations** for active reconnaissance. Modules can be combined to create powerful OSINT workflows tailored to your needs.
+SpiderFoot includes **298 modules** for data gathering, enrichment, and analysis, including **29 external tool integrations** for active reconnaissance. Modules can be combined to create powerful OSINT workflows tailored to your needs.
 
 ---
 
@@ -53,22 +53,18 @@ Modules are plugins that collect, enrich, or analyze data from various sources. 
 
 ### External Tools (Active Reconnaissance)
 
-SpiderFoot integrates **36 external security tool modules** for active scanning. Most require the **Active Scan Worker** Docker image. See [Active Scan Worker](active-scan-worker.md) for details.
+SpiderFoot integrates **29 external security tool modules** for active scanning. Most require the **Active Scan Worker** Docker image. See [Active Scan Worker](active-scan-worker.md) for details.
 
 #### Subdomain & DNS
 - **sfp_subfinder**: Passive subdomain discovery via Subfinder
-- **sfp_tool_amass**: Advanced subdomain enumeration via Amass
 - **sfp_tool_dnsx**: DNS toolkit for resolution and brute-forcing
 - **sfp_tool_dnstwist**: Similar domain and typosquat detection
 - **sfp_tool_massdns**: High-performance bulk DNS resolver
 
 #### Web & HTTP
 - **sfp_httpx**: HTTP probing and technology detection
-- **sfp_tool_katana**: Web crawler and spider
-- **sfp_tool_gau**: Fetch known URLs from web archives
-- **sfp_tool_gospider**: Fast web spidering
-- **sfp_tool_hakrawler**: Simple web crawler
-- **sfp_tool_waybackurls**: Wayback Machine URL fetcher
+- **sfp_tool_katana**: Web crawler and spider (also covers endpoint discovery and JS crawling previously done by gospider/hakrawler/LinkFinder)
+- **sfp_tool_gau**: Fetch known URLs from web archives (also covers waybackurls, which queries the same source)
 - **sfp_tool_nikto**: Web server vulnerability scanner
 - **sfp_tool_whatweb**: Website technology fingerprinting
 - **sfp_tool_wappalyzer**: Technology stack detection
@@ -84,10 +80,13 @@ SpiderFoot integrates **36 external security tool modules** for active scanning.
 
 #### Vulnerability & CMS
 - **sfp_nuclei**: Template-based vulnerability scanner
-- **sfp_tool_cmseek**: CMS detection and enumeration
 - **sfp_tool_snallygaster**: Secret file and vulnerability scanner
-- **sfp_tool_retirejs**: JavaScript library vulnerability detection
 - **sfp_tool_dalfox**: XSS parameter scanner
+
+Note: CMS detection is covered by sfp_tool_whatweb/sfp_httpx (CMSeeK produced
+only WEBSERVER_TECHNOLOGY, the same event those already emit); JS library
+vulnerability scanning (retire.js) was removed - it never worked in the old
+image (its Node runtime was never installed).
 
 #### Port & Network Scanning
 - **sfp_tool_naabu**: Fast port scanner
@@ -102,14 +101,12 @@ SpiderFoot integrates **36 external security tool modules** for active scanning.
 
 #### Fuzzing & Parameter Discovery
 - **sfp_tool_arjun**: HTTP parameter discovery
-- **sfp_tool_linkfinder**: JavaScript endpoint extraction
 
 #### OSINT & Social
-- **sfp_tool_phoneinfoga**: Phone number OSINT
+- **sfp_tool_phoneinfoga**: Phone number OSINT (needs its own API server running; not bundled by default - see the phone-number scan profile for key-free alternatives)
 
 ### AI & Advanced Analytics
 - **sfp_advanced_correlation**: Cross-platform entity resolution and pattern analysis
-- **sfp_performance_optimizer**: Intelligent caching and performance optimization
 
 ### Data Breach
 - **sfp_haveibeenpwned**: HaveIBeenPwned integration
@@ -142,16 +139,13 @@ Below is a complete list of all documented modules. Click a module name to view 
 | [sfp_hudsonrock](modules/sfp_hudsonrock.md) | Queries Hudson Rock Cavalier API for infostealer-compromised credentials and machine data. |
 | [sfp_ipinfo](modules/sfp_ipinfo.md) | Queries IPinfo for geolocation, ASN, and network information. |
 | [sfp_pastebin](modules/sfp_pastebin.md) | Searches Pastebin for leaks, credentials, and mentions. |
-| [sfp_performance_optimizer](modules/sfp_performance_optimizer.md) | Performance optimization with intelligent caching, rate limiting, and resource monitoring. |
 | [sfp_portscan_tcp](modules/sfp_portscan_tcp.md) | Performs TCP port scanning on the target host. |
 | [sfp_securitytrails](modules/sfp_securitytrails.md) | Integrates with SecurityTrails for passive DNS, WHOIS, and infrastructure data. |
 | [sfp_shodan](modules/sfp_shodan.md) | Queries Shodan for open ports, banners, vulnerabilities, and geolocation. |
 | [sfp_social](modules/sfp_social.md) | Searches social media platforms for mentions, profiles, and activity. |
 | [sfp_sslcert](modules/sfp_sslcert.md) | Analyzes SSL/TLS certificates for the target host. |
 | [sfp_tiktok_osint](modules/sfp_tiktok_osint.md) | Comprehensive TikTok intelligence gathering including user profiles and content analysis. |
-| sfp_tool_amass | Advanced subdomain enumeration via OWASP Amass. |
 | sfp_tool_arjun | HTTP parameter discovery and enumeration. |
-| sfp_tool_cmseek | CMS detection and enumeration via CMSeeK. |
 | sfp_tool_dalfox | XSS parameter scanner and vulnerability finder. |
 | sfp_tool_dnsx | DNS toolkit for resolution, brute-forcing, and wildcard filtering. |
 | sfp_tool_dnstwist | Domain typosquat and similar domain detection. |
@@ -159,12 +153,9 @@ Below is a complete list of all documented modules. Click a module name to view 
 | sfp_tool_gau | Fetch known URLs from Wayback Machine, Common Crawl, and other archives. |
 | sfp_tool_gitleaks | Git secret and credential detection. |
 | sfp_tool_gobuster | Directory, file, and DNS brute-forcing. |
-| sfp_tool_gospider | Fast web spidering and crawling. |
 | sfp_tool_gowitness | Webpage screenshot capture via headless Chrome. |
-| sfp_tool_hakrawler | Simple, fast web crawler. |
 | sfp_httpx | HTTP probing with technology detection and response analysis. |
 | sfp_tool_katana | Advanced web crawling and spidering. |
-| sfp_tool_linkfinder | JavaScript endpoint and URL extraction. |
 | sfp_tool_masscan | High-speed TCP port scanner (requires NET_RAW capability). |
 | sfp_tool_massdns | High-performance bulk DNS stub resolver (requires NET_RAW capability). |
 | sfp_tool_naabu | Fast port scanner with SYN/CONNECT scanning (requires NET_RAW capability). |
@@ -173,7 +164,6 @@ Below is a complete list of all documented modules. Click a module name to view 
 | sfp_nuclei | Template-based vulnerability scanner with 9000+ templates. |
 | sfp_tool_onesixtyone | SNMP community string scanner. |
 | sfp_tool_phoneinfoga | Phone number OSINT and information gathering. |
-| sfp_tool_retirejs | Retired JavaScript library vulnerability detection. |
 | sfp_tool_snallygaster | Secret file and configuration leak scanner. |
 | sfp_tool_sslscan | SSL/TLS cipher suite and certificate analysis. |
 | sfp_tool_sslyze | SSL/TLS deep analysis and certificate validation. |
@@ -182,7 +172,6 @@ Below is a complete list of all documented modules. Click a module name to view 
 | sfp_tool_tlsx | TLS certificate grabbing and configuration analysis. |
 | sfp_tool_trufflehog | Secret and credential detection in repositories and filesystems. |
 | sfp_tool_wafw00f | Web Application Firewall detection and fingerprinting. |
-| sfp_tool_waybackurls | Wayback Machine URL fetching. |
 | sfp_tool_whatweb | Website technology fingerprinting and identification. |
 | sfp_tool_wappalyzer | Technology stack detection via Wappalyzer rules. |
 

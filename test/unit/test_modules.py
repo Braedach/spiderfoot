@@ -179,8 +179,7 @@ class TestSpiderFootModuleLoading(TestModuleBase):
         
         # Modules that are exceptions (storage modules, etc.)
         exceptions = [
-            "sfp__stor_elasticsearch",  # Storage module
-            "sfp__stor_db",             # Storage module  
+            "sfp__stor_db",             # Storage module
             "sfp__stor_stdout"          # Storage module
         ]
         
@@ -283,7 +282,7 @@ class TestSpiderFootModuleLoading(TestModuleBase):
             self.assertIsInstance(m.get('meta', {}), dict, f"Module {module} 'meta' should be a dict")
 
             # Skip output/storage modules for additional checks
-            if module in ["sfp__stor_db", "sfp__stor_stdout", "sfp__stor_elasticsearch"]:
+            if module in ["sfp__stor_db", "sfp__stor_stdout"]:
                 continue
 
             self.assertIsNotNone(m.get('cats'), f"Module {module} missing 'cats' property")

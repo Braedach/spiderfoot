@@ -212,8 +212,18 @@ class TestProfileManager(unittest.TestCase):
         self.assertIn("api-powered", names)
         self.assertIn("minimal", names)
         self.assertIn("investigate", names)
+        self.assertIn("phone-number", names)
         self.assertIn("email-address", names)
         self.assertIn("person-name", names)
+
+    def test_phone_number_profile_is_key_free(self):
+        p = self.pm.get("phone-number")
+        self.assertIsNotNone(p)
+        self.assertEqual(
+            set(p.include_modules),
+            {"sfp_phone", "sfp_countryname", "sfp_callername",
+             "sfp_hudsonrock", "sfp_gravatar"},
+        )
 
     def test_person_name_profile_is_key_free(self):
         p = self.pm.get("person-name")

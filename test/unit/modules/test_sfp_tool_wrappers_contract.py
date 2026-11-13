@@ -26,12 +26,12 @@ from spiderfoot import SpiderFootEvent
 
 # Tool wrappers that had no dedicated unit/integration test.
 TOOL_MODULES = [
-    "sfp_tool_amass", "sfp_tool_arjun", "sfp_tool_dalfox", "sfp_tool_dnsx",
-    "sfp_tool_ffuf", "sfp_tool_gau", "sfp_tool_gitleaks", "sfp_tool_gospider",
-    "sfp_tool_gowitness", "sfp_tool_hakrawler", "sfp_tool_katana",
-    "sfp_tool_linkfinder", "sfp_tool_masscan", "sfp_tool_massdns",
+    "sfp_tool_arjun", "sfp_tool_dalfox", "sfp_tool_dnsx",
+    "sfp_tool_ffuf", "sfp_tool_gau", "sfp_tool_gitleaks",
+    "sfp_tool_gowitness", "sfp_tool_katana",
+    "sfp_tool_masscan", "sfp_tool_massdns",
     "sfp_tool_naabu", "sfp_tool_nikto", "sfp_tool_sslscan", "sfp_tool_sslyze",
-    "sfp_tool_tlsx", "sfp_tool_waybackurls",
+    "sfp_tool_tlsx",
 ]
 
 DEFAULT_OPTS = {

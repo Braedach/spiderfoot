@@ -40,12 +40,6 @@ except ImportError:
     CORRELATION_AVAILABLE = False
 
 try:
-    from modules.sfp_performance_optimizer import sfp_performance_optimizer, TTLCache, AdaptiveRateLimiter
-    PERFORMANCE_AVAILABLE = True
-except ImportError:
-    PERFORMANCE_AVAILABLE = False
-
-try:
     from modules.sfp_blockchain_analytics import sfp_blockchain_analytics, BlockchainAnalyzer
     BLOCKCHAIN_AVAILABLE = True
 except ImportError:
@@ -208,82 +202,6 @@ class TestAdvancedCorrelation(TestModuleBase):
             self.assertIn('center', cluster)
             self.assertIn('points', cluster)
             self.assertIn('confidence', cluster)
-
-
-@unittest.skipIf(not PERFORMANCE_AVAILABLE, "Performance Optimizer module not available")
-class TestPerformanceOptimizer(TestModuleBase):
-    """Test cases for Performance Optimizer module."""
-    
-    def setUp(self):
-        """Set up test fixtures."""
-        self.module = sfp_performance_optimizer()
-        self.sfc = MagicMock()
-        self.module.setup(self.sfc, {})
-    
-    def test_module_metadata(self):
-        """Test module metadata is correctly defined."""
-        self.assertEqual(self.module.meta['name'], "Performance Optimizer [DEPRECATED]")
-        self.assertIn("Content Analysis", self.module.meta['categories'])
-    
-    def test_ttl_cache_basic_operations(self):
-        """Test TTL cache basic operations."""
-        cache = TTLCache(default_ttl=5, max_size=100)
-        
-        # Test set and get
-        cache.set("key1", "value1")
-        self.assertEqual(cache.get("key1"), "value1")
-        
-        # Test non-existent key
-        self.assertIsNone(cache.get("nonexistent"))
-        
-        # Test TTL expiration
-        cache.set("key2", "value2", ttl=0)  # Immediate expiration
-        time.sleep(0.1)
-        self.assertIsNone(cache.get("key2"))
-    
-    def test_ttl_cache_size_limit(self):
-        """Test TTL cache size limiting."""
-        cache = TTLCache(default_ttl=3600, max_size=2)
-        
-        # Fill cache to capacity
-        cache.set("key1", "value1")
-        cache.set("key2", "value2")
-        cache.set("key3", "value3")  # Should evict oldest
-        
-        # Verify size limit enforced
-        self.assertIsNone(cache.get("key1"))  # Should be evicted
-        self.assertEqual(cache.get("key2"), "value2")
-        self.assertEqual(cache.get("key3"), "value3")
-    
-    def test_adaptive_rate_limiter(self):
-        """Test adaptive rate limiter functionality."""
-        limiter = AdaptiveRateLimiter(base_delay=0.1, max_delay=1.0)
-        
-        # Test success recording
-        initial_delay = limiter.current_delay
-        limiter.record_success()
-        
-        # Test failure recording
-        limiter.record_failure("429")
-        self.assertGreater(limiter.current_delay, initial_delay)
-        
-        # Test wait functionality (should not raise exception)
-        start_time = time.time()
-        limiter.wait()
-        elapsed = time.time() - start_time
-        self.assertGreaterEqual(elapsed, 0)  # Should wait some amount
-    
-    def test_cache_key_creation(self):
-        """Test cache key creation."""
-        key1 = self.module.create_cache_key("arg1", "arg2", 123)
-        key2 = self.module.create_cache_key("arg1", "arg2", 123)
-        key3 = self.module.create_cache_key("arg1", "arg2", 456)
-        
-        # Same inputs should create same key
-        self.assertEqual(key1, key2)
-        
-        # Different inputs should create different keys
-        self.assertNotEqual(key1, key3)
 
 
 class TestBlockchainAnalytics(TestModuleBase):

@@ -71,43 +71,7 @@ opts = {
 - Temporal windowing for pattern detection
 - Jaccard similarity for entity matching
 
-### 3. Performance Optimizer (`sfp_performance_optimizer`)
-
-**Purpose**: Intelligent caching, rate limiting, and performance optimization system.
-
-**Key Features**:
-- TTL-based caching with automatic cleanup
-- Adaptive rate limiting with backoff
-- Resource usage monitoring
-- Request batching optimization
-- Memory management and garbage collection
-- Performance statistics and recommendations
-
-**Use Cases**:
-- Improving scan performance
-- Reducing API call overhead
-- Managing system resources
-- Preventing rate limit violations
-
-**Configuration Options**:
-```python
-opts = {
-    'enable_caching': True,
-    'cache_ttl_seconds': 3600,
-    'max_cache_size': 10000,
-    'enable_rate_limiting': True,
-    'base_rate_limit_delay': 1.0,
-    'enable_resource_monitoring': True
-}
-```
-
-**Performance Benefits**:
-- Up to 70% reduction in duplicate API calls
-- Automatic rate limit adaptation
-- Memory usage optimization
-- Intelligent request batching
-
-### 4. Advanced Blockchain Analytics (`sfp_blockchain_analytics`)
+### 3. Advanced Blockchain Analytics (`sfp_blockchain_analytics`)
 
 **Purpose**: Comprehensive blockchain and cryptocurrency investigation capabilities.
 
