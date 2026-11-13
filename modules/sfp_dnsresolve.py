@@ -529,10 +529,25 @@ class sfp_dnsresolve(SpiderFootAsyncPlugin):
         if affil:
             if self.sf.isValidLocalOrLoopbackIp(host):
                 htype = "INTERNAL_IP_ADDRESS"
-            elif self.sf.validIP(host):
-                htype = "AFFILIATE_IPADDR"
-            elif self.sf.validIP6(host):
-                htype = "AFFILIATE_IPV6_ADDRESS"
+            elif self.sf.validIP(host) or self.sf.validIP6(host):
+                htype = "AFFILIATE_IPADDR" if self.sf.validIP(host) else "AFFILIATE_IPV6_ADDRESS"
+                # This is the single, central point every discovery
+                # module's affiliate finding passes through regardless of
+                # which one supplied it - the one place to mark an IP
+                # shared, rather than wiring it into every individual
+                # discovery module. Positive proof: a hostname that does
+                # NOT match the target (affil=True) resolves to this exact
+                # address, which may also be a registered target alias via
+                # some other, legitimate path (e.g. the target's own
+                # subdomain forward-resolving to the same CDN edge).
+                # Found live 2026-11-13: sfp_dnsraw correctly classified
+                # braedach-com-always-learning.ghost.io and
+                # ghost.map.fastly.net as AFFILIATE_INTERNET_NAME, cascaded
+                # correctly to AFFILIATE_IPADDR here for 151.101.3.7 - but
+                # with no markIPShared() call, invasive modules kept
+                # scanning that same IP via www.braedach.com's unrelated,
+                # independently-legitimate alias registration of it.
+                self.getTarget().markIPShared(host)
             else:
                 htype = "AFFILIATE_INTERNET_NAME"
         else:
