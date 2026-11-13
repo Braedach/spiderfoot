@@ -36,8 +36,17 @@ class ConfigManager:
         '_maxthreads': 12,
         '__logging': True,
         '__outputfilter': None,
-        '_useragent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:62.0) Gecko/20100101 Firefox/62.0',
-        '_dnsserver': '',
+        # Was Firefox/62.0 (2018) - updated to current stable (2026-11-13,
+        # verified live: Firefox 160, released 2026-11-09).
+        '_useragent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:160.0) Gecko/20100101 Firefox/160.0',
+        # Was '' (system/local resolver). This fork's purpose is external
+        # reconnaissance - an internal/local resolver can give split-horizon
+        # answers that don't reflect what an actual external attacker would
+        # see, and large scan volumes (see the _maxthreads comment above)
+        # can flood local DNS infrastructure (a reverse-proxy's logs, in
+        # one case found live 2026-11-13) with lookups that have nothing to
+        # do with normal local traffic. Cloudflare's public resolver.
+        '_dnsserver': '1.1.1.1',
         '_fetchtimeout': 5,
         '_internettlds': 'https://publicsuffix.org/list/effective_tld_names.dat',
         '_internettlds_cache': 72,

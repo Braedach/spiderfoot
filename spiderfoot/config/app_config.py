@@ -103,9 +103,11 @@ class CoreConfig:
     max_threads: int = 12
     logging_enabled: bool = True
     output_filter: str | None = None
+    # Was Firefox/62.0 (2018) - see core/config.py's comment, updated to
+    # current stable (2026-11-13).
     user_agent: str = (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:62.0) "
-        "Gecko/20100101 Firefox/62.0"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:160.0) "
+        "Gecko/20100101 Firefox/160.0"
     )
     generic_users: str = ""
     production: bool = False
@@ -114,7 +116,9 @@ class CoreConfig:
 @dataclass
 class NetworkConfig:
     """HTTP / DNS / proxy settings."""
-    dns_server: str = ""
+    # Was "" (system resolver) - see spiderfoot/core/config.py's
+    # DEFAULT_CONFIG comment for why (changed 2026-11-13).
+    dns_server: str = "1.1.1.1"
     dns_timeout: int = 10
     fetch_timeout: int = 5
     internet_tlds_url: str = (

@@ -87,7 +87,7 @@ class TestSectionDefaults:
 
     def test_network_defaults(self):
         n = NetworkConfig()
-        assert n.dns_server == ""
+        assert n.dns_server == "1.1.1.1"
         assert n.dns_timeout == 10
         assert n.fetch_timeout == 5
         assert "publicsuffix.org" in n.internet_tlds_url
