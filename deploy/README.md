@@ -37,37 +37,9 @@ Both stacks run the same 8 services (7, plus the active-scan worker under the `s
 build anything. The development stack mirrors production on purpose: what is
 tested there is what runs here.
 
-## Why the old Docker stack was replaced
-
-`stack-spiderfoot-docker.yml` (v1.11.0, last updated 2026-09-22) was replaced
-rather than patched, on 2026-10-23. It was a different design from what actually
-runs in production, and a development stack that does not mirror production
-cannot tell you whether a change is safe to release:
-
-- **It built from source on the deploy host.** The pattern this fork follows
-  builds on a dedicated build host and only *pulls* finished images on the host
-  that runs them, so the machine running the stack never builds anything.
-- **It ran 11 services, production runs 9.** It carried MinIO (with its init
-  job) and Tika, which production does not run, so those paths were exercised
-  in development and never in production, and the reverse was untested.
-- **It used named volumes and its own env layout** (CPU/memory limit variables,
-  MinIO credentials), while production bind-mounts state under
-  `/srv/spiderfoot` with the env file described below. A deployment that
-  differs in how state is stored differs in how it fails.
-- **It had drifted behind production**, which had moved on through several
-  fixes (image sources, required tags, hardening) that the Docker stack never
-  received.
-
-The replacement, `stack-docker.yml`, is derived from the production stack and
-differs only where Docker and Podman genuinely differ (no CDI GPU device, no
-dashboard labels). The old file is not kept: it remains in git history
-(`git log --follow -- deploy/stack-docker.yml`). MinIO, Tika and the other
-profiles are still available through upstream's own `docker-compose.yml`, which
-this fork does not modify.
-
 ## The flow: branch → test build → release
 
-Nothing is pushed to `master`. Work happens on a branch, is tested as a
+Nothing is pushed to `main`. Work happens on a branch, is tested as a
 **release candidate** on the development host, and only then merged and
 released.  An AI does the grunt work under human supervision.  It is fast & efficient,
 but follows guidelines set within another repository.  The AI model employed is mid-level
@@ -75,7 +47,7 @@ and has proven itself to be very competant, and is capable of push-back on devel
 
 | Step | Where | Command / action |
 |---|---|---|
-| 1. Develop | workstation | branch off `master`, commit, push the branch, open a PR (do not merge yet) |
+| 1. Develop | workstation | branch off `main`, commit, push the branch, open a PR (do not merge yet) |
 | 2. Test build | build host | tag the branch tip `v6.1.0-bd.1-rc.1`, `git push origin <tag>`, then `./deploy/publish.sh v6.1.0-bd.1-rc.1` |
 | 3. Soak | development host | set `SPIDERFOOT_TAG=v6.1.0-bd.1-rc.1`, `docker compose … pull && up -d`, test |
 | 4. Merge | GitHub | merge the PR once step 3 is satisfactory |
