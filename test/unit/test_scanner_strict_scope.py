@@ -200,3 +200,37 @@ class TestStrictScopeGate(TestScannerBase):
         event = SpiderFootEvent("IP_ADDRESS", "203.0.113.5", "sfp_dnsresolve", None)
 
         self.assertTrue(scanner.shouldDispatchToModule(invasive, event))
+
+    def test_invasive_module_accepts_full_url_on_target_own_domain(self):
+        # The bug found live 2026-11-13: matches() has no URL parsing, so a
+        # full LINKED_URL_INTERNAL/URL_FORM-style URL for the target's own
+        # page was always rejected outright as "out of target scope" -
+        # every invasive URL-fuzzing module (dalfox/ffuf/arjun/katana/
+        # gobuster) had silently never been able to dispatch on any domain
+        # scan since this gate shipped.
+        scanner = self._build_scanner("example.com", "INTERNET_NAME")
+        invasive = _FakeModule("sfp_tool_dalfox", flags=["invasive"])
+        event = SpiderFootEvent(
+            "URL_FORM", "https://example.com/login.jsp?user=x", "sfp_spider", None)
+
+        self.assertTrue(scanner.shouldDispatchToModule(invasive, event))
+
+    def test_invasive_module_accepts_full_url_with_port_on_target_subdomain(self):
+        scanner = self._build_scanner("example.com", "INTERNET_NAME")
+        scanner._SpiderFootScanner__target.setAlias("www.example.com", "INTERNET_NAME")
+        invasive = _FakeModule("sfp_tool_ffuf", flags=["invasive"])
+        event = SpiderFootEvent(
+            "LINKED_URL_INTERNAL", "http://www.example.com:8080/admin", "sfp_spider", None)
+
+        self.assertTrue(scanner.shouldDispatchToModule(invasive, event))
+
+    def test_invasive_module_still_rejects_full_url_on_unrelated_domain(self):
+        # The fix must not become a bypass - an out-of-scope URL is still
+        # correctly rejected, just via its extracted hostname instead of
+        # the full URL string.
+        scanner = self._build_scanner("example.com", "INTERNET_NAME")
+        invasive = _FakeModule("sfp_tool_dalfox", flags=["invasive"])
+        event = SpiderFootEvent(
+            "URL_FORM", "https://unrelated-third-party.com/login", "sfp_spider", None)
+
+        self.assertFalse(scanner.shouldDispatchToModule(invasive, event))
