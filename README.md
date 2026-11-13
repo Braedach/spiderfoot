@@ -6,11 +6,19 @@ An internal-use fork of [poppopjmp/spiderfoot](https://github.com/poppopjmp/spid
 
 ## Current state
 
-- **Latest published build:** `v6.1.0-bd.1-rc.22`, deployed to production (Podman, managed through Dockhand). It passed the scan gate on all 5 images (Trivy + `npm audit`). No non-`rc` release has been cut yet.
-- **Scope escape: fixed and validated live.** Active tool modules (port scanners, web/TLS probes) used to follow discovery data outside the authorised target's own scope — e.g. an IP scan expanding into thousands of third-party addresses via netblock lookups. `SpiderFootScanner.shouldDispatchToModule()` now gates every invasive module against `SpiderFootTarget.matches()` before dispatch. Re-confirmed live on the original repro cases: discovery still runs and is reported (useful, never the problem), but active tools no longer act outside the target. Validated across phone, email, name, domain and IP targets; ASN is the one target type not yet explicitly exercised against the guard (it may already be correct by design — see `SpiderFootTarget.matches()`'s netblock handling).
-- **Scan profiles and module catalog cleaned up.** Added key-free scan profiles for phone-number, email-address and person-name targets (NewScan's picker previously missed the relevant modules or pulled in the whole catalog). Removed 11 dead/superseded modules — tool wrappers already documented as replaced in the active-scanner image, a few explicitly-deprecated stubs, and a storage backend superseded by the existing Vector.dev integration.
-- **Dependencies and base images:** every Dependabot alert has been fixed, none currently accepted/waived (see below). `sf-qdrant` bumped to v1.20.0.
-- **Long scans:** fixed — tools that used to run once per URL with no cap (occasionally running for hours after findings stopped) now run once per real target, with results kept on a timeout.
+**Honest status.** The upstream source and its design have a great many problems, and this fork exists to work through them. Most of the effort is going into three things, in this order of priority:
+
+1. **Staying in scope.** An OSINT tool that scans things the operator is not authorised to touch is worse than no tool. Active (invasive) modules must never act outside the target's own scope, even when discovery data points elsewhere (shared CDN edges, netblock expansion, third-party hosts).
+2. **Performance, by removing bottlenecks.** Long scans, stalls and silently dead scans have each traced back to a design flaw (a thread pool shared by every module, unbounded waits on raw threads, scans running inside processes that get killed), not to bad luck. Each one found is fixed at the cause, with a regression test.
+3. **Accuracy of the intelligence gained.** Fewer false positives, fewer silently failing modules, and results that can be trusted: broken modules are found by test rather than by accident in log noise.
+
+Expect this to keep changing. Bugs are still being found, mostly old ones that only become visible once a scan is validated live rather than just unit-tested, and the build tags reflect that.
+
+- **Builds:** `v6.1.0-bd.1-rc.27` is deployed; `rc.28` is the current release candidate, being validated. Every build passes the scan gate on all 5 images (Trivy and `npm audit`). No non-`rc` release has been cut yet.
+- **Scope guard:** invasive modules are gated three ways before dispatch (see [How a scan flows](#how-a-scan-flows)): the target must match, the address must not sit in a published Cloudflare or Fastly range, and it must not have been proven shared by another module. Validated live against phone, email, name, domain and IP targets. ASN is the one target type not yet explicitly exercised.
+- **Scan execution:** scans no longer run inside API workers, and a scan whose process dies is detected and marked failed instead of staying `RUNNING` forever (see [Where a scan executes](#where-a-scan-executes)).
+- **Module catalog:** every module's `setup()` is exercised by a catalog-wide test, because modules that fail to load were previously invisible. Key-free scan profiles exist for phone-number, email-address and person-name targets. Dead and superseded modules have been removed.
+- **Dependencies and base images:** every Dependabot alert has been fixed and none are currently waived (see below).
 - **Tag scheme:** `v<upstream base>-bd.<N>` for a release, `-rc.<M>` for a test build. An `-rc` tag never moves `:latest`.
 - **Never push straight to `main`.** Work happens on a branch, goes through a pull request, and is tested as a release candidate before release.
 
@@ -29,13 +37,16 @@ An internal-use fork of [poppopjmp/spiderfoot](https://github.com/poppopjmp/spid
 - **Tool modules:** five tool modules (gobuster, testssl.sh, whatweb, wafw00f, snallygaster) had no binary path configured anywhere, and gobuster had no default wordlist; both now default to the paths baked into the image. A single-page app's catch-all `200` no longer turns every wordlist entry into a hit (`ffuf` auto-calibration, a soft-404 probe for gobuster). `naabu`, `dnsx`, `httpx` and the spider now work against internal hostnames and non-default ports.
 - **Core URL helpers** (`urlBaseUrl`, `urlRelativeToAbsolute`) were dropping explicit ports and mangling `scheme://`, corrupting every link a crawl discovered.
 - **Scan engine and API:** the scan-progress API returned 404 for every scan; the "modules running" count was always 0 because the engine's own running-module check was blind to every module; the export endpoints crashed or silently returned nothing; configuration saved on one API worker was not visible from the others.
+- **Scope escape:** active modules followed discovery data onto shared infrastructure (a target's own subdomain resolving to a Cloudflare or Fastly edge serving unrelated tenants), and the strict-scope check rejected every full-URL event, which silently stopped five web-fuzzing tool modules from ever running. Both fixed.
+- **Silent module failures:** seven modules' own `_maxthreads` option was always overwritten by the global setting of the same name; four modules had a `setup()` signature the engine could not call; eight modules could hang an entire scan forever on one unresponsive host, with no error. All fixed and covered by tests.
+- **Dead scans:** scans ran inside API worker processes that uvicorn's supervisor kills when they are slow to answer a health ping, taking the scan with them and leaving it `RUNNING` permanently.
 - **Database:** Postgres connections were leaked by reads that never committed (`ConfigManager`, `AuthService`, `ReportStore` and 17 more methods in the core database layer), eventually blocking the whole API.
 
 **AI reports**
 - Report generation returned empty or generic output (nine stacked bugs across service access, database wiring, event mapping, vector indexing and timeouts). Reports are now persisted server-side, the analysed-event cap is configurable (`SF_REPORT_MAX_EVENTS_PER_SCAN`), and deleting a scan removes its vectors.
-- Local embeddings use `fastembed` (about 67 MB, no GPU needed) instead of `sentence-transformers` and `torch` (over 1 GB). GPU passthrough is supported but not built.
+- Local embeddings use `fastembed` (about 67 MB, no GPU needed) instead of `sentence-transformers` and `torch` (over 1 GB); `SF_EMBEDDING_PROVIDER=fastembed` is the default, and the old `sentence_transformer` value is no longer installed and silently degrades to meaningless hash-derived embeddings. GPU passthrough is supported but not built.
 - `sf-agents` calls Anthropic directly through the official SDK (no proxy), with a server-side fallback model for requests the primary model's safeguards decline.
-- **AI Connections:** the LLM provider (Anthropic, OpenAI, DeepSeek, Ollama or Mock), its API key and its model are set **only in the GUI**. There is no LLM API key in the environment variables any more: the stacks, env templates and bootstrap script no longer carry one. Keys are stored encrypted and never shown again; the model is chosen from the list the provider offers. One provider is active at a time, with no automatic fallback between providers, so scan findings only go to the one you chose. See [`deploy/README.md`](deploy/README.md) for the details. Ollama needs a network route from `sf-api` and `sf-agents`: see "Ollama and the LLM network" in [`deploy/README.md`](deploy/README.md), which also explains why the maintainer's production stack reuses an existing `llm-net`.
+- **AI Connections:** the LLM provider (Anthropic, OpenAI, DeepSeek, Ollama or Mock), its API key and its model are set **only in the GUI**. There is no LLM API key in the environment variables: the stacks, env templates and bootstrap script do not carry one, and `ANTHROPIC_API_KEY` should not be set. Keys are stored encrypted (using a key derived from `SF_JWT_SECRET_KEY`, so rotating that secret means entering them again) and never shown again; the model is chosen from the list the provider offers. One provider is active at a time, with no automatic fallback between providers, so scan findings only go to the one you chose. See [`deploy/README.md`](deploy/README.md) for the details. Ollama needs a network route from `sf-api` and `sf-agents`: see "Ollama and the LLM network" in [`deploy/README.md`](deploy/README.md), which also explains why the maintainer's production stack reuses an existing `llm-net`.
 
 **Frontend**
 - A dedicated Data Source Credentials page and an AI Connections page; Settings grouped by subsystem; SpiderFoot's own REST tokens renamed "Access Tokens" to stop clashing with module API keys.
@@ -90,12 +101,6 @@ flowchart LR
 
 - The API workers' health-check timeout is `SF_API_WORKER_HEALTHCHECK_TIMEOUT` (default 120s, uvicorn's own default is 5s).
 - Reaper tuning: `SF_SCAN_REAP_GRACE` (180s), `SF_SCAN_HEARTBEAT_INTERVAL` (15s), `SF_SCAN_HEARTBEAT_TTL` (90s), `SF_SCAN_STARTING_MAX_AGE` (6h, a scan may legitimately wait in the Celery queue). With Redis down the reaper does nothing rather than reaping blind.
-
-## Breaking change
-
-**rc.15: the LLM API key is no longer an environment variable.** Upgrading from rc.14 or earlier requires: (1) replace the stack file (the old one *requires* `ANTHROPIC_API_KEY` and does not pass the JWT secret to `sf-agents` and the workers); (2) redeploy on `rc.15`; (3) sign in as an administrator, open **AI Connections**, enter the provider key, choose a model and make the provider active; (4) delete `ANTHROPIC_API_KEY` from the stack environment. Until a key is saved there, AI reports fail with a message pointing at AI Connections. Keys are encrypted using a key derived from `SF_JWT_SECRET_KEY`, so rotating that secret means entering them again.
-
-**Earlier:** `requirements.txt` no longer installs `sentence-transformers` or `torch` at all. If `SF_EMBEDDING_PROVIDER=sentence_transformer` is set anywhere it will **silently** fall back to fake, hash-derived embeddings, with no error and quietly wrong report content. Set `SF_EMBEDDING_PROVIDER=fastembed` (the default in both stack files).
 
 ## Deploying this fork
 
