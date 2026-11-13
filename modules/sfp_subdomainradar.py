@@ -91,8 +91,11 @@ class sfp_subdomainradar(SpiderFootAsyncPlugin):
         return [
             "INTERNET_NAME",
             "INTERNET_NAME_UNRESOLVED",
+            "AFFILIATE_INTERNET_NAME_UNRESOLVED",
             "IP_ADDRESS",
             "IPV6_ADDRESS",
+            "AFFILIATE_IPADDR",
+            "AFFILIATE_IPV6_ADDRESS",
             "TCP_PORT_OPEN",
             "RAW_RIR_DATA",
         ]
@@ -312,24 +315,40 @@ class sfp_subdomainradar(SpiderFootAsyncPlugin):
                 continue
             self.results[hostname] = True
 
-            # Emit hostname
-            if self.getTarget().matches(hostname):
+            # Emit hostname. A subdomain this module returns that doesn't
+            # match the target is someone else's - must be AFFILIATE, not
+            # INTERNET_NAME_UNRESOLVED ("ours"), and its IPs below must be
+            # AFFILIATE_IPADDR too. Otherwise sfp_dnsresolve registers the
+            # hostname's IP as a target alias, letting invasive modules act
+            # on infrastructure that isn't the target's (confirmed live
+            # 2026-11-13 via the same bug in sfp_internetdb.py).
+            is_affiliate = not self.getTarget().matches(hostname)
+            if is_affiliate:
                 evt = SpiderFootEvent(
-                    "INTERNET_NAME", hostname, self.__name__, event)
+                    "AFFILIATE_INTERNET_NAME_UNRESOLVED", hostname, self.__name__, event)
                 self.notifyListeners(evt)
             else:
                 evt = SpiderFootEvent(
-                    "INTERNET_NAME_UNRESOLVED", hostname, self.__name__, event)
+                    "INTERNET_NAME", hostname, self.__name__, event)
                 self.notifyListeners(evt)
 
             if not isinstance(info, dict):
                 continue
 
-            # Emit IPs
+            # Emit IPs. If this hostname is itself an affiliate, its IP is
+            # positive proof of sharing whenever it happens to coincide
+            # with an address already registered as a target alias via
+            # some other path (defensive - markIPShared is a no-op if it
+            # never overlaps).
             for ip in info.get('ips', []):
                 if ip and isinstance(ip, str) and ip not in self.results:
                     self.results[ip] = True
-                    if ':' in ip:
+                    if is_affiliate:
+                        self.getTarget().markIPShared(ip)
+                        evt = SpiderFootEvent(
+                            "AFFILIATE_IPV6_ADDRESS" if ':' in ip else "AFFILIATE_IPADDR",
+                            ip, self.__name__, event)
+                    elif ':' in ip:
                         evt = SpiderFootEvent(
                             "IPV6_ADDRESS", ip, self.__name__, event)
                     else:
@@ -366,21 +385,28 @@ class sfp_subdomainradar(SpiderFootAsyncPlugin):
                 continue
             self.results[hostname] = True
 
-            # Emit hostname
-            if self.getTarget().matches(hostname):
+            # Emit hostname - see _processSubdomainDict's comment above for why
+            # non-matching hostnames (and their IPs below) must be AFFILIATE.
+            is_affiliate = not self.getTarget().matches(hostname)
+            if is_affiliate:
                 evt = SpiderFootEvent(
-                    "INTERNET_NAME", hostname, self.__name__, event)
+                    "AFFILIATE_INTERNET_NAME_UNRESOLVED", hostname, self.__name__, event)
                 self.notifyListeners(evt)
             else:
                 evt = SpiderFootEvent(
-                    "INTERNET_NAME_UNRESOLVED", hostname, self.__name__, event)
+                    "INTERNET_NAME", hostname, self.__name__, event)
                 self.notifyListeners(evt)
 
-            # Emit IPs
+            # Emit IPs (see _processSubdomainDict's comment on markIPShared above)
             for ip in info.get('ips', info.get('ip_addresses', [])):
                 if ip and isinstance(ip, str) and ip not in self.results:
                     self.results[ip] = True
-                    if ':' in ip:
+                    if is_affiliate:
+                        self.getTarget().markIPShared(ip)
+                        evt = SpiderFootEvent(
+                            "AFFILIATE_IPV6_ADDRESS" if ':' in ip else "AFFILIATE_IPADDR",
+                            ip, self.__name__, event)
+                    elif ':' in ip:
                         evt = SpiderFootEvent(
                             "IPV6_ADDRESS", ip, self.__name__, event)
                     else:

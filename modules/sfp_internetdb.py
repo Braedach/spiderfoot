@@ -83,6 +83,7 @@ class sfp_internetdb(SpiderFootAsyncPlugin):
             "VULNERABILITY_GENERAL",
             "INTERNET_NAME",
             "INTERNET_NAME_UNRESOLVED",
+            "AFFILIATE_INTERNET_NAME_UNRESOLVED",
             "RAW_RIR_DATA",
             "WEBSERVER_TECHNOLOGY",
         ]
@@ -186,15 +187,31 @@ class sfp_internetdb(SpiderFootAsyncPlugin):
                 evt = SpiderFootEvent(etype, cvetext, self.__name__, pevent)
                 self.notifyListeners(evt)
 
-            # Hostnames
+            # Hostnames - InternetDB's own reverse-IP lookup. A shared/CDN IP
+            # (Cloudflare, Fastly, etc.) serves many unrelated customers, so
+            # a hostname found this way that doesn't match the target must be
+            # flagged AFFILIATE, not plain INTERNET_NAME_UNRESOLVED - the
+            # latter is trusted downstream (sfp_dnsresolve) as "ours" and its
+            # resolved IP gets registered as a target alias, which then lets
+            # invasive modules act on it. Confirmed live 2026-11-13: this
+            # exact path let a scan of braedach.com register a co-hosted
+            # Cloudflare IP as in-scope purely because an unrelated site
+            # (www.talhabd.com) happened to share it.
             for hostname in rec.get('hostnames', []):
                 if self.getTarget().matches(hostname):
                     evt = SpiderFootEvent(
                         "INTERNET_NAME", hostname, self.__name__, pevent)
                     self.notifyListeners(evt)
                 else:
+                    # Positive proof addr is shared: InternetDB itself just
+                    # returned a hostname on it that isn't the target. Flag
+                    # it so invasive modules stop acting on the bare address
+                    # directly, even if it's already a registered alias via
+                    # some other path (e.g. the target's own subdomain also
+                    # resolving there).
+                    self.getTarget().markIPShared(addr)
                     evt = SpiderFootEvent(
-                        "INTERNET_NAME_UNRESOLVED", hostname, self.__name__, pevent)
+                        "AFFILIATE_INTERNET_NAME_UNRESOLVED", hostname, self.__name__, pevent)
                     self.notifyListeners(evt)
 
             # CPEs as technology indicators

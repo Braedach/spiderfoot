@@ -98,7 +98,9 @@ class LogLevel(str, Enum):
 class CoreConfig:
     """Core / general settings."""
     debug: bool = False
-    max_threads: int = 3
+    # Was 3 - see the matching comment on DEFAULT_CONFIG in
+    # spiderfoot/core/config.py for why (validated live 2026-11-13).
+    max_threads: int = 12
     logging_enabled: bool = True
     output_filter: str | None = None
     user_agent: str = (

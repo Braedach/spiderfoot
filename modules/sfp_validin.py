@@ -88,6 +88,7 @@ class sfp_validin(SpiderFootAsyncPlugin):
         return [
             "INTERNET_NAME",
             "INTERNET_NAME_UNRESOLVED",
+            "AFFILIATE_INTERNET_NAME_UNRESOLVED",
             "IP_ADDRESS",
             "IPV6_ADDRESS",
             "RAW_RIR_DATA",
@@ -233,13 +234,20 @@ class sfp_validin(SpiderFootAsyncPlugin):
                         subdomain = sub.get('domain', sub) if isinstance(sub, dict) else str(sub)
                         if subdomain and subdomain not in self.results:
                             self.results[subdomain] = True
+                            # A non-matching subdomain is someone else's - AFFILIATE,
+                            # not INTERNET_NAME_UNRESOLVED ("ours"). See
+                            # sfp_internetdb.py for the incident this misclassification
+                            # caused (2026-11-13): sfp_dnsresolve registers an
+                            # INTERNET_NAME_UNRESOLVED hostname's resolved IP as a
+                            # target alias, which then lets invasive modules act on
+                            # infrastructure that isn't actually the target's.
                             if self.getTarget().matches(subdomain):
                                 evt = SpiderFootEvent(
                                     "INTERNET_NAME", subdomain, self.__name__, event)
                                 self.notifyListeners(evt)
                             else:
                                 evt = SpiderFootEvent(
-                                    "INTERNET_NAME_UNRESOLVED", subdomain, self.__name__, event)
+                                    "AFFILIATE_INTERNET_NAME_UNRESOLVED", subdomain, self.__name__, event)
                                 self.notifyListeners(evt)
 
         if self.checkForStop():
@@ -295,7 +303,11 @@ class sfp_validin(SpiderFootAsyncPlugin):
                 "RAW_RIR_DATA", str(dns_data), self.__name__, event)
             self.notifyListeners(evt)
 
-            # Extract hostnames that resolved to this IP
+            # Extract hostnames that resolved to this IP. This is a reverse-IP
+            # lookup - on a shared/CDN IP it will return other customers'
+            # hostnames too, which must be flagged AFFILIATE if they don't
+            # match the target (see sfp_internetdb.py for the incident this
+            # exact misclassification caused, 2026-11-13).
             for record in dns_data.get('records', {}).get('a', []):
                 hostname = record.get('domain', '') if isinstance(record, dict) else str(record)
                 if hostname and hostname not in self.results:
@@ -305,8 +317,11 @@ class sfp_validin(SpiderFootAsyncPlugin):
                             "INTERNET_NAME", hostname, self.__name__, event)
                         self.notifyListeners(evt)
                     else:
+                        # Positive proof ip is shared: Validin itself just
+                        # returned a hostname on it that isn't the target.
+                        self.getTarget().markIPShared(ip)
                         evt = SpiderFootEvent(
-                            "INTERNET_NAME_UNRESOLVED", hostname, self.__name__, event)
+                            "AFFILIATE_INTERNET_NAME_UNRESOLVED", hostname, self.__name__, event)
                         self.notifyListeners(evt)
 
             for record in dns_data.get('records', {}).get('aaaa', []):
@@ -318,8 +333,9 @@ class sfp_validin(SpiderFootAsyncPlugin):
                             "INTERNET_NAME", hostname, self.__name__, event)
                         self.notifyListeners(evt)
                     else:
+                        self.getTarget().markIPShared(ip)
                         evt = SpiderFootEvent(
-                            "INTERNET_NAME_UNRESOLVED", hostname, self.__name__, event)
+                            "AFFILIATE_INTERNET_NAME_UNRESOLVED", hostname, self.__name__, event)
                         self.notifyListeners(evt)
 
         if self.checkForStop():

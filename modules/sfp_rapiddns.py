@@ -82,6 +82,7 @@ class sfp_rapiddns(SpiderFootAsyncPlugin):
         return [
             "INTERNET_NAME",
             "INTERNET_NAME_UNRESOLVED",
+            "AFFILIATE_INTERNET_NAME_UNRESOLVED",
             "CO_HOSTED_SITE",
             "IP_ADDRESS",
             "RAW_RIR_DATA",
@@ -227,13 +228,18 @@ class sfp_rapiddns(SpiderFootAsyncPlugin):
             self.results[hostname] = True
             found = True
 
+            # A hostname RapidDNS returns that doesn't match the target is
+            # someone else's - must be AFFILIATE, not INTERNET_NAME_UNRESOLVED
+            # ("ours"), which sfp_dnsresolve would otherwise register as a
+            # target alias. See sfp_internetdb.py for the incident this
+            # pattern caused (2026-11-13).
             if self.getTarget().matches(hostname):
                 evt = SpiderFootEvent(
                     "INTERNET_NAME", hostname, self.__name__, event)
                 self.notifyListeners(evt)
             else:
                 evt = SpiderFootEvent(
-                    "INTERNET_NAME_UNRESOLVED", hostname, self.__name__, event)
+                    "AFFILIATE_INTERNET_NAME_UNRESOLVED", hostname, self.__name__, event)
                 self.notifyListeners(evt)
 
         if found:
@@ -264,6 +270,12 @@ class sfp_rapiddns(SpiderFootAsyncPlugin):
                     "INTERNET_NAME", hostname, self.__name__, event)
                 self.notifyListeners(evt)
             else:
+                # Positive proof this IP is shared: RapidDNS itself just
+                # returned a hostname on it that isn't the target. Flag the
+                # IP so invasive modules stop acting on it directly, even
+                # though it's a registered alias (see
+                # SpiderFootTarget.markIPShared()'s docstring).
+                self.getTarget().markIPShared(ip)
                 evt = SpiderFootEvent(
                     "CO_HOSTED_SITE", hostname, self.__name__, event)
                 self.notifyListeners(evt)

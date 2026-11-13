@@ -297,8 +297,10 @@ class SpiderFootScanner():
 
         self.__setStatus("INITIALIZING", time.time() * 1000, None)
 
+        # Fallback only - the real default lives in
+        # spiderfoot/core/config.py's DEFAULT_CONFIG, kept in step with it.
         self.__sharedThreadPool = SpiderFootThreadPool(
-            threads=self.__config.get("_maxthreads", 3), name='sharedThreadPool')
+            threads=self.__config.get("_maxthreads", 12), name='sharedThreadPool')
 
         self.eventQueue = None
 
@@ -707,6 +709,38 @@ class SpiderFootScanner():
             self.__sharedThreadPool.shutdown(wait=True)
             _running_module_counts.pop(self.__scanId, None)
 
+    @staticmethod
+    def _extractIPForSharedCheck(data: str) -> str | None:
+        """Best-effort extraction of a bare IPv4 address from event data
+        that may be an "ip:port" or "ip:port/proto (service)" string (the
+        shape TCP_PORT_OPEN and similar events use), for the shared-IP
+        dispatch check below.
+
+        Deliberately IPv4-only and conservative: IPv6 addresses contain
+        colons themselves, so "address:port" splitting is ambiguous for
+        them without the (not universally used) [addr]:port bracket
+        convention. Getting this wrong by returning None just means the
+        shared-IP check below is skipped for that one event (falls back
+        to the pre-existing matches() behaviour) - never a false IP.
+
+        Args:
+            data (str): the raw event data.
+
+        Returns:
+            str | None: the bare IPv4 address, or None if not confidently
+                extractable.
+        """
+        import netaddr
+
+        if netaddr.valid_ipv4(data):
+            return data
+
+        candidate = data.split(":", 1)[0].split("/", 1)[0]
+        if netaddr.valid_ipv4(candidate):
+            return candidate
+
+        return None
+
     def shouldDispatchToModule(self, mod: SpiderFootPlugin, sfEvent: SpiderFootEvent) -> bool:
         """Scope gate for the event dispatch loop in waitForThreads().
 
@@ -716,6 +750,17 @@ class SpiderFootScanner():
         those - this is what caused the scope-escape incident documented in
         README.md. Modules not flagged "invasive", and non-IP/hostname
         target types where scope has no meaning, are unaffected.
+
+        Beyond plain relatedness, an address can be *marked shared* (see
+        SpiderFootTarget.markIPShared()) - known, from positive evidence a
+        discovery module found during this same scan, to also serve a host
+        that is NOT the target (a CDN edge IP also used by an unrelated
+        customer, for instance). A shared address still matches() (it's
+        legitimately related - e.g. the target's own hostname really does
+        resolve there, so discovery and hostname-scoped checks are
+        unaffected), but invasive modules must not act on the bare address
+        directly, since that means probing someone else's traffic on it
+        too. Found live 2026-11-13, see markIPShared()'s docstring.
 
         Args:
             mod (SpiderFootPlugin): the module about to receive the event.
@@ -730,14 +775,23 @@ class SpiderFootScanner():
         if "invasive" not in getattr(mod, "meta", {}).get("flags", []):
             return True
 
-        if self.__target.matches(sfEvent.data, includeParents=True, includeChildren=True):
-            return True
+        if not self.__target.matches(sfEvent.data, includeParents=True, includeChildren=True):
+            self.__sf.debug(
+                f"strict_scope: dropping {sfEvent.eventType} ({sfEvent.data}) for"
+                f" invasive module {mod.__name__} - out of target scope."
+            )
+            return False
 
-        self.__sf.debug(
-            f"strict_scope: dropping {sfEvent.eventType} ({sfEvent.data}) for"
-            f" invasive module {mod.__name__} - out of target scope."
-        )
-        return False
+        sharedIP = self._extractIPForSharedCheck(sfEvent.data)
+        if sharedIP and self.__target.isSharedIP(sharedIP):
+            self.__sf.debug(
+                f"strict_scope: dropping {sfEvent.eventType} ({sfEvent.data}) for"
+                f" invasive module {mod.__name__} - address is known-shared"
+                f" with a non-target host."
+            )
+            return False
+
+        return True
 
     def threadsFinished(self, log_status: bool = False) -> bool:
         """Check whether all module queues are empty and no modules are running."""

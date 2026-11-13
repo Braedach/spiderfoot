@@ -165,22 +165,31 @@ class sfp_opennic(SpiderFootAsyncPlugin):
         self.debug(f"OpenNIC resolved {eventData} to addresses: {addrs}")
 
         for addr in set(addrs):
+            # Classify by whether addr itself actually matches the target,
+            # not by whether the input eventName was pre-flagged affiliate -
+            # OpenNIC's alternate root can resolve an in-scope hostname to
+            # an address that doesn't match (shared infrastructure), and
+            # the previous `affiliate and not matches()` gate unconditionally
+            # treated every resolved address as owned whenever eventName
+            # wasn't already AFFILIATE_-prefixed, regardless of what it
+            # actually resolved to (found 2026-11-13 by the static
+            # regression test in test_affiliate_classification_static.py).
             if self.sf.validIP(addr):
-                if affiliate and not self.getTarget().matches(addr, includeParents=True):
-                    evt = SpiderFootEvent(
-                        "AFFILIATE_IPADDR", addr, self.__name__, event)
-                else:
+                if self.getTarget().matches(addr, includeParents=True):
                     evt = SpiderFootEvent(
                         "IP_ADDRESS", addr, self.__name__, event)
+                else:
+                    evt = SpiderFootEvent(
+                        "AFFILIATE_IPADDR", addr, self.__name__, event)
 
                 self.notifyListeners(evt)
             elif self.sf.validIP6(addr):
-                if affiliate and not self.getTarget().matches(addr, includeParents=True):
-                    evt = SpiderFootEvent(
-                        "AFFILIATE_IPV6_ADDRESS", addr, self.__name__, event)
-                else:
+                if self.getTarget().matches(addr, includeParents=True):
                     evt = SpiderFootEvent(
                         "IPV6_ADDRESS", addr, self.__name__, event)
+                else:
+                    evt = SpiderFootEvent(
+                        "AFFILIATE_IPV6_ADDRESS", addr, self.__name__, event)
 
                 self.notifyListeners(evt)
             else:

@@ -89,6 +89,7 @@ class sfp_bevigil(SpiderFootAsyncPlugin):
         return [
             "INTERNET_NAME",
             "INTERNET_NAME_UNRESOLVED",
+            "AFFILIATE_INTERNET_NAME_UNRESOLVED",
             "LINKED_URL_EXTERNAL",
             "CLOUD_STORAGE_OPEN",
             "RAW_RIR_DATA",
@@ -219,13 +220,16 @@ class sfp_bevigil(SpiderFootAsyncPlugin):
                 continue
             self.results[sub] = True
 
+            # A non-matching subdomain is someone else's - AFFILIATE, not
+            # INTERNET_NAME_UNRESOLVED ("ours"). See sfp_internetdb.py for
+            # the incident this misclassification caused (2026-11-13).
             if self.getTarget().matches(sub):
                 evt = SpiderFootEvent(
                     "INTERNET_NAME", sub, self.__name__, event)
                 self.notifyListeners(evt)
             else:
                 evt = SpiderFootEvent(
-                    "INTERNET_NAME_UNRESOLVED", sub, self.__name__, event)
+                    "AFFILIATE_INTERNET_NAME_UNRESOLVED", sub, self.__name__, event)
                 self.notifyListeners(evt)
 
     def _processUrls(self, event: SpiderFootEvent, domain: str) -> None:

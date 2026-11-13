@@ -52,6 +52,7 @@ class SpiderFootTarget():
         self.targetType = typeName
         self.targetValue = targetValue
         self.targetAliases = list()
+        self._sharedIPs: set[str] = set()
 
     def __repr__(self) -> str:
         """Return a string representation of the target."""
@@ -131,6 +132,92 @@ class SpiderFootTarget():
             return
 
         self.targetAliases.append(alias)
+
+    def markIPShared(self, value: str) -> None:
+        """Flag an IP/IPv6 address as known to be shared with a host that
+        is NOT the target (e.g. a CDN edge IP that also serves other,
+        unrelated customers).
+
+        Call this with *positive evidence* only - a discovery module that
+        has actually observed another, non-matching hostname resolving to
+        this exact address (e.g. a reverse-IP lookup's own hostname list).
+        Never call it from the mere absence of evidence (a missing or
+        generic PTR record, for instance): most dedicated/single-tenant
+        target IPs never get a custom PTR either, and treating that as
+        "shared" would wrongly stop active scanning of the user's own,
+        legitimately dedicated infrastructure - exactly the case the
+        original scope guard (PR #37) was built to keep working.
+
+        Once marked, matches() is unaffected (the address is still
+        legitimately related to the target - discovery/passive modules
+        should keep seeing it), but shouldDispatchToModule() in the
+        scanner will refuse to let "invasive" modules act on it, since
+        scanning a shared edge IP means probing someone else's traffic
+        on it too, not just the target's.
+
+        Found live 2026-11-13: a braedach.com domain scan treated a
+        shared Fastly IP as fully in-scope purely because www.braedach.com
+        resolves there, and active tools then scanned micahflee.com's
+        traffic on that same shared edge.
+
+        Never demotes the target's own directly-authorised scope, no
+        matter what any discovery module reports - this mirrors exactly
+        what matches() already treats as the target's own authority:
+
+        * IP_ADDRESS / IPV6_ADDRESS target: the literal searched value
+          itself is never eligible, even if a historical/passive-DNS
+          service's hostname list for it looks like it has had other
+          occupants (common on residential/dynamic IPs - see the
+          rapiddns staleness note elsewhere in this project). The user
+          explicitly authorised scanning that exact address; a stale or
+          noisy third-party record about it is not grounds to silently
+          stop.
+        * NETBLOCK_OWNER / NETBLOCKV6_OWNER target: any address within
+          the owned block - same authorisation logic as above, just at
+          block granularity.
+        * BGP_AS_OWNER target: matches() has no netblock-membership
+          check for ASN targets at all (confirmed by reading it) - an
+          ASN's entire scope is whatever gets registered as aliases, by
+          construction, same reasoning as NETBLOCK_OWNER. Exempted here
+          for consistency, but this path is UNTESTED: the user has no
+          authorised ASN scope to validate it against (2026-11-13). Said
+          so rather than silently assumed correct - see
+          project_outstanding_work.md item 0.
+
+        Args:
+            value (str): the IP or IPv6 address to flag.
+        """
+        if not isinstance(value, str) or not value:
+            return
+
+        value = value.lower()
+
+        if self.targetType in ("IP_ADDRESS", "IPV6_ADDRESS"):
+            if value == self.targetValue.lower():
+                return
+        elif self.targetType in ("NETBLOCK_OWNER", "NETBLOCKV6_OWNER"):
+            try:
+                if netaddr.IPAddress(value) in netaddr.IPNetwork(self.targetValue):
+                    return
+            except netaddr.AddrFormatError:
+                pass
+        elif self.targetType == "BGP_AS_OWNER":
+            return
+
+        self._sharedIPs.add(value)
+
+    def isSharedIP(self, value: str) -> bool:
+        """Return True if this address has been flagged via markIPShared().
+
+        Args:
+            value (str): the IP or IPv6 address to check.
+
+        Returns:
+            bool: whether the address is known to be shared/multi-tenant.
+        """
+        if not isinstance(value, str):
+            return False
+        return value.lower() in self._sharedIPs
 
     def _getEquivalents(self, typeName: str) -> list[str]:
         """Get all aliases of the specfied target data type.
