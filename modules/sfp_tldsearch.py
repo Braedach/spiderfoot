@@ -42,14 +42,27 @@ class sfp_tldsearch(SpiderFootAsyncPlugin):
         # Only report domains that have content (try to fetch the page)
         'activeonly': False,
         'skipwildcards': True,
-        '_maxthreads': 50
+        # Renamed from '_maxthreads' 2026-11-13: that name collided with
+        # the scan-wide global _maxthreads config key. SpiderFootScanner
+        # merges every global config key into each module's own opts dict
+        # AFTER copying the module's own defaults (see waitForThreads()'s
+        # module-load loop), so the global value always won - this
+        # module's intended batch size of 50 was silently being replaced
+        # by the global dispatch-pool size (3, then 12) on every scan,
+        # ~4-6x more sequential batches than intended for a full ~9,000-
+        # entry TLD sweep. Found live investigating a 28+ minute scan
+        # stall (rc.25 scope re-test) that turned out to be this, not
+        # pool contention. 6 other modules had the same collision -
+        # see sfp_accounts/sfp_s3bucket/sfp_dnsbrute/sfp_googleobjectstorage/
+        # sfp_digitaloceanspace/sfp_azureblobstorage.
+        'batch_size': 50
     }
 
     # Option descriptions
     optdescs = {
         'activeonly': "Only report domains that have content (try to fetch the page)?",
         "skipwildcards": "Skip TLDs and sub-TLDs that have wildcard DNS.",
-        "_maxthreads": "Maximum threads"
+        "batch_size": "Maximum concurrent lookups per batch for this module's own enumeration (independent of the scan-wide _maxthreads)."
     }
 
     # Internal results tracking
@@ -206,7 +219,7 @@ class sfp_tldsearch(SpiderFootAsyncPlugin):
             if self.checkForStop():
                 return
 
-            if len(targetList) <= self.opts['_maxthreads']:
+            if len(targetList) <= self.opts['batch_size']:
                 targetList.append([tryDomain, tld])
             else:
                 self.tryTldWrapper(targetList, event)

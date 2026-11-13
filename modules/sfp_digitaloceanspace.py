@@ -45,14 +45,14 @@ class sfp_digitaloceanspace(SpiderFootAsyncPlugin):
     opts = {
         "endpoints": "nyc3.digitaloceanspaces.com,sgp1.digitaloceanspaces.com,ams3.digitaloceanspaces.com",
         "suffixes": "test,dev,web,beta,bucket,space,files,content,data,prod,staging,production,stage,app,media,development,-test,-dev,-web,-beta,-bucket,-space,-files,-content,-data,-prod,-staging,-production,-stage,-app,-media,-development",
-        "_maxthreads": 20,
+        "batch_size": 20,
     }
 
     # Option descriptions
     optdescs = {
         "endpoints": "Different Digital Ocean locations to check where spaces may exist.",
         "suffixes": "List of suffixes to append to domains tried as space names",
-        "_maxthreads": "Maximum threads",
+        "batch_size": "Maximum concurrent lookups per batch for this module's own enumeration (independent of the scan-wide _maxthreads).",
     }
 
     results = None
@@ -145,7 +145,7 @@ class sfp_digitaloceanspace(SpiderFootAsyncPlugin):
         siteList = list()
 
         for site in sites:
-            if i >= self.opts["_maxthreads"]:
+            if i >= self.opts["batch_size"]:
                 data = self.threadSites(siteList)
                 if data is None:
                     return res

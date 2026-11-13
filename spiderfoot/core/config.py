@@ -23,17 +23,31 @@ class ConfigManager:
     # Default configuration options
     DEFAULT_CONFIG = {
         '_debug': False,
-        # Was 3. A domain scan with heavy co-hosted-site discovery (~100
-        # third parties) ran 14+ hours producing only ~25k events at this
-        # default - not CPU/memory/WAN-bound (confirmed: baden had headroom
-        # throughout), just badly serialised: this is almost entirely
-        # I/O-bound work (DNS/HTTP waits), and 3 concurrent module-dispatch
-        # slots for the whole scan starves a large discovery backlog.
-        # Validated live 2026-11-13 against braedach.com at 12: ~10x
-        # throughput (~40k events/hour, sustained, not declining like the
-        # old run's tail), zero rate-limit/429/connection-refused signals
-        # from any third party. See deploy/README.md for the full note.
-        '_maxthreads': 12,
+        # Was 3, then 12 (see history below) - now 24. The 12-thread pool
+        # is shared across ALL ~290 modules, round-robin, with no per-module
+        # reservation beyond each module's own 10-in-flight submission cap
+        # (spiderfoot/plugins/plugin.py's maxThreads). Found live 2026-11-13
+        # (rc.25 scope re-test, braedach.com): a heavy co-hosted-site
+        # discovery burst (hundreds of hostnames queued for sfp_dnsresolve)
+        # stalled scan progress for 28+ minutes with dozens of other modules
+        # also mid-scan and contending for the same 12 real worker threads -
+        # baden had full headroom throughout (load ~1/12 cores, confirmed
+        # live), so this was pool contention, not a resource limit. Raised
+        # together with sfp_dnsresolve's own maxThreads override (see that
+        # module) since it's the single highest-fan-in module (nearly every
+        # discovery module's classification converges through it) and now
+        # also carries the scope-guard's markIPShared() dispatch.
+        #
+        # History: was 3. A domain scan with heavy co-hosted-site discovery
+        # (~100 third parties) ran 14+ hours producing only ~25k events at
+        # that default - not CPU/memory/WAN-bound (confirmed: baden had
+        # headroom throughout), just badly serialised: this is almost
+        # entirely I/O-bound work (DNS/HTTP waits). Validated live
+        # 2026-11-13 against braedach.com at 12: ~10x throughput (~40k
+        # events/hour, sustained), zero rate-limit/429/connection-refused
+        # signals from any third party. See deploy/README.md for the full
+        # note.
+        '_maxthreads': 24,
         '__logging': True,
         '__outputfilter': None,
         # Was Firefox/62.0 (2018) - updated to current stable (2026-11-13,

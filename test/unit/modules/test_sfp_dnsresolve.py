@@ -30,6 +30,14 @@ class TestModuleDnsResolve(TestModuleBase):
         module = sfp_dnsresolve()
         self.assertIsInstance(module.producedEvents(), list)
 
+    def test_max_threads_raised_above_the_shared_default(self):
+        # This module is the single highest-fan-in module in the catalog -
+        # see the class attribute's own comment for the live incident
+        # (28+ minute scan stall, 2026-11-13) that justified raising it
+        # above plugin.py's generic default of 10.
+        module = sfp_dnsresolve()
+        self.assertGreater(module.maxThreads, 10)
+
     def setUp(self):
         """Set up before each test."""
         super().setUp()

@@ -42,7 +42,7 @@ class sfp_dnsbrute(SpiderFootAsyncPlugin):
         "top10000": False,
         "numbersuffix": True,
         "numbersuffixlimit": True,
-        "_maxthreads": 100
+        "batch_size": 100
     }
 
     # Option descriptions
@@ -53,7 +53,7 @@ class sfp_dnsbrute(SpiderFootAsyncPlugin):
         'top10000': "Try a further 10,000 common hostnames/sub-domains. Will make the scan much slower.",
         'numbersuffix': "For any host found, try appending 1, 01, 001, -1, -01, -001, 2, 02, etc. (up to 10)",
         'numbersuffixlimit': "Limit using the number suffixes for hosts that have already been resolved? If disabled this will significantly extend the duration of scans.",
-        "_maxthreads": "Maximum threads"
+        "batch_size": "Maximum concurrent lookups per batch for this module's own enumeration (independent of the scan-wide _maxthreads)."
     }
 
     events = None
@@ -215,7 +215,7 @@ class sfp_dnsbrute(SpiderFootAsyncPlugin):
 
             name = f"{sub}.{eventData}"
 
-            if len(targetList) <= self.opts['_maxthreads']:
+            if len(targetList) <= self.opts['batch_size']:
                 targetList.append(name)
             else:
                 self.tryHostWrapper(targetList, event)
@@ -240,7 +240,7 @@ class sfp_dnsbrute(SpiderFootAsyncPlugin):
                     nextsubs[s + "-0" + str(i) + dom] = True
                     nextsubs[s + "-00" + str(i) + dom] = True
 
-                if len(list(nextsubs.keys())) >= self.opts['_maxthreads']:
+                if len(list(nextsubs.keys())) >= self.opts['batch_size']:
                     self.tryHostWrapper(list(nextsubs.keys()), event)
                     nextsubs = dict()
 

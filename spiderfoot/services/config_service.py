@@ -295,7 +295,7 @@ class ConfigService:
         # validator, ConfigManager.DEFAULT_CONFIG, AppConfig.CoreConfig) -
         # kept all three in step rather than consolidating them, which is
         # a separate, larger refactor.
-        v.add_rule("_maxthreads", type=int, default=12, min_value=1, max_value=100)
+        v.add_rule("_maxthreads", type=int, default=24, min_value=1, max_value=100)
         v.add_rule("_fetchtimeout", type=int, default=15, min_value=1, max_value=300)
         v.add_rule("_dnstimeout", type=int, default=10, min_value=1, max_value=60)
 

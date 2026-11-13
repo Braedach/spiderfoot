@@ -809,7 +809,20 @@ class SpiderFootScanner():
         if "invasive" not in getattr(mod, "meta", {}).get("flags", []):
             return True
 
-        if not self.__target.matches(sfEvent.data, includeParents=True, includeChildren=True):
+        # matches() expects a bare hostname/IP, not a full URL. Events like
+        # LINKED_URL_INTERNAL/URL_FORM carry full URLs ("https://host/path?query"),
+        # which matches() always rejects outright (it has no URL parsing) -
+        # found live 2026-11-13: every invasive URL-fuzzing module
+        # (sfp_tool_dalfox/ffuf/arjun/katana/gobuster) had been silently
+        # unable to dispatch on ANY domain scan since this gate shipped
+        # (PR #37), with zero log output (self.__sf.debug() only surfaces
+        # with _debug on) - looked like the modules weren't running at all.
+        # Extracting the FQDN first is a no-op for already-bare values.
+        matchValue = sfEvent.data
+        if isinstance(matchValue, str) and "://" in matchValue:
+            matchValue = self.__sf.urlFQDN(matchValue) or matchValue
+
+        if not self.__target.matches(matchValue, includeParents=True, includeChildren=True):
             self.__sf.debug(
                 f"strict_scope: dropping {sfEvent.eventType} ({sfEvent.data}) for"
                 f" invasive module {mod.__name__} - out of target scope."
