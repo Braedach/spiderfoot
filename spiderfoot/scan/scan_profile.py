@@ -37,6 +37,8 @@ Built-in profiles:
     - api-powered: All modules requiring API keys
     - minimal: Bare minimum modules
     - phone-number: Phone-number intelligence, key-free only
+    - email-address: Email-address intelligence, key-free only
+    - person-name: Person-name intelligence, key-free only
     - custom: User-defined template
 """
 
@@ -368,6 +370,61 @@ class ProfileManager:
             max_threads=3,
             timeout_minutes=15,
             tags=["phone", "osint", "key-free"],
+        ))
+
+        self.register(ScanProfile(
+            name="email-address",
+            display_name="Email Address Intelligence",
+            description=(
+                "Validity, pattern, breach, and leaked-credential lookups "
+                "for an email-address target. Key-free only - none of "
+                "these modules need an API key configured. For richer "
+                "results (haveibeenpwned, emailrep) sign up for their "
+                "free tiers and use api-powered instead."
+            ),
+            category=ProfileCategory.RECONNAISSANCE,
+            include_modules=[
+                "sfp_email",        # core extractor - finds more addresses in gathered data
+                "sfp_emailformat",  # guesses a company's email naming pattern from its domain
+                "sfp_debounce",     # disposable-email check (debounce.io)
+                "sfp_trumail",      # disposable-email check (trumail.io) - independent 2nd source
+                "sfp_pgp",          # PGP keyserver lookup
+                "sfp_gravatar",     # Gravatar presence check
+                "sfp_hudsonrock",   # Hudson Rock Cavalier: free infostealer-breach intel
+                "sfp_grep_app",     # search grep.app for leaked email mentions in public code
+                "sfp_searchcode",   # search searchcode.com for the same
+                "sfp_accounts",     # check the local-part as a username across 500+ sites
+                "sfp_wikileaks",    # search Wikileaks for mentions
+            ],
+            exclude_flags=["errorprone"],
+            max_threads=3,
+            timeout_minutes=20,
+            tags=["email", "osint", "key-free"],
+        ))
+
+        self.register(ScanProfile(
+            name="person-name",
+            display_name="Person Name Intelligence",
+            description=(
+                "Account, registry, and leak-mention lookups for a "
+                "person-name target. Key-free only. Coverage here is "
+                "genuinely thin compared to phone-number/email-address - "
+                "only 3 modules in the whole catalog watch HUMAN_NAME "
+                "without needing a key. For real people-search depth "
+                "(sociallinks, rocketreach, fullcontact, seon) those all "
+                "need paid/keyed accounts - use api-powered once "
+                "configured."
+            ),
+            category=ProfileCategory.RECONNAISSANCE,
+            include_modules=[
+                "sfp_accounts",   # checks the name as a username across 500+ sites
+                "sfp_arin",       # ARIN registry contact-information lookup
+                "sfp_wikileaks",  # search Wikileaks for mentions
+            ],
+            exclude_flags=["errorprone"],
+            max_threads=3,
+            timeout_minutes=15,
+            tags=["name", "osint", "key-free"],
         ))
 
         self.register(ScanProfile(
