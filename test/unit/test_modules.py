@@ -474,6 +474,63 @@ class TestSpiderFootModuleLoading(TestModuleBase):
                     self.assertTrue(
                         help_text, f"Module {module} option {opt} has empty help")
 
+    def test_every_module_can_be_instantiated_and_set_up(self):
+        """Catalog-wide smoke test: every module must survive setup() called
+        the way the real scan engine actually calls it -
+        mod.setup(self.__sf, self.__modconfig[modName]) in
+        SpiderFootScanner - without raising.
+
+        Found 2026-11-13: 4 modules (sfp_adsbexchange, sfp_aprsfi,
+        sfp_aviationstack, sfp_datalastic) declared setup(self) with no
+        arguments, which doesn't match that call shape at all - discovered
+        only by accident, via unrelated log noise, months after being
+        written. No existing test called setup() with real arguments
+        across the whole catalog.
+
+        loadModulesAsDict() (used by every other test in this file)
+        instantiates each module internally too, but wraps it in a bare
+        try/except that silently swallows any error - by design, for the
+        module-discovery UI, but it means that path can never catch this
+        class of bug. This test imports and instantiates each module
+        directly instead, the same way SpiderFootScanner's own module-load
+        loop does.
+        """
+        import importlib
+        from copy import deepcopy
+        from spiderfoot.core.config import ConfigManager
+
+        sf = SpiderFoot(self.default_options)
+        # Replicate SpiderFootScanner's exact per-module opts: the module's
+        # own defaults with every global config key merged in on top (see
+        # test_module_opt_global_collision.py for why that merge order
+        # matters) - an empty dict understates what setup() actually
+        # receives in a real scan and would wrongly flag modules that read
+        # a global key directly.
+        global_config = ConfigManager().initialize()
+        mod_dir = os.path.dirname(os.path.abspath(__file__)) + '/../../modules/'
+        failures = []
+
+        for filename in sorted(os.listdir(mod_dir)):
+            if not filename.endswith('.py') or filename.startswith('__') or filename == 'sfp_shodan.py':
+                continue
+
+            module_name = filename[:-3]
+            try:
+                mod = importlib.import_module(f"modules.{module_name}")
+                cls = getattr(mod, module_name)
+                instance = cls()
+                instance.__name__ = module_name
+                userOpts = deepcopy(instance.opts)
+                userOpts.update(deepcopy(global_config))
+                instance.setup(sf, userOpts)
+            except Exception as e:
+                failures.append(f"{module_name}: {type(e).__name__}: {e}")
+
+        self.assertEqual(
+            [], failures,
+            "Modules that failed setup() when called the way the scan"
+            " engine actually calls it:\n" + "\n".join(failures))
+
     def setUp(self):
         """Set up before each test."""
         super().setUp()
