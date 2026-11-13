@@ -47,14 +47,14 @@ class sfp_s3bucket(SpiderFootAsyncPlugin):
     opts = {
         "endpoints": "s3.amazonaws.com,s3-external-1.amazonaws.com,s3-us-west-1.amazonaws.com,s3-us-west-2.amazonaws.com,s3.ap-south-1.amazonaws.com,s3-ap-south-1.amazonaws.com,s3.ap-northeast-2.amazonaws.com,s3-ap-northeast-2.amazonaws.com,s3-ap-southeast-1.amazonaws.com,s3-ap-southeast-2.amazonaws.com,s3-ap-northeast-1.amazonaws.com,s3.eu-central-1.amazonaws.com,s3-eu-central-1.amazonaws.com,s3-eu-west-1.amazonaws.com,s3-sa-east-1.amazonaws.com",
         "suffixes": "test,dev,web,beta,bucket,space,files,content,data,prod,staging,production,stage,app,media,development,-test,-dev,-web,-beta,-bucket,-space,-files,-content,-data,-prod,-staging,-production,-stage,-app,-media,-development",
-        "_maxthreads": 20,
+        "batch_size": 20,
     }
 
     # Option descriptions
     optdescs = {
         "endpoints": "Different S3 endpoints to check where buckets may exist, as per http://docs.aws.amazon.com/general/latest/gr/rande.html#s3_region",
         "suffixes": "List of suffixes to append to domains tried as bucket names",
-        "_maxthreads": "Maximum threads",
+        "batch_size": "Maximum concurrent lookups per batch for this module's own enumeration (independent of the scan-wide _maxthreads).",
     }
 
     results = None
@@ -143,7 +143,7 @@ class sfp_s3bucket(SpiderFootAsyncPlugin):
         siteList = list()
 
         for site in sites:
-            if i >= self.opts["_maxthreads"]:
+            if i >= self.opts["batch_size"]:
                 data = self.threadSites(siteList)
                 if data is None:
                     return res

@@ -43,7 +43,7 @@ class sfp_accounts(SpiderFootAsyncPlugin):
         "userfromemail": True,
         "permutate": False,
         "usernamesize": 4,
-        "_maxthreads": 20
+        "batch_size": 20
     }
 
     # Option descriptions
@@ -54,7 +54,7 @@ class sfp_accounts(SpiderFootAsyncPlugin):
         "userfromemail": "Extract usernames from e-mail addresses at all? If disabled this can reduce false positives for common usernames but for highly unique usernames it would result in missed accounts.",
         "permutate": "Look for the existence of account name permutations. Useful to identify fraudulent social media accounts or account squatting.",
         "usernamesize": "The minimum length of a username to query across social media sites. Helps avoid false positives for very common short usernames.",
-        "_maxthreads": "Maximum threads"
+        "batch_size": "Maximum concurrent lookups per batch for this module's own enumeration (independent of the scan-wide _maxthreads)."
     }
 
     results = None
@@ -198,7 +198,7 @@ class sfp_accounts(SpiderFootAsyncPlugin):
 
         # start the scan threads
         threads = []
-        for i in range(min(len(sites), self.opts['_maxthreads'])):
+        for i in range(min(len(sites), self.opts['batch_size'])):
             thread = threading.Thread(
                 name=f'sfp_accounts_scan_{i}',
                 target=processSiteQueue,

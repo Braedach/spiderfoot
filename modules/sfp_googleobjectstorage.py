@@ -47,13 +47,13 @@ class sfp_googleobjectstorage(SpiderFootAsyncPlugin):
     # Default options
     opts = {
         "suffixes": "test,dev,web,beta,bucket,space,files,content,data,prod,staging,production,stage,app,media,development,-test,-dev,-web,-beta,-bucket,-space,-files,-content,-data,-prod,-staging,-production,-stage,-app,-media,-development",
-        "_maxthreads": 20,
+        "batch_size": 20,
     }
 
     # Option descriptions
     optdescs = {
         "suffixes": "List of suffixes to append to domains tried as bucket names",
-        "_maxthreads": "Maximum threads",
+        "batch_size": "Maximum concurrent lookups per batch for this module's own enumeration (independent of the scan-wide _maxthreads).",
     }
 
     results = None
@@ -146,7 +146,7 @@ class sfp_googleobjectstorage(SpiderFootAsyncPlugin):
         siteList = list()
 
         for site in sites:
-            if i >= self.opts["_maxthreads"]:
+            if i >= self.opts["batch_size"]:
                 data = self.threadSites(siteList)
                 if data is None:
                     return res
