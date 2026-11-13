@@ -191,7 +191,7 @@ class ScanManager:
             modlist = final_modlist
 
         # Add required storage modules
-        storage_modules = ["sfp__stor_db", "sfp__stor_stdout", "sfp__stor_elasticsearch"]
+        storage_modules = ["sfp__stor_db", "sfp__stor_stdout"]
         for storage_mod in storage_modules:
             if storage_mod not in modlist:
                 modlist.append(storage_mod)

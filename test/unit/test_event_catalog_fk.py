@@ -78,8 +78,15 @@ class TestModuleEventsFKSatisfied(unittest.TestCase):
         cls.modules = sf.opts.get("__modules__", {})
 
     def test_modules_loaded(self):
-        """Sanity: at least 300 modules should load."""
-        self.assertGreaterEqual(len(self.modules), 300,
+        """Sanity: at least 290 modules should load.
+
+        Was 300 pre-cleanup (2026-11); lowered after removing 11 dead/
+        superseded modules (7 tool wrappers the active-scanner Dockerfile's
+        own comments already documented as replaced, 3 explicitly
+        "no longer needed" stub modules, 1 storage backend superseded by
+        Vector.dev) - see that PR's description for the full list.
+        """
+        self.assertGreaterEqual(len(self.modules), 290,
                                 f"Only {len(self.modules)} modules loaded")
 
     def test_all_produced_events_in_catalog(self):
@@ -115,7 +122,7 @@ class TestModuleEventsFKSatisfied(unittest.TestCase):
         empty = [m for m, info in self.modules.items()
                  if not info.get("provides")]
         # Storage sinks and example modules may not produce events
-        excluded = {"sfp__stor_db", "sfp__stor_stdout", "sfp__stor_elasticsearch",
+        excluded = {"sfp__stor_db", "sfp__stor_stdout",
                     "sfp__stor_s3", "sfp__stor_redis", "sfp__stor_jsonl",
                     "sfp_example"}
         non_sink_empty = [m for m in empty if m not in excluded]

@@ -132,14 +132,13 @@ SpiderFoot v6.1.0 includes 309 modules organized into the following categories:
 ### Additional Investigation Modules
 - **Blockchain Analytics**: sfp_blockchain_analytics (Bitcoin, Ethereum, Litecoin analysis)
 - **Advanced Correlation**: sfp_advanced_correlation (entity resolution, pattern detection)
-- **Performance Optimization**: sfp_performance_optimizer (caching, rate limiting)
 
 **Enhanced CLI Patterns:**
 ```bash
-# Domain reconnaissance with performance optimization
+# Domain reconnaissance
 curl -X POST http://localhost:8001/api/v1/scans \
   -H "Content-Type: application/json" \
-  -d '{"target": "example.com", "modules": ["sfp_dnsresolve", "sfp_subdomain_enum", "sfp_ssl", "sfp_whois", "sfp_threatcrowd", "sfp_performance_optimizer"]}'
+  -d '{"target": "example.com", "modules": ["sfp_dnsresolve", "sfp_subdomain_enum", "sfp_ssl", "sfp_whois", "sfp_threatcrowd"]}'
 
 # TikTok OSINT investigation
 curl -X POST http://localhost:8001/api/v1/scans \
@@ -164,7 +163,7 @@ curl -X POST http://localhost:8001/api/v1/scans \
 # Multi-target investigation with performance optimization
 curl -X POST http://localhost:8001/api/v1/scans \
   -H "Content-Type: application/json" \
-  -d '{"target": "multiple_targets.txt", "modules": ["sfp_dnsresolve", "sfp_ssl", "sfp_blockchain_analytics", "sfp_performance_optimizer"]}'
+  -d '{"target": "multiple_targets.txt", "modules": ["sfp_dnsresolve", "sfp_ssl", "sfp_blockchain_analytics"]}'
 ```
 
 ---

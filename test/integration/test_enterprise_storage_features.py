@@ -27,12 +27,10 @@ import os
 import json
 from unittest.mock import patch, MagicMock, Mock
 import psycopg2
-from elasticsearch import Elasticsearch, ConnectionError
 
 from spiderfoot.sflib import SpiderFoot
 from spiderfoot.events.event import SpiderFootEvent
 from modules.sfp__stor_db import sfp__stor_db
-from modules.sfp__stor_elasticsearch import sfp__stor_elasticsearch
 from modules.sfp__stor_stdout import sfp__stor_stdout
 
 
@@ -132,88 +130,6 @@ class TestEnterpriseStorageFeatures(TestModuleBase):
             print("✓ PostgreSQL schema compliance")
             print("✓ PostgreSQL connection recovery")
 
-    def test_elasticsearch_enterprise_features(self):
-        """Test Elasticsearch storage enterprise features."""
-        print("\n=== Testing Elasticsearch Enterprise Features ===")
-        
-        with patch('modules.sfp__stor_elasticsearch.Elasticsearch') as mock_es_class, \
-             patch('elasticsearch.helpers.bulk') as mock_bulk:
-            mock_es = MagicMock()
-            mock_es.ping.return_value = True
-            mock_es.indices.exists.return_value = False
-            mock_es.bulk.return_value = {'errors': False}
-            mock_es_class.return_value = mock_es
-            mock_bulk.return_value = (150, [])  # Simulate 150 successes, no errors
-            
-            # Test advanced configuration with security
-            module = sfp__stor_elasticsearch()
-            opts = {
-                'enabled': True,
-                'host': 'elasticsearch.company.com',
-                'port': 9200,
-                'index': 'spiderfoot-enterprise',
-                'use_ssl': True,
-                'verify_certs': True,
-                'api_key': 'enterprise_api_key_12345',
-                'bulk_size': 1,  # Lowered for deterministic test
-                'timeout': 30
-            }
-            
-            module.setup(self.sf, opts)
-            module.getScanId = MagicMock(return_value=self.test_scan_id)
-            
-            # Verify secure connection configuration
-            self.assertFalse(module.errorState)
-            call_args = mock_es_class.call_args[1]
-            self.assertTrue(call_args['use_ssl'])
-            self.assertTrue(call_args['verify_certs'])
-            self.assertEqual(call_args['api_key'], 'enterprise_api_key_12345')
-            
-            # Test index management
-            module._ensure_index_exists()
-            mock_es.indices.exists.assert_called_with(index='spiderfoot-enterprise')
-            self.assertGreaterEqual(mock_es.indices.create.call_count, 1, "Index creation should be called at least once.")
-            
-            # Test bulk insertion and buffering
-            events = []
-            for i in range(150):  # More than bulk_size
-                event = self.create_test_event("IP_ADDRESS", f"10.0.0.{i}")
-                events.append(event)
-                module.handleEvent(event)
-            # Force flush remaining buffer
-            module._flush_buffer()
-            # Should trigger bulk insertion
-            self.assertTrue(mock_bulk.called)
-            
-            # Test thread safety
-            def bulk_add_events():
-                for i in range(50):
-                    event = self.create_test_event("DOMAIN_NAME", f"test{i}.com")
-                    module.handleEvent(event)
-            
-            threads = []
-            for _ in range(3):
-                thread = threading.Thread(target=bulk_add_events)
-                threads.append(thread)
-                thread.start()
-            
-            for thread in threads:
-                thread.join()
-            
-            # Should handle concurrent access safely
-            self.assertTrue(hasattr(module.buffer_lock, 'acquire') and hasattr(module.buffer_lock, 'release'))
-            
-            # Test error handling and retry
-            mock_es.ping.side_effect = [ConnectionError("Connection failed"), True]
-            test_event = self.create_test_event("URL", "https://example.com")
-            module.handleEvent(test_event)
-            
-            print("✓ Elasticsearch SSL/API key authentication")
-            print("✓ Elasticsearch index management")
-            print("✓ Elasticsearch bulk insertion and buffering")
-            print("✓ Elasticsearch thread safety")
-            print("✓ Elasticsearch connection retry")
-
     def test_storage_performance_optimization(self):
         """Test performance optimization features."""
         print("\n=== Testing Performance Optimization ===")
@@ -232,38 +148,8 @@ class TestEnterpriseStorageFeatures(TestModuleBase):
             db_module.handleEvent(event)
         
         db_time = time.time() - start_time
-        
-        # Elasticsearch bulk performance test
-        with patch('modules.sfp__stor_elasticsearch.Elasticsearch') as mock_es_class:
-            mock_es = MagicMock()
-            mock_es.ping.return_value = True
-            mock_es.bulk.return_value = {'errors': False}
-            mock_es_class.return_value = mock_es
-            
-            es_module = sfp__stor_elasticsearch()
-            es_module.setup(self.sf, {
-                'enabled': True,
-                'host': 'localhost',
-                'port': 9200,
-                'index': 'performance_test',
-                'bulk_size': 100
-            })
-            es_module.getScanId = MagicMock(return_value=self.test_scan_id)
-            
-            start_time = time.time()
-            for i in range(1000):
-                event = self.create_test_event("DOMAIN_NAME", f"test{i}.example.com")
-                es_module.handleEvent(event)
-            
-            # Force flush remaining buffer
-            es_module._flush_buffer()
-            es_time = time.time() - start_time
-            
-            # Bulk operations should be more efficient
-            self.assertLess(mock_es.bulk.call_count, 15)  # Should batch efficiently
-        
+
         print(f"✓ Database processing time: {db_time:.3f}s")
-        print(f"✓ Elasticsearch bulk processing: {es_time:.3f}s")
         print("✓ Performance optimization validated")
 
     def test_error_handling_resilience(self):
@@ -295,22 +181,7 @@ class TestEnterpriseStorageFeatures(TestModuleBase):
             
             # Should fall back to default storage
             self.assertEqual(self.mock_dbh.scanEventStore.call_count, 0)
-        
-        # Test Elasticsearch error scenarios
-        with patch('modules.sfp__stor_elasticsearch.Elasticsearch') as mock_es_class:
-            mock_es_class.side_effect = ConnectionError("Elasticsearch unavailable")
-            
-            es_module = sfp__stor_elasticsearch()
-            es_module.setup(self.sf, {
-                'enabled': True,
-                'host': 'unavailable.host',
-                'port': 9200,
-                'index': 'test'
-            })
-            
-            # Should enter error state gracefully
-            self.assertTrue(es_module.errorState)
-        
+
         # Test configuration validation
         invalid_pg_module = sfp__stor_db()
         invalid_pg_module.setup(self.sf, {
@@ -320,7 +191,6 @@ class TestEnterpriseStorageFeatures(TestModuleBase):
         
         print("✓ PostgreSQL connection failure handling")
         print("✓ PostgreSQL fallback to default storage")
-        print("✓ Elasticsearch connection failure handling") 
         print("✓ Configuration validation")
 
     def test_data_integrity_and_validation(self):
@@ -399,31 +269,8 @@ class TestEnterpriseStorageFeatures(TestModuleBase):
             # Test health check failure detection
             mock_cursor.execute.side_effect = psycopg2.OperationalError("Health check failed")
             self.assertFalse(pg_module._check_postgresql_connection())
-        
-        # Test Elasticsearch health monitoring
-        with patch('modules.sfp__stor_elasticsearch.Elasticsearch') as mock_es_class:
-            mock_es = MagicMock()
-            mock_es.ping.return_value = True
-            mock_es_class.return_value = mock_es
-            
-            es_module = sfp__stor_elasticsearch()
-            es_module.setup(self.sf, {
-                'enabled': True,
-                'host': 'localhost',
-                'port': 9200,
-                'index': 'monitoring_test'
-            })
-            
-            # Test health monitoring
-            self.assertTrue(es_module._check_elasticsearch_health())
-            mock_es.ping.assert_called()
-            
-            # Test failure detection
-            mock_es.ping.side_effect = ConnectionError("Health check failed")
-            self.assertFalse(es_module._check_elasticsearch_health())
-        
+
         print("✓ PostgreSQL health monitoring")
-        print("✓ Elasticsearch health monitoring")
         print("✓ Connection failure detection")
 
     def test_security_features(self):
@@ -452,37 +299,14 @@ class TestEnterpriseStorageFeatures(TestModuleBase):
             self.assertEqual(call_args['user'], 'secure_user')
             self.assertEqual(call_args['password'], 'secure_password_123!')
             self.assertEqual(call_args['connect_timeout'], 30)
-        
-        # Test Elasticsearch SSL and authentication
-        with patch('modules.sfp__stor_elasticsearch.Elasticsearch') as mock_es_class:
-            mock_es = MagicMock()
-            mock_es_class.return_value = mock_es
-            
-            es_module = sfp__stor_elasticsearch()
-            es_module.setup(self.sf, {
-                'enabled': True,
-                'host': 'secure.es.host',
-                'port': 9200,
-                'index': 'security_test',
-                'use_ssl': True,
-                'verify_certs': True,
-                'api_key': 'secure_api_key_xyz789'
-            })
-            
-            # Verify SSL and authentication configuration
-            call_args = mock_es_class.call_args[1]
-            self.assertTrue(call_args['use_ssl'])
-            self.assertTrue(call_args['verify_certs'])
-            self.assertEqual(call_args['api_key'], 'secure_api_key_xyz789')
-        
+
         print("✓ PostgreSQL secure connection parameters")
-        print("✓ Elasticsearch SSL configuration")
         print("✓ Authentication and API key handling")
 
     def test_multi_storage_coordination(self):
         """Test coordination between multiple storage backends."""
         print("\n=== Testing Multi-Storage Coordination ===")
-        
+
         # Set up multiple storage modules
         db_module = sfp__stor_db()
         with patch('modules.sfp__stor_db.psycopg2.connect'):
@@ -491,47 +315,25 @@ class TestEnterpriseStorageFeatures(TestModuleBase):
         db_module.pg_conn = None
         db_module.errorState = False
         db_module.getScanId = MagicMock(return_value=self.test_scan_id)
-        with patch('modules.sfp__stor_elasticsearch.Elasticsearch') as mock_es_class, \
-             patch('elasticsearch.helpers.bulk') as mock_bulk:
-            mock_es = MagicMock()
-            mock_es.ping.return_value = True
-            mock_es.bulk.return_value = {'errors': False}
-            mock_es_class.return_value = mock_es
-            mock_bulk.return_value = (10, [])  # Simulate 10 successes, no errors
-            
-            es_module = sfp__stor_elasticsearch()
-            es_module.setup(self.sf, {
-                'enabled': True,
-                'host': 'localhost',
-                'port': 9200,
-                'index': 'coordination_test',
-                'bulk_size': 1  # Lowered for deterministic test
-            })
-            es_module.getScanId = MagicMock(return_value=self.test_scan_id)
-            
-            stdout_module = sfp__stor_stdout()
-            stdout_module.setup(self.sf, {'_store': True})
-            stdout_module.getScanId = MagicMock(return_value=self.test_scan_id)
-            
-            # Send same events to all storage backends
-            test_events = []
-            for i in range(10):
-                event = self.create_test_event("COORDINATION_TEST", f"data_{i}")
-                test_events.append(event)
-                
-                # Store in all backends
-                db_module.handleEvent(event)
-                es_module.handleEvent(event)
-                with patch('sys.stdout'):
-                    stdout_module.handleEvent(event)
-            
-            # Verify all backends processed events
-            self.assertEqual(self.mock_dbh.scanEventStore.call_count, 10)
-            self.assertEqual(len(es_module.buffer), 0)  # All events flushed immediately with bulk_size=1
-            # Force flush Elasticsearch buffer
-            es_module._flush_buffer()
-            self.assertGreaterEqual(mock_bulk.call_count, 1, "Elasticsearch bulk should be called after flush.")
-        
+
+        stdout_module = sfp__stor_stdout()
+        stdout_module.setup(self.sf, {'_store': True})
+        stdout_module.getScanId = MagicMock(return_value=self.test_scan_id)
+
+        # Send same events to all storage backends
+        test_events = []
+        for i in range(10):
+            event = self.create_test_event("COORDINATION_TEST", f"data_{i}")
+            test_events.append(event)
+
+            # Store in all backends
+            db_module.handleEvent(event)
+            with patch('sys.stdout'):
+                stdout_module.handleEvent(event)
+
+        # Verify all backends processed events
+        self.assertEqual(self.mock_dbh.scanEventStore.call_count, 10)
+
         print("✓ Multi-storage backend coordination")
         print("✓ Consistent event processing")
         print("✓ Independent error handling")
@@ -544,7 +346,6 @@ class TestEnterpriseStorageFeatures(TestModuleBase):
         
         test_methods = [
             self.test_postgresql_enterprise_features,
-            self.test_elasticsearch_enterprise_features,
             self.test_storage_performance_optimization,
             self.test_error_handling_resilience,
             self.test_data_integrity_and_validation,

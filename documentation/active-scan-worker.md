@@ -59,8 +59,6 @@ docker-compose level by assigning different `--queues` flags.
 | nmap          | `sfp_nmap`               | apt        |
 | nuclei        | `sfp_nuclei`             | binary     |
 | testssl.sh    | `sfp_tool_testsslsh`     | git clone  |
-| CMSeeK        | `sfp_tool_cmseek`        | git clone  |
-| retire.js     | `sfp_tool_retirejs`      | npm        |
 | nbtscan       | `sfp_tool_nbtscan`       | apt        |
 | onesixtyone   | `sfp_tool_onesixtyone`   | apt        |
 | whatweb        | `sfp_tool_whatweb`       | apt        |
@@ -69,7 +67,14 @@ docker-compose level by assigning different `--queues` flags.
 | trufflehog    | `sfp_tool_trufflehog`    | pip        |
 | wafw00f       | `sfp_tool_wafw00f`       | pip        |
 
-### Added by the active worker (`docker/Dockerfile.active-scanner`)
+### Added by the active worker (`deploy/docker/Dockerfile.active-scanner`)
+
+A number of tools originally planned for this image were removed or
+replaced during the fork's rewrite (checksum-pinning, CVE/stale-release
+audit) - CMSeeK, retire.js, amass, gospider, hakrawler, waybackurls, and
+LinkFinder. See that Dockerfile's own header comment ("TOOLS REMOVED, and
+why") for the full reasoning and which currently-listed tool now covers
+each one's events. Their module files have been removed from `modules/`.
 
 #### DNS & Subdomain Enumeration
 
@@ -78,7 +83,6 @@ docker-compose level by assigning different `--queues` flags.
 | **httpx**      | `sfp_httpx`           | HTTP probing & tech fingerprinting  | Go build  |
 | **subfinder**  | `sfp_subfinder`       | Passive subdomain enumeration       | Go build  |
 | **gobuster**   | `sfp_tool_gobuster`   | Directory / DNS brute-forcing       | Go build  |
-| amass      | `sfp_tool_amass`          | OWASP attack surface mapping        | Go build  |
 | dnsx       | `sfp_tool_dnsx`           | DNS resolution & record queries     | Go build  |
 | massdns    | `sfp_tool_massdns`        | Bulk DNS resolution                 | C build   |
 
@@ -86,11 +90,8 @@ docker-compose level by assigning different `--queues` flags.
 
 | Tool       | Module                    | Purpose                             | Install   |
 |------------|---------------------------|--------------------------------------|-----------|
-| katana     | `sfp_tool_katana`         | Next-gen web crawling (headless)    | Go build  |
-| gospider   | `sfp_tool_gospider`       | Fast web spider                     | Go build  |
-| hakrawler  | `sfp_tool_hakrawler`      | Simple web crawler                  | Go build  |
-| gau        | `sfp_tool_gau`            | Fetch archived URLs (Wayback etc.)  | Go build  |
-| waybackurls| `sfp_tool_waybackurls`    | Wayback Machine URL extraction      | Go build  |
+| katana     | `sfp_tool_katana`         | Next-gen web crawling (headless, also covers gospider/hakrawler's JS-crawling and LinkFinder's endpoint extraction via `-jc`) | Go build  |
+| gau        | `sfp_tool_gau`            | Fetch archived URLs (Wayback etc., also covers waybackurls' source) | Go build  |
 | ffuf       | `sfp_tool_ffuf`           | Web content fuzzing                 | Go build  |
 | gowitness  | `sfp_tool_gowitness`      | Web screenshots (headless Chrome)   | Go build  |
 | arjun      | `sfp_tool_arjun`          | HTTP parameter discovery            | pip       |
@@ -114,7 +115,6 @@ docker-compose level by assigning different `--queues` flags.
 | Tool       | Module                    | Purpose                             | Install   |
 |------------|---------------------------|--------------------------------------|-----------|
 | gitleaks   | `sfp_tool_gitleaks`       | Git secret detection                | Go build  |
-| linkfinder | `sfp_tool_linkfinder`     | JS endpoint extraction              | pip       |
 
 #### SSL/TLS Analysis
 
@@ -221,13 +221,9 @@ Below is the data flow showing which events trigger each tool and what
 they produce:
 
 ```
-DOMAIN_NAME ──┬──→ sfp_tool_amass      ──→ INTERNET_NAME, IP_ADDRESS
-              ├──→ sfp_tool_gau        ──→ LINKED_URL_*, URL_JAVASCRIPT
-              ├──→ sfp_tool_waybackurls──→ LINKED_URL_*, URL_JAVASCRIPT
-              ├──→ sfp_tool_gospider   ──→ LINKED_URL_*, URL_JAVASCRIPT, EMAILADDR
+DOMAIN_NAME ──┬──→ sfp_tool_gau        ──→ LINKED_URL_*, URL_JAVASCRIPT
               ├──→ sfp_tool_katana     ──→ LINKED_URL_*, URL_JAVASCRIPT
               ├──→ sfp_tool_ffuf       ──→ LINKED_URL_INTERNAL, HTTP_CODE
-              ├──→ sfp_tool_hakrawler  ──→ LINKED_URL_*, URL_JAVASCRIPT
               └──→ sfp_tool_nikto      ──→ VULNERABILITY_*, WEBSERVER_*
 
 INTERNET_NAME ┬──→ sfp_tool_dnsx       ──→ IP_ADDRESS, RAW_DNS_RECORDS, DNS_*
@@ -246,8 +242,6 @@ IP_ADDRESS ───┬──→ sfp_tool_naabu      ──→ TCP_PORT_OPEN
 
 URL_FORM ─────┬──→ sfp_tool_dalfox     ──→ VULNERABILITY_*, RAW_RIR_DATA
               └──→ sfp_tool_arjun      ──→ URL_FORM, RAW_RIR_DATA
-
-URL_JAVASCRIPT└──→ sfp_tool_linkfinder ──→ LINKED_URL_INTERNAL, LINKED_URL_EXTERNAL
 
 LINKED_URL_INTERNAL
               ├──→ sfp_tool_katana     ──→ LINKED_URL_*, URL_JAVASCRIPT
@@ -268,13 +262,9 @@ TCP_PORT_OPEN └──→ sfp_tool_tlsx       ──→ SSL_CERTIFICATE_* (TLS 
 
 | Module | Tool | Watched Events | Key Produced Events |
 |--------|------|---------------|---------------------|
-| `sfp_tool_amass` | OWASP Amass | `DOMAIN_NAME` | `INTERNET_NAME`, `IP_ADDRESS` |
 | `sfp_tool_dnsx` | dnsx | `INTERNET_NAME`, `DOMAIN_NAME` | `IP_ADDRESS`, `RAW_DNS_RECORDS`, `DNS_TEXT` |
 | `sfp_tool_massdns` | massdns | `INTERNET_NAME_UNRESOLVED` | `IP_ADDRESS`, `INTERNET_NAME` |
 | `sfp_tool_gau` | gau | `DOMAIN_NAME` | `LINKED_URL_*`, `URL_JAVASCRIPT` |
-| `sfp_tool_waybackurls` | waybackurls | `DOMAIN_NAME` | `LINKED_URL_*`, `URL_JAVASCRIPT` |
-| `sfp_tool_gospider` | gospider | `DOMAIN_NAME`, `LINKED_URL_INTERNAL` | `LINKED_URL_*`, `URL_JAVASCRIPT`, `EMAILADDR` |
-| `sfp_tool_hakrawler` | hakrawler | `DOMAIN_NAME`, `LINKED_URL_INTERNAL` | `LINKED_URL_*`, `URL_JAVASCRIPT` |
 | `sfp_tool_katana` | katana | `DOMAIN_NAME`, `LINKED_URL_INTERNAL` | `LINKED_URL_*`, `URL_JAVASCRIPT` |
 | `sfp_tool_ffuf` | ffuf | `DOMAIN_NAME`, `LINKED_URL_INTERNAL` | `LINKED_URL_INTERNAL`, `HTTP_CODE` |
 | `sfp_tool_gowitness` | gowitness | `LINKED_URL_INTERNAL`, `DOMAIN_NAME` | `RAW_RIR_DATA` |
@@ -282,7 +272,6 @@ TCP_PORT_OPEN └──→ sfp_tool_tlsx       ──→ SSL_CERTIFICATE_* (TLS 
 | `sfp_tool_nikto` | Nikto | `DOMAIN_NAME`, `IP_ADDRESS`, `LINKED_URL_INTERNAL` | `VULNERABILITY_*`, `WEBSERVER_BANNER` |
 | `sfp_tool_dalfox` | Dalfox | `URL_FORM`, `LINKED_URL_INTERNAL` | `VULNERABILITY_*` |
 | `sfp_tool_gitleaks` | Gitleaks | `PUBLIC_CODE_REPO` | `PASSWORD_COMPROMISED`, `VULNERABILITY_GENERAL` |
-| `sfp_tool_linkfinder` | LinkFinder | `URL_JAVASCRIPT` | `LINKED_URL_INTERNAL`, `LINKED_URL_EXTERNAL` |
 | `sfp_tool_naabu` | Naabu | `IP_ADDRESS`, `INTERNET_NAME`, `DOMAIN_NAME` | `TCP_PORT_OPEN` |
 | `sfp_tool_masscan` | Masscan | `IP_ADDRESS`, `NETBLOCK_OWNER` | `TCP_PORT_OPEN`, `WEBSERVER_BANNER` |
 | `sfp_tool_tlsx` | tlsx | `INTERNET_NAME`, `IP_ADDRESS`, `TCP_PORT_OPEN` | `SSL_CERTIFICATE_*`, `VULNERABILITY_GENERAL` |
