@@ -32,10 +32,16 @@
     "recharts": "^2.14.0",
     "zustand": "^5.0.0"
   },
+  "overrides": {
+    "js-yaml": "^4.3.2",
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "^11.0.1"
+    }
+  },
   "devDependencies": {
     "@eslint/js": "^9.14.0",
     "@hey-api/client-axios": "^0.9.1",
-    "@hey-api/openapi-ts": "^0.92.4",
+    "@hey-api/openapi-ts": "^0.99.0",
     "@tailwindcss/forms": "^0.5.9",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
@@ -52,7 +58,7 @@
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.6.3",
-    "typescript-eslint": "^8.56.0",
+    "typescript-eslint": "^8.72.2",
     "vite": "^6.0.0",
     "vitest": "^5.1.0"
   }

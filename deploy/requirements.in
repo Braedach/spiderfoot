@@ -5,7 +5,11 @@
 fastembed>=0.7.0,<1.0.0
 
 # Anthropic's official SDK: sf-agents calls Claude directly (replaces the LiteLLM proxy).
-anthropic>=1.0.0
+# Capped below 2.0.0 deliberately: that's a major version with its own breaking
+# changes, unrelated to the Dependabot/CVE pin bumps this lock update is for.
+# Bump it in its own PR, migration-guide-checked, not as a side effect of a
+# routine recompile.
+anthropic>=1.0.0,<2.0.0
 
 # pip itself, locked with hashes like everything else. The python:3.12-slim image
 # bundles pip 25.0.1, which has five published advisories (fixed by 26.2.1). The
