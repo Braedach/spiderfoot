@@ -75,8 +75,13 @@ class TestLoadModulesPipeline(unittest.TestCase):
         cls.modules = cls.sf.opts.get("__modules__", {})
 
     def test_modules_loaded(self):
-        """loadModules() must load 300+ modules."""
-        self.assertGreaterEqual(len(self.modules), 300,
+        """loadModules() must load 290+ modules.
+
+        Was 300 pre-cleanup (2026-11); lowered after removing 11 dead/
+        superseded modules - see test_event_catalog_fk.py's
+        test_modules_loaded and that PR's description for the full list.
+        """
+        self.assertGreaterEqual(len(self.modules), 290,
                                 f"Only {len(self.modules)} modules loaded")
 
     def test_modules_have_handleEvent(self):
