@@ -144,3 +144,64 @@ class TestModernPluginAsDict(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEventFailureHandling(unittest.TestCase):
+    """One failing event must not switch a module off, and every failure must reach the scan log."""
+
+    def _module(self):
+        m = FakeModule()
+        m.errors = []
+        m.error = m.errors.append                 # SpiderFootPlugin.error() adds the scanId the scan log needs
+        m._enable_metrics = True
+        return m
+
+    def _event(self, etype="IP_ADDRESS"):
+        ev = MagicMock()
+        ev.eventType = etype
+        return ev
+
+    def test_a_single_failure_is_recorded_and_the_module_keeps_running(self):
+        m = self._module()
+        m._handle_event_exception(KeyError("hosts"), self._event("SSL_CERTIFICATE_RAW"))
+        self.assertFalse(m.errorState)
+        self.assertEqual(len(m.errors), 1)
+        self.assertIn("sfp_test failed on a SSL_CERTIFICATE_RAW event: KeyError", m.errors[0])
+        self.assertIn("hosts", m.errors[0])
+
+    def test_repeated_failures_switch_the_module_off_with_a_message(self):
+        m = self._module()
+        for _ in range(SpiderFootModernPlugin.MAX_EVENT_FAILURES - 1):
+            m._handle_event_exception(ValueError("x"), self._event())
+        self.assertFalse(m.errorState)
+        m._handle_event_exception(ValueError("x"), self._event())
+        self.assertTrue(m.errorState)
+        self.assertIn("switched off for the rest of this scan", m.errors[-1])
+
+    def test_the_worker_loop_survives_a_failing_event(self):
+        import queue
+        m = self._module()
+        handled = []
+
+        def handle(event):
+            if event.data == "bad":
+                raise AttributeError("'NoneType' object has no attribute 'lower'")
+            handled.append(event.data)
+
+        m.handleEvent = handle
+        m.incomingEventQueue = queue.Queue()
+        stop = {"n": 0}
+
+        def check_for_stop():
+            stop["n"] += 1
+            return stop["n"] > 4
+
+        m.checkForStop = check_for_stop
+        for data in ("good1", "bad", "good2"):
+            ev = self._event()
+            ev.data = data
+            m.incomingEventQueue.put(ev)
+        m.threadWorker()
+        self.assertEqual(handled, ["good1", "good2"])         # the event after the failure was still handled
+        self.assertFalse(m.errorState)
+        self.assertEqual(len(m.errors), 1)

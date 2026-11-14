@@ -158,8 +158,10 @@ class sfp_sslcert(SpiderFootAsyncPlugin):
             self.notifyListeners(evt)
 
         if eventName != "IP_ADDRESS" and cert.get('mismatch'):
-            evt = SpiderFootEvent('SSL_CERTIFICATE_MISMATCH', ', '.join(
-                cert.get('hosts')), self.__name__, event)
+            # The names the certificate is valid for. An event cannot have empty data, so a certificate that lists none
+            # (rare, but it crashed the module) is reported as such.
+            hosts = ', '.join(cert.get('hosts') or []) or f"the certificate lists no host names (served for {fqdn})"
+            evt = SpiderFootEvent('SSL_CERTIFICATE_MISMATCH', hosts, self.__name__, event)
             self.notifyListeners(evt)
 
         for san in set(cert.get('altnames', list())):

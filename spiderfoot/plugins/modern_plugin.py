@@ -499,13 +499,33 @@ class SpiderFootModernPlugin(SpiderFootPlugin):
                 self.handleEvent(sfEvent)
                 self._record_module_duration(time.monotonic() - t0)
             except Exception as e:
-                self.log.error("Module %s failed: %s", self.__name__, e)
-                self._record_module_error(type(e).__name__)
-                self.errorState = True
+                self._handle_event_exception(e, sfEvent)
             finally:
                 self._busy = False
 
             self.incomingEventQueue.task_done()
+
+    # A module that raises on this many events is switched off for the rest of the scan.
+    MAX_EVENT_FAILURES = 5
+
+    def _handle_event_exception(self, exc: Exception, event: Any) -> None:
+        """Record an exception raised by handleEvent, and keep the module running unless it keeps failing.
+
+        Before, the first exception was written only to the worker log and switched the module off for the whole
+        scan. One unusual event (a certificate with no host list, a header in a different case) silently disabled
+        sfp_sslcert, sfp_cloudfront and sfp_subfinder, and nothing in the scan's own error list said so. Now every
+        failure is written to the scan log with its exception type and message (the traceback goes to the worker
+        log), and the module is disabled only after MAX_EVENT_FAILURES of them, with a message saying so.
+        """
+        self._event_failures = getattr(self, "_event_failures", 0) + 1
+        etype = getattr(event, "eventType", "?")
+        self.error(f"Module {self.__name__} failed on a {etype} event: {type(exc).__name__}: {exc}")
+        self.log.debug("Traceback for the failure in module %s", self.__name__, exc_info=True)
+        self._record_module_error(type(exc).__name__)
+        if self._event_failures >= self.MAX_EVENT_FAILURES:
+            self.error(f"Module {self.__name__} is switched off for the rest of this scan after "
+                       f"{self._event_failures} failures")
+            self.errorState = True
 
     # ------------------------------------------------------------------
     # Module info
