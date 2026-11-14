@@ -129,6 +129,12 @@ class sfp_keybase(SpiderFootAsyncPlugin):
 
         code = status.get('code')
 
+        if code == 100:
+            # Keybase's "input error": the name is not a valid Keybase username/selector. Expected for most
+            # of the arbitrary names this module is asked about, so not an error.
+            self.debug(f"Keybase rejected {qry!r} as an invalid lookup")
+            return None
+
         if code != 0:
             self.error(
                 f"Unexpected JSON response code reply from Keybase: {code}")

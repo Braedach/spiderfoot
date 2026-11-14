@@ -68,3 +68,15 @@ class TestAPILLeak(TestModuleBase):
         event = SpiderFootEvent("DOMAIN_NAME", "example.com", "tester", None)
         self.module.handleEvent(event)
         self.module.notifyListeners.assert_not_called()
+
+    @patch("requests.get")
+    def test_missing_token_is_reported_once_not_per_event(self, mock_get):
+        """The error fired for every event (340 times in one scan)."""
+        self.module.setup(self.sf_instance, {"github_token": ""})
+        self.module.notifyListeners = MagicMock()
+        errors = []
+        self.module.error = lambda m, *a, **k: errors.append(m)
+        for host in ("a.example.com", "b.example.com", "c.example.com"):
+            self.module.handleEvent(SpiderFootEvent("DOMAIN_NAME", host, "tester", None))
+        self.assertEqual(len(errors), 1)
+        self.assertTrue(self.module.errorState)

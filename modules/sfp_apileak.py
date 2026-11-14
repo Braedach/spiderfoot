@@ -78,6 +78,7 @@ class sfp_apileak(SpiderFootAsyncPlugin):
         token = self.opts.get('github_token', '').strip()
         if not token:
             self.error("GitHub API token is not set. Please configure the github_token option.")
+            self.errorState = True  # once, not once per event
             return
         headers = {"Authorization": f"token {token}"}
         url = f"https://api.github.com/search/code?q={query}&per_page={self.opts['max_results']}"

@@ -37,6 +37,20 @@ class TestModulewikipediaedits(TestModuleBase):
         if hasattr(self, 'module'):
             self.register_event_emitter(self.module)
 
+    def test_query_unescapes_links_without_error(self):
+        """HTMLParser.unescape was removed in Python 3.9; every response raised AttributeError."""
+        sf = SpiderFoot(self.default_options)
+        module = sfp_wikipediaedits()
+        module.setup(sf, {'_fetchtimeout': 5})
+        module.fetch_url = lambda *a, **k: {
+            'code': '200',
+            'content': "<link>https://en.wikipedia.org/wiki/A&amp;B</link>\n<link>Special:Contributions/x</link>",
+        }
+        errors = []
+        module.error = lambda m, *a, **k: errors.append(m)
+        self.assertEqual(module.query('someone'), {'https://en.wikipedia.org/wiki/A&B'})
+        self.assertEqual(errors, [])
+
     def tearDown(self):
         """Clean up after each test."""
         super().tearDown()
