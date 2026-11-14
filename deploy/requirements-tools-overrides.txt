@@ -7,3 +7,10 @@
 # against a local TLS server in the built image (see deploy/README.md). Revisit, and delete
 # this file, once sslyze lifts the cap.
 cryptography>=50.0.2,<51.0.0
+
+# soupsieve: maigret 0.6.6 declares soupsieve<3.0, which holds the tools venv at 2.10 (two HIGH findings, CVE-2026-126190
+# and CVE-2026-126191, fixed only in 4.0.0 and 3.0.2). maigret does not import soupsieve itself: it reaches it through
+# beautifulsoup4, which accepts any soupsieve >= 1.6.1, and the application venv already runs soupsieve 4.0.1 with
+# beautifulsoup4. 4.0.1 is under the 14-day cool-down (published 2026-11-04): a named exception for a security fix, as
+# for the application venv (see deploy/README.md "Supply-chain policy"). Delete this block when maigret lifts the cap.
+soupsieve==4.0.1

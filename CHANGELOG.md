@@ -8,6 +8,30 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Fork-specific changes since 6.1.0, shipped as release candidates. The per-build record and the build and deploy
 procedure are in [`deploy/README.md`](deploy/README.md).
 
+### Fixed (rc.38)
+- **nuclei had never run in this stack.** It looked for its templates in its home directory, found none and exited at
+  once, and the module reported "0 findings" and hid the error. It now gets the image's pinned templates, runs a
+  cheap baseline pass (the `ssl` tag: expired certificates, weak ciphers) and an automatic technology-matched pass, scans
+  each host or web origin once instead of every discovered URL, keeps findings printed before a timeout and reports a
+  fatal error. Verified in the live worker against the authorised test host.
+- **Three modules crashed on their first or an unusual event and were silently switched off for the whole scan:**
+  `sfp_subfinder` read an attribute that does not exist (it never ran), `sfp_sslcert` crashed on every certificate
+  mismatch because `parseCert` never returned the host list, and `sfp_cloudfront` read a header with the wrong case.
+  Fixed, and a module failure is now written to the scan's error list with its message; a module is switched off only
+  after 5 failures, not the first.
+- **WHOIS throttling:** `sfp_whois` looks domains up over RDAP first (structured, and a busy server says so); port-43
+  WHOIS is the fallback. Over 200 throttled answers in two scans had been discarded.
+- **13 modules whose service is gone are marked deprecated** (`sfp_sublist3r`, `sfp_duckduckgo`, `sfp_bgpview`, `sfp_sorbs`,
+  `sfp_zonefiles`, `sfp_onionsearchengine`, `sfp_callername`, `sfp_trumail`, `sfp_searchcode`, `sfp_twitter`, `sfp_threatminer`,
+  `sfp_tool_wappalyzer`, `sfp_tool_phoneinfoga`), so nothing selects them; each was checked against its real service.
+
+### Added (rc.38)
+- **`sfp_tool_maigret`**: looks a username up on up to 5,900 sites and reports the profiles that exist and the details they publish.
+- **`sfp_tool_user_scanner`**: checks which of about 200 sites an email address is registered on, and the username a site
+  attaches to it. Sites whose check could send the owner a notification are skipped unless asked for.
+- Both act only in scans about a person (a name, email address, username or phone number), never on staff details found
+  on a company website, unless the user turns that restriction off. The tools venv grows by about 250 MB (69 packages).
+
 ### Breaking (rc.35)
 - Needs the updated stack file (`deploy/stack-podman.yml` 2.16.0, `deploy/stack-docker.yml` 2.6.0): it adds the
   `sf-tor` service. Changing only the image tag leaves Tor reported as "not working".

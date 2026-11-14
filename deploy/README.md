@@ -233,8 +233,10 @@ were structural, so the fixes are rules, not one-off patches:
   `pypdf` 6.21.2 (high), and on 2026-10-28 `dnspython` 2.9.0 in both locks
   (high — DoS via DNS compression pointer traversal, CVE-2026-114605), on 2026-11-14
   `soupsieve` 4.0.1 (high — polynomial-time DoS in selector parsing, fixed in 4.0, which
-  was 10 days old; bs4 CSS selection re-verified against it), plus the
-  `cryptography` override in the tools lock. Each is an `--exclude-newer-package`
+  was 10 days old; bs4 CSS selection re-verified against it) in the application lock and, the same
+  day, in the tools lock (maigret declares `soupsieve<3.0`, which held it at 2.10 with two high
+  findings; maigret does not import soupsieve, it reaches it through beautifulsoup4, and both tools were run
+  against 4.0.1), plus the `cryptography` override in the tools lock. Each is an `--exclude-newer-package`
   date in the compile command below, and must pass the scan gate. Move them back
   under the 14-day rule at the next rebuild — **do a plain recompile without
   reapplying every exception's date first** and only re-add the ones the gate
@@ -276,6 +278,13 @@ and checksum-verified; Python tools live in their own hash-locked venv.
   one, raise the floor to the first fixed release (at least 14 days old, or a named
   exception). gowitness is built from a checkout (its `go.mod` has `replace`
   directives); gau is pinned to a commit.
+- **Identity tools** (Python, in the tools venv): `maigret` (username search on about 5,900 sites) and
+  `user-scanner` (email registrations on about 200 sites), added 2026-11-14 with 69 dependencies; the tools venv
+  grew from about 60 MB to about 310 MB. Both are pinned exactly (they release every one to two weeks). Their
+  modules run them with no update check (maigret `--no-autoupdate`, user-scanner's own settings file), no
+  recursion, no AI report, no cross-scan pivoting, and only in scans about a person. Before the build the lock was
+  installed with `--require-hashes` into a clean venv and scanned with the gate's own Trivy in `rootfs` mode
+  (`fs` mode does not read installed packages and reports nothing): clean after the soupsieve exception.
 - **Removed:** amass (own dependencies carry 2 critical / 48 high; v5 is a different
   architecture; subfinder + dnsx cover it), gospider and hakrawler (katana),
   waybackurls (gau), LinkFinder (katana `-jc`), CMSeeK (whatweb, httpx), retire.js
