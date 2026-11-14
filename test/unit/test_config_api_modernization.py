@@ -344,8 +344,18 @@ class TestSaveReload:
         cfg = _make_config()
         mock_db = MagicMock()
         mock_db_cls.return_value = mock_db
+        cfg.set_config_option('_debug', True)
         cfg.save_config()
         mock_db.configSet.assert_called_once()
+        assert list(mock_db.configSet.call_args[0][0]) == ['_debug']
+
+    @patch('spiderfoot.api.dependencies.SpiderFootDb')
+    def test_save_config_with_no_changes_writes_nothing(self, mock_db_cls):
+        cfg = _make_config()
+        mock_db = MagicMock()
+        mock_db_cls.return_value = mock_db
+        cfg.save_config()
+        mock_db.configSet.assert_not_called()
 
     @patch('spiderfoot.api.dependencies.SpiderFootDb')
     def test_save_config_handles_failure(self, mock_db_cls):

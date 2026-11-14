@@ -147,7 +147,8 @@ const APP_VERSION = '6.0.1';
 export default function Layout() {
   const [showAbout, setShowAbout] = useState(false);
   const [servicesOpen, setServicesOpen] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Open by default on a wide screen; on a narrow one it would cover the page on every load.
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 1024);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(loadCollapsed);
   const location = useLocation();
   const { user, isAuthenticated, logout, hasPermission } = useAuthStore();
