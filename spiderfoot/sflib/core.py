@@ -75,9 +75,8 @@ class SpiderFoot:
         self._ssl_context = self._scan_ssl_context
 
         if self.opts.get('_dnsserver', "") != "":
-            res = dns.resolver.Resolver()
-            res.nameservers = [self.opts['_dnsserver']]
-            dns.resolver.override_system_resolver(res)
+            from spiderfoot.sflib.dns_override import install_external_resolver
+            install_external_resolver(self.opts['_dnsserver'])
 
     @property
     def dbh(self) -> SpiderFootDb | None:

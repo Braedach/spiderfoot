@@ -263,9 +263,8 @@ class SpiderFootScanner():
         # Improved exception handling for DNS override
         try:
             if self.__config['_dnsserver']:
-                res = dns.resolver.Resolver()
-                res.nameservers = [self.__config['_dnsserver']]
-                dns.resolver.override_system_resolver(res)
+                from spiderfoot.sflib.dns_override import install_external_resolver
+                install_external_resolver(self.__config['_dnsserver'])
             else:
                 dns.resolver.restore_system_resolver()
         except Exception as e:
