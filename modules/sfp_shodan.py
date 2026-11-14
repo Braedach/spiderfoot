@@ -103,6 +103,23 @@ class sfp_shodan(SpiderFootAsyncPlugin):
             "SOFTWARE_USED",
         ]
 
+    @staticmethod
+    def _is_not_found(message) -> bool:
+        """True for Shodan's normal "we hold nothing on this one" answer."""
+        return "no information available" in str(message).lower()
+
+    def _report_shodan_error(self, message, qry: str) -> None:
+        """Log an error answer from Shodan.
+
+        "No information available for that IP." is the ordinary reply for an address Shodan has never indexed
+        or has removed, so it is not a failure: one scan of a single address logged it 1,150 times as errors,
+        85% of the scan's error count. Every other error answer is still an error.
+        """
+        if self._is_not_found(message):
+            self.debug(f"SHODAN holds no information on {qry}")
+            return
+        self.error(f"Error returned from SHODAN: {message}")
+
     def queryHost(self, qry: str) -> dict | None:
         """Query Host."""
         res = self.fetch_url(
@@ -125,7 +142,7 @@ class sfp_shodan(SpiderFootAsyncPlugin):
         try:
             r = json.loads(res['content'])
             if "error" in r:
-                self.error(f"Error returned from SHODAN: {r['error']}")
+                self._report_shodan_error(r["error"], qry)
                 return None
             return r
         except Exception as e:
@@ -161,7 +178,7 @@ class sfp_shodan(SpiderFootAsyncPlugin):
         try:
             r = json.loads(res['content'])
             if "error" in r:
-                self.error(f"Error returned from SHODAN: {r['error']}")
+                self._report_shodan_error(r["error"], qry)
                 return None
             return r
         except Exception as e:
@@ -197,7 +214,7 @@ class sfp_shodan(SpiderFootAsyncPlugin):
         try:
             r = json.loads(res['content'])
             if "error" in r:
-                self.error(f"Error returned from SHODAN: {r['error']}")
+                self._report_shodan_error(r["error"], qry)
                 return None
             if r.get('total', 0) == 0:
                 self.info(f"No SHODAN info found for {qry}")
