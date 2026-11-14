@@ -10,7 +10,7 @@ import {
   Radar, Lock, Unlock, Zap,
   ShieldCheck, FileText, Loader2, Layers, Shield, Info,
 } from 'lucide-react';
-import { PageHeader, Tabs, SearchInput, Toast, useDebounce, type ToastType } from '../components/ui';
+import { PageHeader, Tabs, SearchInput, Toast, InfoNote, useDebounce, type ToastType } from '../components/ui';
 import { moduleCredentialStatus } from '../lib/settingsMeta';
 
 type TabKey = 'usecase' | 'profile' | 'data' | 'module';
@@ -310,6 +310,11 @@ export default function NewScanPage() {
       {/* Module Selection */}
       <div className="card animate-fade-in-up" style={{ animationDelay: '100ms' }}>
         <label className="section-label mb-4 block">Module Selection</label>
+
+        <InfoNote className="mb-4" title="Scans stay in scope">
+          <p>Discovery modules report whatever they find, including third-party hosts. Active modules (port scans, web and TLS probes, fuzzers) only act on the target itself: addresses that belong to someone else, such as shared CDN infrastructure, are listed in the results but never probed.</p>
+          <p>Modules that need an API key are skipped for that service until a key is saved on the Modules page.</p>
+        </InfoNote>
 
         <Tabs<TabKey>
           tabs={[

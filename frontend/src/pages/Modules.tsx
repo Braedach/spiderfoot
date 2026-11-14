@@ -1,5 +1,4 @@
 import { useState, useMemo } from 'react';
-import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { dataApi, type Module } from '../lib/api';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
@@ -8,9 +7,10 @@ import {
   ChevronDown, ChevronRight, Shield,
 } from 'lucide-react';
 import {
-  PageHeader, SearchInput, StatCard, EmptyState, TableSkeleton,
+  PageHeader, SearchInput, StatCard, EmptyState, TableSkeleton, Toast, InfoNote, type ToastType,
 } from '../components/ui';
-import { moduleHasCredential, moduleCredentialStatus, isCredentialOption } from '../lib/settingsMeta';
+import ModuleOptionsEditor from '../components/ModuleOptionsEditor';
+import { moduleHasCredential, moduleCredentialStatus } from '../lib/settingsMeta';
 
 type FilterKey = 'all' | 'needs_credential' | 'credential_missing';
 
@@ -19,6 +19,7 @@ export default function ModulesPage() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterKey>('all');
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ type: ToastType; message: string } | null>(null);
 
   const { data: modulesData, isLoading } = useQuery({
     queryKey: ['modules', { page: 1, page_size: 500 }],
@@ -73,7 +74,15 @@ export default function ModulesPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Modules" subtitle={`${modules.length} data collection modules — reference only; enable/disable and credentials are managed elsewhere`} />
+      <PageHeader title="Modules" subtitle={`${modules.length} data collection modules. Open one to edit its options and API key`} />
+
+      <InfoNote title="What modules are" className="mb-4">
+        <p>Each module collects one kind of information (DNS, certificates, breach data, web content, port scans and so on). A scan runs the modules you pick, and each one reacts to what the others find.</p>
+        <p>
+          <strong className="text-dark-100">Options</strong> tune how a module behaves.{' '}
+          <strong className="text-dark-100">API keys</strong> unlock modules that query a third-party service; a module marked &quot;needs a key&quot; skips that service until one is saved here. Keys are stored encrypted.
+        </p>
+      </InfoNote>
 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
@@ -189,32 +198,7 @@ export default function ModulesPage() {
                                 </div>
                               </div>
                             )}
-                            {credStatus !== 'none' && (
-                              <div className="sm:col-span-2">
-                                <Link
-                                  to="/credentials"
-                                  className="flex items-center gap-1.5 text-xs text-spider-400 hover:text-spider-300 transition-colors w-fit"
-                                >
-                                  <KeyRound className="h-3 w-3" />
-                                  This module needs an API key — set it on Data Source Credentials
-                                </Link>
-                              </div>
-                            )}
-                            {m.opts && Object.keys(m.opts).filter((k) => !isCredentialOption(k)).length > 0 && (
-                              <div className="sm:col-span-2">
-                                <p className="text-xs text-dark-500 mb-2">
-                                  Options ({Object.keys(m.opts).filter((k) => !isCredentialOption(k)).length})
-                                </p>
-                                <div className="space-y-1 max-h-40 overflow-y-auto">
-                                  {Object.entries(m.opts).filter(([k]) => !isCredentialOption(k)).map(([k, v]) => (
-                                    <div key={k} className="flex items-center justify-between text-xs">
-                                      <span className="text-dark-400 font-mono">{k}</span>
-                                      <span className="text-dark-500">{m.optdescs?.[k]?.slice(0, 60) || String(v ?? '')}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
+                            <ModuleOptionsEditor module={m} onResult={(type, message) => setToast({ type, message })} />
                           </div>
                         </div>
                       )}
@@ -234,6 +218,8 @@ export default function ModulesPage() {
           />
         </div>
       )}
+
+      {toast && <Toast type={toast.type} message={toast.message} onClose={() => setToast(null)} />}
     </div>
   );
 }
