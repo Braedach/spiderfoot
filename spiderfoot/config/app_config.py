@@ -125,11 +125,15 @@ class NetworkConfig:
         "https://publicsuffix.org/list/effective_tld_names.dat"
     )
     internet_tlds_cache_hours: int = 72
-    proxy_type: str = ""       # '', '4', '5', 'HTTP', 'TOR'
+    proxy_type: str = ""       # '', '4', '5', 'HTTP' ('TOR' still accepted, treated as SOCKS5)
     proxy_host: str = ""
     proxy_port: str = ""
     proxy_user: str = ""
     proxy_pass: str = ""
+    # Tor: separate from the proxy above, used only for .onion addresses (spiderfoot/sflib/proxy.py).
+    tor_enabled: bool = True
+    tor_host: str = "sf-tor"
+    tor_port: int = 9050
 
 
 @dataclass
@@ -315,6 +319,9 @@ _KEY_TO_FIELD: dict[str, tuple[str, str]] = {
     "_socks3port": ("network", "proxy_port"),
     "_socks4user": ("network", "proxy_user"),
     "_socks5pwd": ("network", "proxy_pass"),
+    "_tor_enabled": ("network", "tor_enabled"),
+    "_tor_host": ("network", "tor_host"),
+    "_tor_port": ("network", "tor_port"),
 
     # Database
     "__database": ("database", "db_path"),
@@ -446,6 +453,9 @@ _ENV_TO_KEY: dict[str, str] = {
     "SF_SOCKS_PORT": "_socks3port",
     "SF_SOCKS_USER": "_socks4user",
     "SF_SOCKS_PASS": "_socks5pwd",
+    "SF_TOR_ENABLED": "_tor_enabled",
+    "SF_TOR_HOST": "_tor_host",
+    "SF_TOR_PORT": "_tor_port",
     "SF_DNS_SERVER": "_dnsserver",
     "SF_DNS_TIMEOUT": "_dnstimeout",
     "SF_WEB_HOST": "_webhost",
@@ -565,12 +575,18 @@ FIELD_DESCRIPTIONS: dict[str, str] = {
         "List of usernames that if found as usernames or as part of "
         "e-mail addresses, should be treated differently to non-generics."
     ),
-    "_socks1type": "SOCKS Server Type. Can be '4', '5', 'HTTP' or 'TOR'",
-    "_socks2addr": "SOCKS Server IP Address.",
-    "_socks3port": (
-        "SOCKS Server TCP Port. Usually 1080 for 4/5, 8080 for HTTP "
-        "and 9050 for TOR."
+    "_socks1type": (
+        "General outbound proxy type: '4' (SOCKS4), '5' (SOCKS5) or 'HTTP'. Leave empty for a "
+        "direct connection. Tor has its own setting and is not configured here."
     ),
+    "_socks2addr": "General outbound proxy host name or IP address.",
+    "_socks3port": "General outbound proxy TCP port. Usually 1080 for SOCKS, 8080 for HTTP.",
+    "_tor_enabled": (
+        "Use Tor for .onion addresses. Only dark-web modules fetch .onion addresses; all other "
+        "requests never go through Tor."
+    ),
+    "_tor_host": "Tor SOCKS host. The sf-tor service of the deploy stack by default.",
+    "_tor_port": "Tor SOCKS port. 9050 by default.",
     "_socks4user": "SOCKS Username. Valid only for SOCKS4 and SOCKS5 servers.",
     "_socks5pwd": "SOCKS Password. Valid only for SOCKS5 servers.",
     "_modulesenabled": "Modules enabled for the scan.",
@@ -914,6 +930,12 @@ class AppConfig:
             errors.append(ValidationError(
                 "_socks2addr",
                 "Proxy host is required when proxy type is set",
+            ))
+        if self.network.tor_enabled and not (0 < int(self.network.tor_port or 0) < 65536):
+            errors.append(ValidationError(
+                "_tor_port",
+                "Must be a port between 1 and 65535 when Tor is enabled",
+                self.network.tor_port,
             ))
         if self.network.internet_tlds_cache_hours < 0:
             errors.append(ValidationError(

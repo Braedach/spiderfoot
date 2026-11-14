@@ -79,6 +79,12 @@ class ConfigManager:
         '_socks3port': '',
         '_socks4user': '',
         '_socks5pwd': '',
+        # Tor is a separate setting from the general proxy above and is used only for .onion
+        # addresses (see spiderfoot/sflib/proxy.py). The defaults match the sf-tor service in
+        # the deploy stacks, so dark-web modules work out of the box.
+        '_tor_enabled': True,
+        '_tor_host': 'sf-tor',
+        '_tor_port': 9050,
         '_strict_scope': True,
     }
 
@@ -110,11 +116,20 @@ class ConfigManager:
             "List of usernames that if found as usernames or as part of e-mail addresses,"
             " should be treated differently to non-generics."
         ),
-        '_socks1type': "SOCKS Server Type. Can be '4', '5', 'HTTP' or 'TOR'",
-        '_socks2addr': 'SOCKS Server IP Address.',
-        '_socks3port': 'SOCKS Server TCP Port. Usually 1080 for 4/5, 8080 for HTTP and 9050 for TOR.',
+        '_socks1type': (
+            "General outbound proxy type: '4' (SOCKS4), '5' (SOCKS5) or 'HTTP'. Leave empty for a direct"
+            " connection. Tor has its own setting and is not configured here."
+        ),
+        '_socks2addr': 'General outbound proxy host name or IP address.',
+        '_socks3port': 'General outbound proxy TCP port. Usually 1080 for SOCKS, 8080 for HTTP.',
         '_socks4user': 'SOCKS Username. Valid only for SOCKS4 and SOCKS5 servers.',
         '_socks5pwd': "SOCKS Password. Valid only for SOCKS5 servers.",
+        '_tor_enabled': (
+            "Use Tor for .onion addresses. Only dark-web modules fetch .onion addresses; all other"
+            " requests never go through Tor."
+        ),
+        '_tor_host': "Tor SOCKS host. The sf-tor service of the deploy stack by default.",
+        '_tor_port': "Tor SOCKS port. 9050 by default.",
         '_modulesenabled': "Modules enabled for the scan.",
         '_strict_scope': (
             "Block events from reaching invasive tool modules (port scanners, web/TLS"

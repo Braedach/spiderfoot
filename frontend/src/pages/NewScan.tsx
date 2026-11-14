@@ -16,7 +16,7 @@ import { moduleCredentialStatus } from '../lib/settingsMeta';
 type TabKey = 'usecase' | 'profile' | 'data' | 'module';
 
 const USE_CASES = [
-  { key: 'all', label: 'All Modules', desc: 'Run every available module for maximum coverage' },
+  { key: 'all', label: 'All Modules', desc: 'Every reliable module, including active tools and dark-web searches (error-prone and retired modules are left out)' },
   { key: 'quick', label: 'Quick Scan', desc: 'Fast scan with essential passive modules (~20 modules)' },
   { key: 'footprint', label: 'Footprint', desc: 'Discover the target\'s full digital footprint' },
   { key: 'investigate', label: 'Investigate', desc: 'Deep dive into a specific target' },
@@ -185,8 +185,10 @@ export default function NewScanPage() {
       payload.type_filter = [...selectedTypes];
     } else if (tab === 'usecase' && useCase === 'quick') {
       payload.modules = QUICK_SCAN_MODULES;
+      payload.selection = 'Use case: Quick Scan';
     } else if (tab === 'usecase' && useCase !== 'all') {
       payload.modules = effectiveModules;
+      payload.selection = `Use case: ${USE_CASES.find((u) => u.key === useCase)?.label ?? useCase}`;
     }
     // When useCase === 'all' or no selection, send no modules/type_filter → server uses all modules
     if (stealthLevel !== 'none') {
@@ -408,7 +410,7 @@ export default function NewScanPage() {
           {tab === 'data' && (
             <div className="animate-fade-in">
               <p className="text-sm text-dark-400 mb-3">
-                Select the types of data you want to collect. Modules that produce this data will be enabled.
+                Select the types of data you want to collect. The scan runs the modules that produce this data, plus the modules that feed them the input they need, so the final module count is larger than the number shown here.
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[400px] overflow-y-auto pr-2">
                 {entityTypes.map((et) => (

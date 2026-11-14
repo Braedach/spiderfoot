@@ -382,10 +382,13 @@ def fetchUrl(
     sizeLimit: int | None = None, headOnly: bool = False,
     verify: bool = True,
     stealth_engine: object | None = None,
+    opts: dict | None = None,
 ) -> dict:
     """Fetch content from a URL and return response details.
 
     Args:
+        opts: Scan options. When given, the general proxy and the Tor setting are applied
+            (see :mod:`spiderfoot.sflib.proxy`); ``.onion`` addresses only ever go through Tor.
         stealth_engine: Optional :class:`~spiderfoot.recon.stealth_engine.StealthEngine`
             instance.  When provided, the engine applies request jitter,
             randomised headers, and proxy rotation transparently before
@@ -435,6 +438,16 @@ def fetchUrl(
             # Fall through — make the request without stealth rather
             # than silently aborting the fetch.
     # ──────────────────────────────────────────────────────────────────
+
+    from .proxy import is_onion, proxies_for_url
+    configured, proxy_error = proxies_for_url(url, opts)
+    if proxy_error:
+        log.debug("Not fetching %s: %s", url, proxy_error)
+        result['status'] = proxy_error
+        return result
+    if configured and (is_onion(url) or not proxies):
+        # A stealth proxy chain may replace the general proxy, never Tor for an .onion address.
+        proxies = configured
 
     session = getSession()
     try:

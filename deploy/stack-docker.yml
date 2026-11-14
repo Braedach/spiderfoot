@@ -1,6 +1,6 @@
 # =============================================================================
 # deploy/stack-docker.yml
-# Version: 2.5.0
+# Version: 2.6.0
 # Created: 2026-10-23
 # Updated: 2026-11-14
 #
@@ -57,6 +57,8 @@
 #       isolated for testing.
 #
 # Changelog:
+#   2.6.0 (2026-11-14) - Mirrors stack-podman.yml 2.16.0: new service sf-tor (Tor client, no published port), used only for .onion addresses.
+#     Needs images v6.1.0-bd.1-rc.35 or later.
 #   2.5.0 (2026-11-14) - Mirrors stack-podman.yml 2.15.0: api and Celery workers share the persistent embeddings-cache with sf-agents
 #     (chown -R 1000:1000 /srv/spiderfoot/embeddings-cache first; they run non-root). No HuggingFace key is needed.
 #   2.4.0 (2026-11-14) - Mirrors stack-podman.yml 2.14.0: sf-api and both Celery workers get SF_EMBEDDING_PROVIDER/MODEL/DIMENSIONS=fastembed,
@@ -446,6 +448,52 @@ services:
       - com.docker.compose.service=sf-juiceshop
     ports:
       - 5002:3000
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - spiderfoot-net
+
+  # Tor client for the dark-web modules. Used ONLY to reach .onion addresses (Settings > Tor); ordinary
+  # requests never pass through it. It is on by default: it builds Tor circuits from this host as soon as
+  # it starts, whether or not a dark-web scan runs, so an IDS/IPS may flag Tor traffic. Remove this service
+  # (and turn off "Use Tor" in Settings) if you do not want that. No port is published: only containers on
+  # spiderfoot-net can use it. Circuit state lives in tmpfs and is rebuilt on every start.
+  # A site that must leave through a proxy adds e.g. "--HTTPSProxy", "proxy.example:3128" to the command.
+  sf-tor:
+    image: ghcr.io/braedach/spiderfoot-base:${SPIDERFOOT_TAG:?set SPIDERFOOT_TAG to an exact published tag, e.g. v6.1.0-bd.1}
+    container_name: sf-tor
+    hostname: sf-tor
+    restart: always
+    entrypoint: ["tor"]
+    command:
+      - "--SocksPort"
+      - "0.0.0.0:9050"
+      - "--SocksPolicy"
+      - "accept 10.0.0.0/8,accept 172.16.0.0/12,accept 192.168.0.0/16,reject *"
+      - "--DataDirectory"
+      - "/tmp/tor"
+      - "--ClientOnly"
+      - "1"
+      - "--RunAsDaemon"
+      - "0"
+      - "--Log"
+      - "notice stdout"
+    labels:
+      - com.docker.compose.project=spiderfoot
+      - com.docker.compose.service=sf-tor
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      - TZ=${TZ}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; s=socket.create_connection(('127.0.0.1',9050),3); s.sendall(bytes([5,1,0])); assert s.recv(2)==bytes([5,0])"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     security_opt:
       - no-new-privileges:true
     cap_drop:

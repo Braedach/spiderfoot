@@ -158,6 +158,8 @@ export interface ScanCreateRequest {
   type_filter?: string[];
   engine?: string;
   profile?: string;
+  /** How the module list was chosen; recorded with the scan and shown in Scan Settings. */
+  selection?: string;
   stealth_level?: StealthLevelName;
 }
 
@@ -587,6 +589,7 @@ export const workspaceApi = {
 // ── Health API ────────────────────────────────────────────────
 export interface HealthComponent {
   status: string;
+  message?: string;
   latency_ms?: number;
   [key: string]: unknown;
 }

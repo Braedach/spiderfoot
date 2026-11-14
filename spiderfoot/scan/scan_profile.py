@@ -432,15 +432,10 @@ class ProfileManager:
             display_name="Dark Web Scan",
             description=(
                 "Search dark web / Tor hidden services for mentions "
-                "of the target. Requires Tor proxy configuration."
+                "of the target. Uses the Tor setting (Settings > Tor)."
             ),
             category=ProfileCategory.DARKWEB,
             include_flags=["tor"],
-            option_overrides={
-                "_socks1type": "TOR",
-                "_socks2addr": "127.0.0.1",
-                "_socks3port": "9050",
-            },
             max_threads=2,
             tags=["darkweb", "tor", "deep-web"],
         ))

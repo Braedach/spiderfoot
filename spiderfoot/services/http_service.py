@@ -18,6 +18,8 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Any
 
+from spiderfoot.sflib.proxy import as_bool, general_proxy_url, proxies_for_url
+
 try:
     import requests
     HAS_REQUESTS = True
@@ -60,6 +62,9 @@ class HttpServiceConfig:
     proxy_username: str = ""
     proxy_password: str = ""
     proxy_dns: bool = True
+    tor_enabled: bool = False
+    tor_host: str = ""
+    tor_port: int = 0
     user_agent: str = "SpiderFoot"
     timeout: int = 30
     ssl_verify: bool = True
@@ -83,6 +88,9 @@ class HttpServiceConfig:
             proxy_username=opts.get("_socks4user", "") or "",
             proxy_password=opts.get("_socks5pwd", "") or "",
             proxy_dns=opts.get("_socks6dns", True),
+            tor_enabled=as_bool(opts.get("_tor_enabled", False)),
+            tor_host=str(opts.get("_tor_host") or ""),
+            tor_port=int(opts.get("_tor_port") or 0) if str(opts.get("_tor_port") or "").isdigit() else 0,
             timeout=int(opts.get("_fetchtimeout") or 30),
             size_limit=int(opts.get("_fetchsizelimit") or 10_000_000),
             google_api_key=opts.get("_googlecseapi", "") or "",
@@ -166,29 +174,19 @@ class HttpService:
 
         return True
 
-    def _get_proxy_dict(self) -> dict[str, str]:
-        """Build the proxy dict for requests.
-
-        Returns:
-            Proxy configuration dict for requests library
-        """
-        if not self.config.proxy_type:
-            return {}
-
-        proxy_type = self.config.proxy_type.lower()
-        auth = ""
-        if self.config.proxy_username:
-            auth = f"{self.config.proxy_username}"
-            if self.config.proxy_password:
-                auth += f":{self.config.proxy_password}"
-            auth += "@"
-
-        proxy_url = f"{proxy_type}://{auth}{self.config.proxy_host}:{self.config.proxy_port}"
-
+    def _proxy_opts(self) -> dict[str, Any]:
+        """This service's proxy settings in the option names spiderfoot.sflib.proxy reads."""
+        c = self.config
         return {
-            "http": proxy_url,
-            "https": proxy_url,
+            "_socks1type": c.proxy_type, "_socks2addr": c.proxy_host, "_socks3port": c.proxy_port,
+            "_socks4user": c.proxy_username, "_socks5pwd": c.proxy_password,
+            "_tor_enabled": c.tor_enabled, "_tor_host": c.tor_host, "_tor_port": c.tor_port,
         }
+
+    def _get_proxy_dict(self) -> dict[str, str]:
+        """Requests-style proxy dict for the general proxy (empty when none is configured)."""
+        proxy_url = general_proxy_url(self._proxy_opts())
+        return {"http": proxy_url, "https": proxy_url} if proxy_url else {}
 
     # --- HTTP Fetch ---
 
@@ -252,10 +250,13 @@ class HttpService:
 
         session = self.get_session()
 
-        # Configure proxy
-        proxies = {}
-        if self._should_use_proxy(url):
-            proxies = self._get_proxy_dict()
+        # Configure proxy: the general proxy for ordinary sites, Tor only for .onion addresses
+        proxies, proxy_error = proxies_for_url(url, self._proxy_opts())
+        if proxy_error:
+            self.log.debug("Not fetching %s: %s", url, proxy_error)
+            result["status"] = proxy_error
+            return result
+        proxies = proxies or {}
 
         try:
             if head_only:

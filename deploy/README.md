@@ -122,6 +122,23 @@ not update them. For each deploy:
    (`podman ps --format '{{.Names}} {{.Image}} {{.Status}}'`). If a service is still on the old tag, the stack was
    started rather than redeployed, or the tag change was not saved first.
 
+6. **Soak before the release notes go out.** Use the build for 20 minutes the way a user does (dashboard open, two or
+   three scans, a settings change) and watch the database connection count: it must stay flat.
+   `select client_addr, state, count(*) from pg_stat_activity where datname='spiderfoot' group by 1,2` in `sf-postgres`;
+   a healthy idle stack holds about 25 connections. rc.33 passed its unit tests and leaked one connection per request,
+   which only showed under real use (dashboard frozen, every call 500 after about 15 minutes).
+7. Check the dashboard's System health: every deployed subsystem `healthy`, and Tor `working` (it can read `checking`
+   for the first minute while Tor builds its first circuit). If Tor stays `not working`, look at `podman logs sf-tor`
+   and at whether a firewall or IDS/IPS between the host and the internet blocks Tor.
+
+### Tor
+
+`sf-tor` is a Tor client built from the base image. It publishes no port; only the stack's own containers can use it,
+and only `.onion` addresses are sent through it (Settings > Tor, default `sf-tor:9050`). It is on by default, so the
+host makes Tor connections from the moment the stack starts. To run without Tor, delete the `sf-tor` service from the
+stack file and turn off "Use Tor" in Settings; the dark-web modules then skip `.onion` pages. The general outbound
+proxy (Settings > Network & Proxy) is a separate setting for sites that must leave through a proxy.
+
 ### Tag scheme
 
 `v<upstream base version>-bd.<N>` for a release, `…-rc.<M>` appended for a test
