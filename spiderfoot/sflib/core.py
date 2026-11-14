@@ -27,7 +27,7 @@ import dns.resolver
 from .network import (
     resolveHost, resolveIP, resolveHost6, validateIP,
     safeSocket, safeSSLSocket, parseCert, getSession,
-    fetchUrl, checkDnsWildcard,
+    fetchUrl, fetchBytes, checkDnsWildcard,
 )
 from .helpers import (
     hashstring, cachePut, cacheGet, removeUrlCreds,
@@ -304,6 +304,13 @@ class SpiderFoot:
             postData, disableContentEncoding, sizeLimit,
             headOnly, verify, opts=_opts,
         )
+
+    def fetchBytes(
+        self, url: str, timeout: int = 30, useragent: str = "SpiderFoot",
+        sizeLimit: int = 10_000_000, verify: bool = True,
+    ) -> bytes | None:
+        """Download a URL as raw bytes (for binary files), or None on failure. See network.fetchBytes."""
+        return fetchBytes(url, timeout, useragent, sizeLimit, verify, opts=getattr(self, "opts", None))
 
     # ── Stealth context management ────────────────────────────────────
 

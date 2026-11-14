@@ -8,6 +8,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Fork-specific changes since 6.1.0, shipped as release candidates. The per-build record and the build and deploy
 procedure are in [`deploy/README.md`](deploy/README.md).
 
+### Breaking (rc.35)
+- Needs the updated stack file (`deploy/stack-podman.yml` 2.16.0, `deploy/stack-docker.yml` 2.6.0): it adds the
+  `sf-tor` service. Changing only the image tag leaves Tor reported as "not working".
+- `sf-tor` is on by default and connects to the Tor network as soon as the stack starts. To run without it, remove the
+  service from the stack file and turn off "Use Tor" in Settings.
+- The outbound proxy setting now takes effect. It was ignored before, so an installation with a proxy configured will
+  start sending its requests through that proxy.
+- New Scan "All Modules" now leaves out error-prone and retired modules and includes the dark-web modules; "By
+  Required Data" runs a selected set of modules instead of all of them.
+
 ### Breaking (rc.31)
 - Needs the updated stack file (`deploy/stack-podman.yml` 2.15.0, `deploy/stack-docker.yml` 2.5.0) and
   `chown -R 1000:1000 /srv/spiderfoot/embeddings-cache` on the host.
@@ -28,6 +38,17 @@ procedure are in [`deploy/README.md`](deploy/README.md).
   modules are included.
 - A scan **profile** now applies its own settings (thread limit, option overrides) as well as its module list.
 - The Dark Web profile no longer rewrites the general proxy setting; it uses the Tor setting.
+
+### Fixed (rc.36)
+- **httpx flood:** httpx ran once for every discovered link and reported the site's banner, technology and open port
+  each time (2,449 of 5,560 events in one scan of a small site). It now probes each site (scheme, host, port) once and
+  reports each fact once. `sfp_webserver` had the same habit (280 events, 2 distinct) and is fixed the same way.
+- **File metadata never worked:** documents and images were downloaded as text, which no parser can read, so every
+  file failed (121 errors in one scan); the PDF reader also used an API that newer pypdf removed. Files are now
+  downloaded as bytes (`fetchBytes`), PDF, DOCX, PPTX, JPEG and TIFF are read with the current libraries, and a damaged
+  file is no longer logged as a module error.
+- **ffuf** reported Windows device names (`con`, `aux`, `com1`...) as pages in every directory of a Windows-hosted
+  site, and fed them to the other tools. They are ignored.
 
 ### Fixed (rc.35)
 - **New Scan, By Required Data** ran every module: the server dropped the selected data types. It now runs the modules

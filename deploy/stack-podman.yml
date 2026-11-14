@@ -1,6 +1,6 @@
 # =============================================================================
 # deploy/stack-podman.yml  (was stack-spiderfoot-podman.yml in the repo root until 2.8.0)
-# Version: 2.16.0
+# Version: 2.16.1
 # Created: 2026-08-06
 # Updated: 2026-11-14
 #
@@ -16,6 +16,10 @@
 #     AI report generation (sf-agents) calls Anthropic's API (Claude Sonnet 5.5) directly through the official SDK.
 #     No proxy and no local Ollama. The provider and its API key are set in the GUI (AI Connections), not in the environment.
 #     Single network for isolation
+#     Tor: the sf-tor service is a Tor client used ONLY for .onion addresses by the dark-web modules (Settings > Tor,
+#     default sf-tor:9050). It publishes no port and is on by default, so this host makes Tor connections from the
+#     moment the stack starts; an IDS/IPS may flag them. To run without Tor, delete the sf-tor service and turn off
+#     "Use Tor" in Settings. The general outbound proxy (Settings > Network & Proxy) is a separate setting.
 #
 #     110 of SpiderFoot's 310 modules need an API key; 80 of those are free (sign up, generate a key)
 #     Highest-value free ones:
@@ -67,7 +71,7 @@
 #          - Supply the values from /srv/spiderfoot/stack-spiderfoot-env.env as the stack's environment, and set
 #            SPIDERFOOT_TAG to an exact published tag (see Builds above). The stack refuses to start without it.
 #          - Deploy
-#       4. Confirm all 7 containers report healthy (8 with the `scan` profile), then log in at the UI above with the admin password from step 1.
+#       4. Confirm all 9 containers report healthy (sf-tor included), then log in at the UI above with the admin password from step 1.
 #
 #       5. To upgrade: change SPIDERFOOT_TAG to the new exact tag and redeploy. Updates are deliberate, never automatic
 #          (Watchtower was purged 30 Sep 2026).
@@ -109,6 +113,7 @@
 #     - IDS/IPS systems may go ballistic
 #
 # Changelog:
+#   2.16.1 (2026-11-14) - Comments only: the Tor service is described in the Summary and step 4 counts 9 containers. No change to any service.
 #   2.16.0 (2026-11-14) - New service sf-tor (Tor client from the spiderfoot-base image, no published port), used only for .onion addresses
 #     by the dark-web modules (Settings > Tor, default sf-tor:9050). Needs images v6.1.0-bd.1-rc.35 or later (tor is in the base image from there).
 #   2.15.0 (2026-11-14) - sf-api and both Celery workers share sf-agents' persistent model cache (/srv/spiderfoot/embeddings-cache) instead of

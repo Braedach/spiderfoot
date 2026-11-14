@@ -471,6 +471,55 @@ def fetchUrl(
     return result
 
 
+def fetchBytes(
+    url: str, timeout: int = 30, useragent: str = "SpiderFoot",
+    sizeLimit: int = 10_000_000, verify: bool = True, opts: dict | None = None,
+) -> bytes | None:
+    """Download a URL and return its body unchanged, or None when it cannot be fetched.
+
+    :func:`fetchUrl` returns text (the body decoded as UTF-8, bad bytes replaced), which destroys
+    binary files. Anything that parses a file's own format (PDF, Office, images) needs this.
+    The download stops, and None is returned, once the body exceeds ``sizeLimit`` bytes.
+    The general proxy and the Tor setting in ``opts`` apply as they do for :func:`fetchUrl`.
+    """
+    if not isinstance(url, str) or not url.strip():
+        return None
+    url = url.strip()
+    try:
+        if urllib.parse.urlparse(url).scheme not in ('http', 'https'):
+            return None
+    except ValueError:
+        return None
+
+    from .proxy import proxies_for_url
+    proxies, proxy_error = proxies_for_url(url, opts)
+    if proxy_error:
+        log.debug("Not fetching %s: %s", url, proxy_error)
+        return None
+
+    kwargs: dict = dict(timeout=timeout, headers={"User-Agent": useragent}, verify=verify, stream=True)
+    if proxies:
+        kwargs["proxies"] = proxies
+    try:
+        with getSession().get(url, **kwargs) as resp:
+            if resp.status_code != 200:
+                return None
+            declared = resp.headers.get("Content-Length", "")
+            if sizeLimit and declared.isdigit() and int(declared) > sizeLimit:
+                log.debug("Not downloading %s: %s bytes is over the %s byte limit", url, declared, sizeLimit)
+                return None
+            body = bytearray()
+            for chunk in resp.iter_content(chunk_size=65536):
+                body.extend(chunk)
+                if sizeLimit and len(body) > sizeLimit:
+                    log.debug("Stopped downloading %s at the %s byte limit", url, sizeLimit)
+                    return None
+            return bytes(body)
+    except Exception as e:
+        log.debug("Download failed for %s: %s", url, e)
+        return None
+
+
 # Per-process wildcard cache (Cycle 57)
 _wildcard_cache: dict[str, bool] = {}
 

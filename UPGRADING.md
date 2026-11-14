@@ -5,6 +5,33 @@ For the full list of changes see [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
+## Upgrading the fork build to rc.35 or later
+
+**rc.35 is a breaking change** for an existing stack. The steps, in order:
+
+1. Take the stack file from the tag you are deploying (`deploy/stack-podman.yml` 2.16.0 or `deploy/stack-docker.yml`
+   2.6.0, or later). It adds the `sf-tor` service. Changing only `SPIDERFOOT_TAG` leaves the stack running without it,
+   and the dashboard then reports Tor as "not working".
+2. Decide whether you want Tor. `sf-tor` is on by default and connects to the Tor network as soon as the stack starts,
+   whether or not a dark-web scan runs; a firewall or IDS/IPS may flag or block that. To run without it, delete the
+   `sf-tor` service from the stack file and turn off "Use Tor" under Settings, Tor. Dark-web modules then skip
+   `.onion` pages.
+3. Check Settings, Network & Proxy. The outbound proxy setting was ignored by earlier builds and now takes effect: if
+   a proxy type, host and port are filled in, requests start going through that proxy. Clear them for a direct
+   connection. The type `TOR` is still accepted there and is treated as SOCKS5, but Tor now has its own section.
+4. Set `SPIDERFOOT_TAG` and **redeploy** the stack (not Stop and Start).
+5. Check the dashboard's System health: Tor reads `checking` for up to a minute, then `working`. If it stays
+   `not working`, read `podman logs sf-tor` (or `docker logs sf-tor`) and check that the host is allowed to reach Tor.
+6. Expect different module counts on New Scan: "All Modules" leaves out error-prone and retired modules and includes the
+   dark-web modules; "By Required Data" runs the modules that produce the selected data plus the modules that feed them
+   (earlier builds ran every module); a profile applies its own thread limit and option overrides.
+
+There is no database change and no host-side step. Scans launched before rc.35 show "Not recorded" for Module
+selection in Scan Settings.
+
+rc.34 fixes a database connection leak in rc.32 and rc.33 (the dashboard stopped updating and API calls answered 500
+after about 15 minutes of use). Do not run rc.32 or rc.33.
+
 ## Upgrading the fork build (`v6.1.0-bd.1-rc.N`) to rc.31
 
 This fork's builds are release candidates published by `deploy/publish.sh`; the build and deploy procedure is in

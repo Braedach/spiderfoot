@@ -804,6 +804,19 @@ now read from `/etc/davros/ghcr-token` works (GHCR login succeeded).
   an `llm` reranker, and stack files 2.15.0 (Podman) / 2.5.0 (Docker) that give the API and workers the embedding
   settings and the shared model cache. **Breaking:** needs the new stack file and
   `chown -R 1000:1000 /srv/spiderfoot/embeddings-cache`.
+- rc.32 and rc.33: settings and API keys saved through one API worker are no longer overwritten by another; gobuster and
+  katana floods, the accounts deadline and three noisy modules fixed. **Do not run these two builds:** the settings fix
+  opened a database connection on almost every request and never returned it, so the API ran out of connections after
+  about 15 minutes of use.
+- rc.34: that connection leak fixed (every settings read and write closes its handle, and a dropped handle returns its
+  connection by itself); database errors no longer contain the connection string. Validated live: the API held 12 to 13
+  database connections through a 30 minute soak with the dashboard open and six scans.
+- rc.35: Tor for the dark-web modules (`sf-tor` service, a Tor section in Settings, a Tor status on the dashboard), a
+  working outbound proxy, New Scan selections that run what the screen says, and the selection shown in Scan Settings.
+  Stack files 2.16.0 (Podman) / 2.6.0 (Docker). **Breaking:** needs the new stack file; Tor is on by default; the
+  proxy setting now takes effect; "All Modules" and "By Required Data" select different modules (see `UPGRADING.md`).
+- rc.36: httpx probes each site once instead of once per link; the file metadata module reads files (it never had);
+  ffuf ignores Windows device names; `sfp_webserver` reports each banner once per host.
 
 ## Deploy
 

@@ -1,12 +1,12 @@
 # =============================================================================
 # deploy/stack-docker.yml
-# Version: 2.6.0
+# Version: 2.6.1
 # Created: 2026-10-23
 # Updated: 2026-11-14
 #
 # Summary:
 #   Purpose:
-#     Docker DEVELOPMENT / SANDBOX deployment (claude). The same 9 services,
+#     Docker DEVELOPMENT / SANDBOX deployment (claude). The same services,
 #     images, wiring and hardening as deploy/stack-podman.yml (production,
 #     baden) - deliberately, so that what is tested here is what runs in
 #     production. Only ever PULLS the images deploy/publish.sh builds and
@@ -15,6 +15,11 @@
 #     Branch work is tested here first as an -rc build (e.g. v6.1.0-bd.1-rc.1),
 #     and only a tag that has soaked here is released and deployed to baden.
 #     See deploy/README.md for the whole flow.
+#
+#     Tor: the sf-tor service is a Tor client used ONLY for .onion addresses by the dark-web modules (Settings > Tor,
+#     default sf-tor:9050). It publishes no port and is on by default, so this host makes Tor connections from the
+#     moment the stack starts; an IDS/IPS may flag them. To run without Tor, delete the sf-tor service and turn off
+#     "Use Tor" in Settings. The general outbound proxy (Settings > Network & Proxy) is a separate setting.
 #
 #     Replaces stack-spiderfoot-docker.yml v1.11.0, a build-from-source
 #     reference deployment with MinIO and Tika that no longer matched
@@ -57,6 +62,7 @@
 #       isolated for testing.
 #
 # Changelog:
+#   2.6.1 (2026-11-14) - Comments only: the Tor service is described in the Summary. No change to any service.
 #   2.6.0 (2026-11-14) - Mirrors stack-podman.yml 2.16.0: new service sf-tor (Tor client, no published port), used only for .onion addresses.
 #     Needs images v6.1.0-bd.1-rc.35 or later.
 #   2.5.0 (2026-11-14) - Mirrors stack-podman.yml 2.15.0: api and Celery workers share the persistent embeddings-cache with sf-agents
