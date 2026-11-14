@@ -18,7 +18,6 @@ import {
   Users,
   User,
   Shield,
-  KeyRound,
   Fingerprint,
   Sparkles,
   Lock,
@@ -84,7 +83,6 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Configure',
     items: [
       { name: 'Settings', to: '/settings', icon: Settings },
-      { name: 'Data Source Credentials', to: '/credentials', icon: KeyRound },
       { name: 'AI Connections', to: '/ai-connections', icon: Sparkles },
       // SpiderFoot's own REST tokens, not the third-party module keys above.
       { name: 'Access Tokens', to: '/api-keys', icon: Fingerprint, authOnly: true },

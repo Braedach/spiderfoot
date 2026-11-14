@@ -60,11 +60,11 @@ export interface GlobalKeyMeta {
   description: string;
 }
 
-export type SettingsTab = 'system' | 'data' | 'ai' | 'modules';
+export type SettingsTab = 'system' | 'data' | 'ai';
 
 interface GroupMeta {
   /** Which Settings tab the group appears under. */
-  tab: Exclude<SettingsTab, 'modules'>;
+  tab: SettingsTab;
   label: string;
   description: string;
   order: number;
@@ -77,7 +77,7 @@ export const GLOBAL_GROUPS: Record<string, GroupMeta> = {
   embedding: { tab: 'ai', label: 'Embeddings (RAG)', description: 'Model used to turn scan events into vectors for semantic correlation.', order: 1 },
   reranker: { tab: 'ai', label: 'Reranker (RAG)', description: 'Model used to re-score and filter vector search results.', order: 2 },
   vector: { tab: 'ai', label: 'Vector Search', description: 'Qdrant vector database and the vector-based correlation engine.', order: 3 },
-  network: { tab: 'system', label: 'Network & Proxy', description: 'DNS, SOCKS proxy, and outbound HTTP request behaviour.', order: 4 },
+  network: { tab: 'system', label: 'Network & Proxy', description: 'DNS (used for scan targets and public names only; stack services use the container network DNS), SOCKS proxy, and outbound HTTP request behaviour.', order: 4 },
   database: { tab: 'data', label: 'Database', description: 'PostgreSQL connection used for scan data storage.', order: 5 },
   cache_queue: { tab: 'data', label: 'Cache & Queue', description: 'Redis-backed caching, the event bus, and background worker concurrency.', order: 6 },
   storage: { tab: 'data', label: 'Object Storage', description: 'MinIO/S3 buckets for reports, logs, and backups.', order: 7 },

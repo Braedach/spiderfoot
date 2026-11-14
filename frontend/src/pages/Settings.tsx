@@ -1,19 +1,18 @@
 import { useState, useMemo, useRef, useCallback } from 'react';
-import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  configApi, dataApi, type Module,
+  configApi,
 } from '../lib/api';
 import {
-  isCredentialOption, moduleHasCredential, metaForGlobalKey, GLOBAL_GROUPS, type SettingsTab,
+  isCredentialOption, metaForGlobalKey, GLOBAL_GROUPS, type SettingsTab,
 } from '../lib/settingsMeta';
 import {
-  Settings as SettingsIcon, Globe, KeyRound, Upload, Download,
+  Settings as SettingsIcon, Globe, Upload, Download,
   RotateCcw, Save, Eye, EyeOff, AlertTriangle,
-  Loader2, Database, Sparkles, Cpu,
+  Loader2, Database, Sparkles,
 } from 'lucide-react';
 import {
-  PageHeader, SearchInput, Toast, ConfirmDialog, EmptyState, Tabs,
+  PageHeader, SearchInput, Toast, ConfirmDialog, EmptyState, Tabs, InfoNote,
   Skeleton,
   type ToastType,
 } from '../components/ui';
@@ -36,13 +35,8 @@ export default function SettingsPage() {
     queryKey: ['config'],
     queryFn: ({ signal }) => configApi.get(signal),
   });
-  const { data: modulesData } = useQuery({
-    queryKey: ['modules', { page: 1, page_size: 500 }],
-    queryFn: ({ signal }) => dataApi.modules({ page: 1, page_size: 500 }, signal),
-  });
 
   const config = configData?.config ?? {};
-  const modules: Module[] = modulesData?.items ?? [];
 
   /* Global options: config keys that are not internal */
   const globalOptions = useMemo(() => {
@@ -59,90 +53,41 @@ export default function SettingsPage() {
       const g = metaForGlobalKey(k).group;
       groupCounts.set(g, (groupCounts.get(g) ?? 0) + 1);
     }
-    const items: { key: string; label: string; count: number; isGlobal: boolean }[] = [];
+    const items: { key: string; label: string; count: number }[] = [];
     for (const [groupId, meta] of Object.entries(GLOBAL_GROUPS).sort((a, b) => a[1].order - b[1].order)) {
       if (meta.hideFromSettingsSidebar || meta.tab !== tab) continue;
       const count = groupCounts.get(groupId) ?? 0;
       if (count === 0) continue;
-      items.push({ key: `global:${groupId}`, label: meta.label, count, isGlobal: true });
+      items.push({ key: `global:${groupId}`, label: meta.label, count });
     }
 
-    const sortedModules = (tab === 'modules' ? [...modules] : [])
-      .map((m) => ({
-        mod: m,
-        nonCredCount: Object.keys(m.opts ?? {}).filter((k) => !isCredentialOption(k)).length,
-      }))
-      .filter((m) => m.nonCredCount > 0)
-      .sort((a, b) => a.mod.name.localeCompare(b.mod.name));
-
-    for (const { mod, nonCredCount } of sortedModules) {
-      items.push({
-        key: mod.name,
-        label: (mod.meta?.['name'] as string) || mod.name.replace(/^sfp_/, ''),
-        count: nonCredCount,
-        isGlobal: false,
-      });
-    }
     if (search) {
       const q = search.toLowerCase();
       return items.filter((i) => i.label.toLowerCase().includes(q) || i.key.toLowerCase().includes(q));
     }
     return items;
-  }, [globalOptions, modules, search, tab]);
+  }, [globalOptions, search, tab]);
 
   /* The selection can belong to another tab; fall back to this tab's first section. */
   const activeSection = sections.some((x) => x.key === selectedSection) ? selectedSection : (sections[0]?.key ?? '');
 
-  const activeModule = activeSection.startsWith('global:') ? undefined : modules.find((m) => m.name === activeSection);
   const activeGroup = activeSection.startsWith('global:') ? activeSection.slice(7) : null;
 
   /* Current section options */
   const currentOptions = useMemo(() => {
-    if (activeGroup) {
-      return globalOptions
-        .filter(([k]) => metaForGlobalKey(k).group === activeGroup)
-        .map(([k, v]) => {
-          const meta = metaForGlobalKey(k);
-          return { key: k, value: v, description: meta.description, label: meta.label };
-        });
-    }
-    if (!activeModule?.opts) return [];
-    const descs = activeModule.optdescs ?? {};
-    return Object.entries(activeModule.opts)
-      .filter(([k]) => !isCredentialOption(k))
-      .map(([k, v]) => ({
-        key: `${activeModule.name}:${k}`,
-        value: v,
-        description: descs[k] || '',
-        label: k,
-      }));
-  }, [activeGroup, globalOptions, activeModule]);
+    if (!activeGroup) return [];
+    return globalOptions
+      .filter(([k]) => metaForGlobalKey(k).group === activeGroup)
+      .map(([k, v]) => {
+        const meta = metaForGlobalKey(k);
+        return { key: k, value: v, description: meta.description, label: meta.label };
+      });
+  }, [activeGroup, globalOptions]);
 
-  /* Save — global options via PATCH /config, module opts via PATCH /modules/{name}/options */
+  /* Save: global options via PATCH /config. Module options are edited on the Modules page. */
   const saveMut = useMutation({
     mutationFn: async (edited: Record<string, string>) => {
-      const globalOpts: Record<string, unknown> = {};
-      const moduleOpts = new Map<string, Record<string, unknown>>();
-
-      for (const [key, val] of Object.entries(edited)) {
-        if (key.includes(':')) {
-          const [mod, ...rest] = key.split(':');
-          const optKey = rest.join(':');
-          if (!moduleOpts.has(mod)) moduleOpts.set(mod, {});
-          moduleOpts.get(mod)![optKey] = val;
-        } else {
-          globalOpts[key] = val;
-        }
-      }
-
-      const promises: Promise<unknown>[] = [];
-      if (Object.keys(globalOpts).length > 0) {
-        promises.push(configApi.update(globalOpts));
-      }
-      for (const [mod, opts] of moduleOpts) {
-        promises.push(configApi.updateModuleOptions(mod, opts));
-      }
-      await Promise.all(promises);
+      await configApi.update(edited);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['config'] });
@@ -227,7 +172,7 @@ export default function SettingsPage() {
         className="hidden"
         onChange={onImportFileChange}
       />
-      <PageHeader title="Settings" subtitle="Core platform configuration. Module API keys live on Data Source Credentials; the LLM provider on AI Connections.">
+      <PageHeader title="Settings" subtitle="Core platform configuration. Module options and API keys are edited on the Modules page; the LLM provider on AI Connections.">
         <div className="flex gap-2">
           <button className="btn-secondary text-sm" onClick={handleImport}>
             <Upload className="h-3.5 w-3.5" /> Import
@@ -246,11 +191,22 @@ export default function SettingsPage() {
           { key: 'system', label: 'System', icon: SettingsIcon },
           { key: 'data', label: 'Data & Storage', icon: Database },
           { key: 'ai', label: 'AI & Search', icon: Sparkles },
-          { key: 'modules', label: 'Module Options', icon: Cpu },
         ]}
         active={tab}
         onChange={setTab}
       />
+
+      <InfoNote className="mt-4">
+        {tab === 'system' && (
+          <p>How the scan engine behaves, how outbound lookups and requests are made, and where the web UI and API listen. The DNS server set under Network &amp; Proxy is used only to look up scan targets and other public names; the stack&apos;s own services are always found through the container network&apos;s built-in DNS.</p>
+        )}
+        {tab === 'data' && (
+          <p>Where scan results, cache, queues and files are stored. These point at the database, Redis and object storage services the stack runs; change them only if you move those services.</p>
+        )}
+        {tab === 'ai' && (
+          <p>The embedding, reranking and vector-search settings behind correlation and AI reports. The LLM provider itself (and its API key) is set on AI Connections.</p>
+        )}
+      </InfoNote>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mt-4">
         {/* Sidebar */}
@@ -270,11 +226,7 @@ export default function SettingsPage() {
                 }`}
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  {s.isGlobal ? (
-                    <Globe className="h-3.5 w-3.5 flex-shrink-0 text-dark-500" />
-                  ) : (
-                    <SettingsIcon className="h-3.5 w-3.5 flex-shrink-0 text-dark-600" />
-                  )}
+                  <Globe className="h-3.5 w-3.5 flex-shrink-0 text-dark-500" />
                   <span className="truncate">{s.label}</span>
                 </div>
                 <span className="text-xs text-dark-600 tabular-nums">{s.count}</span>
@@ -290,42 +242,6 @@ export default function SettingsPage() {
             <div className="card animate-fade-in">
               <h3 className="text-sm font-semibold text-foreground">{GLOBAL_GROUPS[activeGroup]?.label}</h3>
               <p className="text-xs text-dark-400 mt-1">{GLOBAL_GROUPS[activeGroup]?.description}</p>
-            </div>
-          )}
-
-          {/* Module info header */}
-          {activeModule && (
-            <div className="card animate-fade-in">
-              <h3 className="text-sm font-semibold text-foreground">{(activeModule.meta?.['name'] as string) || activeModule.name.replace(/^sfp_/, '')}</h3>
-              <p className="text-xs text-dark-400 mt-1">
-                {activeModule.descr || activeModule.description || 'No description available.'}
-              </p>
-              {activeModule.provides && activeModule.provides.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1">
-                  {activeModule.provides.slice(0, 6).map((p) => (
-                    <span key={p} className="badge badge-info text-[10px]">{p}</span>
-                  ))}
-                  {activeModule.provides.length > 6 && (
-                    <span className="text-xs text-dark-500">+{activeModule.provides.length - 6} more</span>
-                  )}
-                </div>
-              )}
-              {activeModule.group && activeModule.group.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1">
-                  {activeModule.group.map((g) => (
-                    <span key={g} className="badge bg-dark-600 text-dark-200 text-[10px]">{g}</span>
-                  ))}
-                </div>
-              )}
-              {moduleHasCredential(activeModule.opts) && (
-                <Link
-                  to="/credentials"
-                  className="mt-3 flex items-center gap-1.5 text-xs text-spider-400 hover:text-spider-300 transition-colors w-fit"
-                >
-                  <KeyRound className="h-3 w-3" />
-                  This module also needs an API key — set it on Data Source Credentials
-                </Link>
-              )}
             </div>
           )}
 

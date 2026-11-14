@@ -636,6 +636,22 @@ export function ModalShell({
   );
 }
 
+/* ── InfoNote: a short explainer for a page or section ───────── */
+export function InfoNote({ title, children, className }: { title?: string; children: React.ReactNode; className?: string }) {
+  return (
+    <div
+      role="note"
+      className={clsx('flex gap-3 rounded-lg border border-blue-800/30 bg-blue-900/10 px-4 py-3 text-xs text-dark-300', className)}
+    >
+      <Info className="h-4 w-4 flex-shrink-0 text-blue-400 mt-0.5" aria-hidden="true" />
+      <div className="space-y-1 leading-relaxed">
+        {title && <p className="text-sm font-medium text-dark-100">{title}</p>}
+        {children}
+      </div>
+    </div>
+  );
+}
+
 /* ── Tabs Component ───────────────────────────────────────── */
 export function Tabs<T extends string>({
   tabs, active, onChange,
