@@ -71,7 +71,7 @@
 #          - Supply the values from /srv/spiderfoot/stack-spiderfoot-env.env as the stack's environment, and set
 #            SPIDERFOOT_TAG to an exact published tag (see Builds above). The stack refuses to start without it.
 #          - Deploy
-#       4. Confirm all 9 containers report healthy (sf-tor included), then log in at the UI above with the admin password from step 1.
+#       4. Confirm all 8 containers report healthy (9 with the `scan` profile; sf-tor is one of the 8), then log in at the UI above with the admin password from step 1.
 #
 #       5. To upgrade: change SPIDERFOOT_TAG to the new exact tag and redeploy. Updates are deliberate, never automatic
 #          (Watchtower was purged 30 Sep 2026).
@@ -113,7 +113,7 @@
 #     - IDS/IPS systems may go ballistic
 #
 # Changelog:
-#   2.16.1 (2026-11-14) - Comments only: the Tor service is described in the Summary and step 4 counts 9 containers. No change to any service.
+#   2.16.1 (2026-11-14) - Comments only: the Tor service is described in the Summary and step 4 counts sf-tor. No change to any service.
 #   2.16.0 (2026-11-14) - New service sf-tor (Tor client from the spiderfoot-base image, no published port), used only for .onion addresses
 #     by the dark-web modules (Settings > Tor, default sf-tor:9050). Needs images v6.1.0-bd.1-rc.35 or later (tor is in the base image from there).
 #   2.15.0 (2026-11-14) - sf-api and both Celery workers share sf-agents' persistent model cache (/srv/spiderfoot/embeddings-cache) instead of

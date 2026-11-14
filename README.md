@@ -14,10 +14,10 @@ An internal-use fork of [poppopjmp/spiderfoot](https://github.com/poppopjmp/spid
 
 Expect this to keep changing. Bugs are still being found, mostly old ones that only become visible once a scan is validated live rather than just unit-tested, and the build tags reflect that.
 
-- **Builds:** `v6.1.0-bd.1-rc.35` is the current release candidate, being deployed and validated (`rc.34` was the last build validated live, with a 30 minute soak). `rc.35` is a breaking change for an existing stack: see [`UPGRADING.md`](UPGRADING.md). Every build passes the scan gate on all 5 images (Trivy and `npm audit`). No non-`rc` release has been cut yet.
+- **Builds:** `v6.1.0-bd.1-rc.36` is the current release candidate, being deployed and validated. `rc.34` was the last build validated live (a 30 minute soak with the dashboard open and six scans). `rc.35` and later are a breaking change for an existing stack: see [`UPGRADING.md`](UPGRADING.md). Do not run `rc.32` or `rc.33` (database connection leak). Every build passes the scan gate on all 5 images (Trivy and `npm audit`). No non-`rc` release has been cut yet.
 - **Scope guard:** invasive modules are gated three ways before dispatch (see [How a scan flows](#how-a-scan-flows)): the target must match, the address must not sit in a published Cloudflare or Fastly range, and it must not have been proven shared by another module. Validated live against phone, email, name, domain and IP targets. ASN is the one target type not yet explicitly exercised.
 - **Scan execution:** scans no longer run inside API workers, and a scan whose process dies is detected and marked failed instead of staying `RUNNING` forever (see [Where a scan executes](#where-a-scan-executes)).
-- **Module catalog:** every module's `setup()` is exercised by a catalog-wide test, because modules that fail to load were previously invisible. Key-free scan profiles exist for phone-number, email-address and person-name targets. Dead and superseded modules have been removed.
+- **Module catalog:** every module's `setup()` is exercised by a catalog-wide test, because modules that fail to load were previously invisible. Key-free scan profiles exist for phone-number, email-address and person-name targets, and each has been run end to end on a live stack. Dead and superseded modules have been removed.
 - **Dependencies and base images:** every Dependabot alert has been fixed and none are currently waived (see below).
 - **Tag scheme:** `v<upstream base>-bd.<N>` for a release, `-rc.<M>` for a test build. An `-rc` tag never moves `:latest`.
 - **Never push straight to `main`.** Work happens on a branch, goes through a pull request, and is tested as a release candidate before release.
@@ -44,7 +44,7 @@ Expect this to keep changing. Bugs are still being found, mostly old ones that o
 - **Result floods:** gobuster, katana, httpx and ffuf each reported the same thing hundreds of times or reported junk as findings (a WAF answering every path, one probe per discovered link, Windows device names); each now reports a site's facts once.
 - **File metadata:** documents and images were downloaded as text, so no file was ever read; they are now downloaded as bytes and PDF, Office, JPEG and TIFF metadata is extracted.
 - **Dead scans:** scans ran inside API worker processes that uvicorn's supervisor kills when they are slow to answer a health ping, taking the scan with them and leaving it `RUNNING` permanently.
-- **Database:** Postgres connections were leaked by reads that never committed (`ConfigManager`, `AuthService`, `ReportStore` and 17 more methods in the core database layer), eventually blocking the whole API.
+- **Database:** Postgres connections were leaked by reads that never committed (`ConfigManager`, `AuthService`, `ReportStore` and 17 more methods in the core database layer), eventually blocking the whole API. A later leak of the same kind (a database handle opened on almost every request and never closed, in `rc.32` and `rc.33`) is fixed, and a handle that is dropped without being closed now returns its connection by itself.
 
 **AI reports**
 - Report generation returned empty or generic output (nine stacked bugs across service access, database wiring, event mapping, vector indexing and timeouts). Reports are now persisted server-side, the analysed-event cap is configurable (`SF_REPORT_MAX_EVENTS_PER_SCAN`), and deleting a scan removes its vectors.
@@ -109,6 +109,26 @@ flowchart LR
 - The API workers' health-check timeout is `SF_API_WORKER_HEALTHCHECK_TIMEOUT` (default 120s, uvicorn's own default is 5s).
 - Reaper tuning: `SF_SCAN_REAP_GRACE` (180s), `SF_SCAN_HEARTBEAT_INTERVAL` (15s), `SF_SCAN_HEARTBEAT_TTL` (90s), `SF_SCAN_STARTING_MAX_AGE` (6h, a scan may legitimately wait in the Celery queue). With Redis down the reaper does nothing rather than reaping blind.
 
+### What a scan runs
+
+The New Scan page offers four ways to choose modules. The server, not the browser, decides the final list, and the choice is stored with the scan and shown in Scan Settings as "Module selection".
+
+| Tab | What runs |
+|---|---|
+| By Use Case, All Modules | Every reliable module (about 285 of about 290): active tools and dark-web modules included, error-prone and retired modules left out |
+| By Use Case, others | The modules in that group (Footprint, Investigate, Passive), or a fixed short list for Quick Scan |
+| By Profile | The profile's module list, with the profile's own thread limit and option overrides |
+| By Required Data | The modules that produce the selected data types, plus the modules that feed them their input. This chain grows quickly: for most data types it reaches about 190 modules |
+| By Module | Exactly the modules ticked |
+
+Two scans run at a time; a third waits and is shown as Queued.
+
+### Outbound requests: proxy and Tor
+
+- **General proxy** (Settings, Network & Proxy): SOCKS4, SOCKS5 or HTTP, for a site that must leave the network through a proxy. It applies to every request except local and private addresses. Empty by default.
+- **Tor** (Settings, Tor): used **only** for `.onion` addresses, which only the dark-web modules fetch. Ordinary requests never pass through Tor, so data sources that block Tor exits keep working. The stacks ship a Tor client (`sf-tor`, no published port) and the setting points at it by default. With Tor turned off, `.onion` addresses are not fetched at all.
+- The dashboard's System health shows Tor as working, not working or not configured.
+
 ### After a scan: indexing and AI reports
 
 ```mermaid
@@ -133,7 +153,7 @@ Two layers, deliberately separate:
 - **Upstream's own deployment**: `docker-compose.yml` and `docker/compose/*.yml` build every image from source, Traefik-fronted and feature-profiled (`--profile full` for everything, or pick `ai`, `scan`, `storage`, `monitor`, `scheduler`, `sso`). Build the base image first (`docker compose build base`); see that file's header for why. This fork patches some of these files but otherwise leaves them alone.
 - **`deploy/`**: this fork's own tooling, in its own folder so pulling upstream never conflicts with it.
   - `deploy/publish.sh` builds the 5 images from an explicit tag on the build host, runs the scan gate, pushes `ghcr.io/braedach/spiderfoot-<service>:<tag>`, and creates a GitHub Release.
-  - `deploy/stack-podman.yml` is the production deployment: it pulls the published images and builds nothing.
+  - `deploy/stack-podman.yml` is the production deployment: it pulls the published images and builds nothing. It runs nine services: the API, two Celery workers (general, and the active scanner under the `scan` profile), the frontend, the agents service and the Tor client from the five published images, plus Postgres, Redis and Qdrant.
   - `deploy/stack-docker.yml` is the Docker development mirror, where release candidates are tested first.
   - Both stacks require an exact `SPIDERFOOT_TAG` and never follow `:latest`.
 
