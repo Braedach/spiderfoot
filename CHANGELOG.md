@@ -8,6 +8,29 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Fork-specific changes since 6.1.0, shipped as release candidates. The per-build record and the build and deploy
 procedure are in [`deploy/README.md`](deploy/README.md).
 
+### Changed (rc.37)
+- **Phone, email and name profiles follow what they find.** A name or email yields usernames and profile links, but the
+  profiles listed only the modules that read the target itself, so those leads were never followed (the name profile ran
+  3 working modules). They now include the follow-on modules that need no key: GitHub, Keybase, Venmo, Wikipedia edits,
+  Hudson Rock, Twitter, SlideShare and Myspace for names and emails (name profile 3 -> 11 modules, email 11 -> 18).
+- **Keyed modules join a profile automatically.** Each profile lists the keyed modules it can use (14 phone, 25 email,
+  5 name, including every free-tier service). They are skipped, with no error, until their API key is saved on the Modules
+  page, then run in the next scan. The By Profile cards show how many are active.
+- `sfp_gravatar` is removed from the phone profile: it only reads email addresses, so it could never run on a phone number.
+  A new test checks that every module named in these profiles can fire from the profile's own target.
+
+### Fixed (rc.37)
+- **Spider fetched every page twice:** `http://site:80/a` and `http://site/a` are one URL, but were treated as two, so a
+  site reached both by name and by an open-port event was crawled, reported and stored twice (14% of one scan's URLs).
+  The default port is now dropped and the scheme and host are lower-cased.
+- **Shodan "no information available"** is Shodan's ordinary answer for an address it holds nothing on. It was logged
+  as an error 1,150 times in one scan of a single address (85% of that scan's errors). It is no longer an error; every
+  other Shodan error still is.
+- **Tor status flickered** between "working" and "checking" depending on which API process answered. The result is now
+  kept in Redis, so every process shows the same answer, and only one probes at a time.
+- **Dashboard "vector: down"** was a check for the Vector log shipper, which is not part of the stack. It now reads "not
+  configured", and a real Qdrant row (the vector database AI reports use) is added.
+
 ### Breaking (rc.35)
 - Needs the updated stack file (`deploy/stack-podman.yml` 2.16.0, `deploy/stack-docker.yml` 2.6.0): it adds the
   `sf-tor` service. Changing only the image tag leaves Tor reported as "not working".

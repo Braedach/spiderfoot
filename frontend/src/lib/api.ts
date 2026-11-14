@@ -336,6 +336,10 @@ export interface ScanProfile {
   tags: string[];
   max_threads: number;
   timeout_minutes: number;
+  /** Keyed modules the profile can use: they join a scan once their API key is saved. */
+  optional_total?: number;
+  optional_active?: string[];
+  optional_inactive?: string[];
 }
 
 // ── Module / Data API ─────────────────────────────────────────

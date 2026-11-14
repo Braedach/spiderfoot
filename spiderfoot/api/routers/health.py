@@ -42,12 +42,15 @@ except ImportError:
 
 
 def _check_vector() -> dict[str, Any]:
-    """Vector.dev log pipeline health."""
+    """Vector.dev log pipeline health (not the Qdrant vector database: see _check_qdrant)."""
+    # The Vector log shipper is not part of this fork's stack. Probing a default host name for it made the
+    # dashboard show "vector: down" on a healthy installation, so it is checked only when its URL is set.
+    api_url = os.environ.get("VECTOR_API_URL", "").strip()
+    if not api_url:
+        return {"status": "unknown", "message": "Not configured (the Vector log pipeline is not deployed)"}
     try:
         from spiderfoot.observability.vector_bootstrap import VectorBootstrap, VectorBootstrapConfig
-        # Use VECTOR_API_URL env or Docker service name 'vector' on management API port 8687
-        # (SF_VECTOR_HTTP_PORT=8686 is the event-ingestion HTTP source port, not the API)
-        api_url = os.environ.get("VECTOR_API_URL", "http://vector:8687")
+        # (SF_VECTOR_HTTP_PORT=8686 is the event-ingestion HTTP source port, not the management API)
         cfg = VectorBootstrapConfig(
             vector_api_url=api_url,
             vector_graphql_url=f"{api_url}/graphql",
@@ -168,6 +171,24 @@ def _get_metrics_text() -> str:
 # -----------------------------------------------------------------------
 # MinIO object storage check
 # -----------------------------------------------------------------------
+
+def _check_qdrant() -> dict[str, Any]:
+    """Qdrant, the vector database that holds the scan-finding index used by AI reports."""
+    import urllib.request
+    url = os.environ.get("SF_QDRANT_URL", "").strip().rstrip("/")
+    if not url:
+        host = os.environ.get("SF_QDRANT_HOST", "").strip() or "qdrant"
+        port = os.environ.get("SF_QDRANT_PORT", "").strip() or "6333"
+        url = f"http://{host}:{port}"
+    try:
+        with urllib.request.urlopen(f"{url}/healthz", timeout=3) as resp:
+            if 200 <= resp.status < 300:
+                return {"status": "up"}
+            return {"status": "down", "message": f"Qdrant answered HTTP {resp.status}"}
+    except Exception as e:
+        log.warning("Qdrant health check failed: %s", type(e).__name__)
+        return {"status": "down", "message": "Qdrant is not reachable"}
+
 
 def _check_minio() -> dict[str, Any]:
     """Check MinIO/S3 connectivity and bucket status."""
@@ -300,11 +321,59 @@ def _probe_tor(host: str, port: int) -> dict[str, Any]:
         return {"status": "degraded", "message": "Proxy answers, but Tor has no working circuit yet"}
 
 
+_TOR_REDIS_PREFIX = "sf:health:tor:"
+
+
+def _tor_redis():
+    """A Redis client for the shared Tor result, or None when Redis is not available."""
+    url = os.environ.get("SF_REDIS_URL", "").strip()
+    if not url:
+        return None
+    try:
+        import redis as redis_lib
+        return redis_lib.Redis.from_url(url, socket_connect_timeout=2, socket_timeout=2)
+    except Exception:
+        return None
+
+
+def _check_tor_shared(r, host: str, port: int) -> dict[str, Any] | None:
+    """The Tor check using Redis as the one place the result lives.
+
+    Every API process runs its own copy of the dashboard code. With the result kept in each process, a
+    dashboard refresh showed "working" or "checking" depending on which process answered (9 of 12 readings in
+    one minute). In Redis the first process to find no result takes a lock and probes; everyone else sees the
+    same stored answer until it expires. Returns None when Redis cannot be used, so the caller falls back to the
+    per-process state.
+    """
+    import json as _json
+    key = f"{host}:{port}"
+    try:
+        raw = r.get(f"{_TOR_REDIS_PREFIX}result:{key}")
+        if raw:
+            return {**_json.loads(raw), "endpoint": key}
+        if r.set(f"{_TOR_REDIS_PREFIX}lock:{key}", "1", nx=True, ex=90):
+            def _run() -> None:
+                result = _probe_tor(host, port)
+                ttl = int(_TOR_OK_TTL if result.get("status") == "up" else _TOR_RETRY_TTL)
+                try:
+                    r.setex(f"{_TOR_REDIS_PREFIX}result:{key}", ttl, _json.dumps(result))
+                    r.delete(f"{_TOR_REDIS_PREFIX}lock:{key}")
+                except Exception as e:
+                    log.info("Tor health result could not be stored: %s", type(e).__name__)
+
+            threading.Thread(target=_run, name="tor-health", daemon=True).start()
+        return {"status": "unknown", "message": "Checking..."}
+    except Exception as e:
+        log.info("Tor health check could not use Redis: %s", type(e).__name__)
+        return None
+
+
 def _check_tor() -> dict[str, Any]:
     """Tor status for the dashboard: working, not working, or not configured.
 
     The probe opens a Tor circuit, which is slow, so it runs in the background and its result
-    is reused for a few minutes; the dashboard never waits for it.
+    is reused for a few minutes; the dashboard never waits for it. The result is shared between
+    API processes through Redis when it is available.
     """
     try:
         from spiderfoot.api.dependencies import get_app_config
@@ -318,6 +387,12 @@ def _check_tor() -> dict[str, Any]:
         return {"status": "unknown", "message": "Configuration unavailable"}
     if not enabled or not host or not port:
         return {"status": "unknown", "message": "Not configured (turned off in Settings > Tor)"}
+
+    r = _tor_redis()
+    if r is not None:
+        shared = _check_tor_shared(r, host, port)
+        if shared is not None:
+            return shared
 
     key = f"{host}:{port}"
     now = time.monotonic()
@@ -347,6 +422,7 @@ _SUBSYSTEM_CHECKS = {
     "postgresql": _check_postgresql,
     "redis": _check_redis,
     "celery": _check_celery,
+    "qdrant": _check_qdrant,
     "vector": _check_vector,
     "minio": _check_minio,
     "tor": _check_tor,
@@ -371,7 +447,7 @@ def _get_core_subsystems() -> set[str]:
     if os.environ.get("SF_MINIO_ENDPOINT", "").strip():
         core.add("minio")
     if os.environ.get("SF_QDRANT_HOST", "").strip() or os.environ.get("SF_VECTOR_URL", "").strip():
-        core.add("vector")
+        core.add("qdrant")
     return core
 
 

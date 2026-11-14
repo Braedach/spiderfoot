@@ -101,9 +101,24 @@ def _get_all_modules_dict() -> dict:
     return sf.getModules()
 
 
-def _profile_to_dict(p, all_modules: dict) -> dict:
-    """Serialize a ScanProfile, resolving effective modules."""
-    resolved = p.resolve_modules(all_modules)
+def _configured_modules() -> set[str]:
+    """Names of the modules whose API key (or other credential) is saved in the live configuration."""
+    from spiderfoot.scan.scan_profile import modules_with_credentials
+    try:
+        return modules_with_credentials(get_app_config().get_config().get("__modules__"))
+    except Exception as e:
+        log.warning("Could not read which modules have credentials saved: %s", e)
+        return set()
+
+
+def _profile_to_dict(p, all_modules: dict, configured: set[str] | None = None) -> dict:
+    """Serialize a ScanProfile, resolving effective modules.
+
+    ``modules`` is what a scan started now would run: the profile's own modules plus those of its optional
+    (keyed) modules whose credentials are saved.
+    """
+    resolved = p.resolve_modules(all_modules, configured)
+    optional = [m for m in p.optional_modules if m in all_modules]
     return {
         "name": p.name,
         "display_name": p.display_name,
@@ -111,6 +126,9 @@ def _profile_to_dict(p, all_modules: dict) -> dict:
         "category": p.category.value if hasattr(p.category, "value") else str(p.category),
         "module_count": len(resolved),
         "modules": resolved,
+        "optional_total": len(optional),
+        "optional_active": [m for m in optional if m in resolved],
+        "optional_inactive": [m for m in optional if m not in resolved],
         "tags": p.tags,
         "max_threads": p.max_threads,
         "timeout_minutes": p.timeout_minutes,
@@ -159,7 +177,8 @@ def list_scan_profiles(api_key: str = api_key_dep):
         from spiderfoot.scan.scan_profile import get_profile_manager
         pm = get_profile_manager()
         all_modules = _get_all_modules_dict()
-        profiles = [_profile_to_dict(p, all_modules) for p in pm.list_profiles()]
+        configured = _configured_modules()
+        profiles = [_profile_to_dict(p, all_modules, configured) for p in pm.list_profiles()]
         return {"profiles": profiles, "total": len(profiles)}
     except Exception as e:
         log.warning("Failed to load scan profiles: %s", e)
@@ -176,7 +195,7 @@ def get_scan_profile(profile_name: str, api_key: str = api_key_dep):
         if not p:
             raise HTTPException(status_code=404, detail=f"Profile '{profile_name}' not found")
         all_modules = _get_all_modules_dict()
-        result = _profile_to_dict(p, all_modules)
+        result = _profile_to_dict(p, all_modules, _configured_modules())
         result["include_flags"] = p.include_flags
         result["exclude_flags"] = p.exclude_flags
         return result
@@ -814,7 +833,7 @@ async def create_scan(
         elif scan_request.profile:
             # Load modules from a scan profile (e.g. "tools-only", "quick-recon")
             try:
-                from spiderfoot.scan.scan_profile import get_profile_manager
+                from spiderfoot.scan.scan_profile import get_profile_manager, modules_with_credentials
                 pm = get_profile_manager()
                 profile = pm.get(scan_request.profile)
                 if not profile:
@@ -823,7 +842,7 @@ async def create_scan(
                         detail=f"Unknown scan profile: '{scan_request.profile}'",
                     )
                 all_mods = _get_all_modules_dict()
-                modules = profile.resolve_modules(all_mods)
+                modules = profile.resolve_modules(all_mods, modules_with_credentials(sf_config.get("__modules__")))
                 # A profile is more than a module list: apply its settings to this scan only.
                 sf_config = {**sf_config, **(profile.option_overrides or {})}
                 if profile.max_threads:

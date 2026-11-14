@@ -221,17 +221,22 @@ class TestProfileManager(unittest.TestCase):
         self.assertIsNotNone(p)
         self.assertEqual(
             set(p.include_modules),
-            {"sfp_phone", "sfp_countryname", "sfp_callername",
-             "sfp_hudsonrock", "sfp_gravatar"},
+            {"sfp_phone", "sfp_countryname", "sfp_callername", "sfp_hudsonrock"},
         )
+        # sfp_gravatar only reads email addresses: it can never run on a phone number
+        self.assertNotIn("sfp_gravatar", p.include_modules)
+        self.assertIn("sfp_numverify", p.optional_modules)
 
     def test_person_name_profile_is_key_free(self):
         p = self.pm.get("person-name")
         self.assertIsNotNone(p)
         self.assertEqual(
             set(p.include_modules),
-            {"sfp_accounts", "sfp_arin", "sfp_wikileaks"},
+            {"sfp_accounts", "sfp_arin", "sfp_wikileaks",
+             "sfp_github", "sfp_keybase", "sfp_venmo", "sfp_wikipediaedits", "sfp_hudsonrock",
+             "sfp_twitter", "sfp_slideshare", "sfp_myspace"},
         )
+        self.assertIn("sfp_socialprofiles", p.optional_modules)
 
     def test_email_address_profile_is_key_free(self):
         p = self.pm.get("email-address")
@@ -240,8 +245,11 @@ class TestProfileManager(unittest.TestCase):
             set(p.include_modules),
             {"sfp_email", "sfp_emailformat", "sfp_debounce", "sfp_trumail",
              "sfp_pgp", "sfp_gravatar", "sfp_hudsonrock", "sfp_grep_app",
-             "sfp_searchcode", "sfp_accounts", "sfp_wikileaks"},
+             "sfp_searchcode", "sfp_accounts", "sfp_wikileaks", "sfp_myspace",
+             "sfp_github", "sfp_keybase", "sfp_venmo", "sfp_wikipediaedits",
+             "sfp_twitter", "sfp_slideshare"},
         )
+        self.assertIn("sfp_emailrep", p.optional_modules)
 
     def test_get_profile(self):
         p = self.pm.get("quick-recon")
