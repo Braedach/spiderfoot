@@ -89,7 +89,7 @@ export function renderMarkdownToHTML(md: string): string {
         );
         inTable = true;
       }
-      if (/^\|[-:|\s]+\|$/.test(line.trim())) return;
+      if (/^\|[\s:|-]+\|$/.test(line.trim())) return;
       const cells = line.split('|').filter((c) => c.trim() !== '');
       const isHeader = !html.some((l) => l.includes('<tr'));
       const rowClass = isHeader ? 'bg-dark-800/60' : 'hover:bg-dark-800/30 transition-colors';
