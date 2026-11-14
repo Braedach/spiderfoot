@@ -169,8 +169,15 @@ class sfp_accounts(SpiderFootAsyncPlugin):
         with self.lock:
             self.siteResults[retname] = True
 
+    # A check that makes no progress for this long is treated as hung. The floor is a class attribute so
+    # tests can shorten it. MAX_DURATION is a hard ceiling for one username's whole run.
+    STALL_FLOOR = 30
+    MAX_DURATION = 900
+
     def checkSites(self, username: str, sites: list = None) -> list | None:
         """Check Sites."""
+        lastProgress = [time.monotonic()]
+
         def processSiteQueue(username: str, queue: list) -> None:
             """Process SiteQueue."""
             try:
@@ -181,6 +188,7 @@ class sfp_accounts(SpiderFootAsyncPlugin):
                     except Exception as e:
                         self.debug(
                             f'Thread {threading.current_thread().name} exception: {e}')
+                    lastProgress[0] = time.monotonic()
             except QueueEmpty:
                 return
 
@@ -216,17 +224,23 @@ class sfp_accounts(SpiderFootAsyncPlugin):
         # busy-wait rather than this sequential .join(), but the same risk),
         # silently stalled a scan overnight with no error, no crash, no
         # symptom beyond the scan never finishing.
-        deadline = time.monotonic() + max(30, self.opts.get('_fetchtimeout', 15) * 4)
+        # The wait is bounded by STALL, not by a total time: 20 threads legitimately take a minute or
+        # more to work through hundreds of sites, and a flat total deadline cut every username short and
+        # silently skipped the remaining sites. It gives up only when no site check has finished for
+        # STALL seconds (everything left is hung), or after MAX_DURATION in total.
+        stall = max(self.STALL_FLOOR, self.opts.get('_fetchtimeout', 15) * 4)
+        hardStop = startTime + self.MAX_DURATION
         timed_out = False
-        while threads:
-            thread = threads.pop(0)
-            thread.join(timeout=max(0, deadline - time.monotonic()))
-            if thread.is_alive():
+        while any(t.is_alive() for t in threads):
+            now = time.monotonic()
+            if now - lastProgress[0] > stall or now > hardStop:
                 timed_out = True
+                break
+            time.sleep(0.1)
         if timed_out:
             self.error(
-                "Timed out waiting for account-site checks - abandoning"
-                " remaining checks for this username (a site may be"
+                "Account-site checks stopped making progress - abandoning"
+                " the remaining sites for this username (a site may be"
                 " unresponsive).")
 
         duration = time.monotonic() - startTime

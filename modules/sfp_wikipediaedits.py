@@ -16,9 +16,9 @@ from __future__ import annotations
 # -------------------------------------------------------------------------------
 
 import datetime
+import html
 import re
 import urllib.parse
-from html.parser import HTMLParser
 
 from spiderfoot import SpiderFootEvent
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
@@ -102,14 +102,13 @@ class sfp_wikipediaedits(SpiderFootAsyncPlugin):
         links = list()
 
         try:
-            parser = HTMLParser()
 
             for line in res['content'].split("\n"):
                 matches = re.findall("<link>(.*?)</link>", line, re.IGNORECASE)
                 for m in matches:
                     if "Special:Contributions" in m:
                         continue
-                    d = parser.unescape(m)
+                    d = html.unescape(m)
                     links.append(d)
             return set(links)
         except Exception as e:
