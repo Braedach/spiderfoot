@@ -7,7 +7,7 @@ import {
   Clock, Zap, RefreshCw, XCircle,
 } from 'lucide-react';
 import {
-  PageHeader, StatCard, EmptyState, Skeleton,
+  PageHeader, StatCard, EmptyState, Skeleton, InfoNote,
 } from '../components/ui';
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -156,6 +156,18 @@ export default function AgentsPage() {
           Refresh
         </button>
       </PageHeader>
+
+      <InfoNote title="Agents run on request, not on their own" className="mb-4">
+        <p>
+          An agent only works when something asks it to: generating an <strong className="text-dark-100">AI Report</strong> on a scan,
+          the <strong className="text-dark-100">IaC</strong> advisor, or analysing an uploaded document. Nothing starts them
+          automatically when a scan finishes, so <em>Idle</em> with zero counts is normal until you use one of those.
+        </p>
+        <p>
+          The counts are kept in memory and start again from zero whenever the agents service restarts. Auto-refresh only
+          re-reads them every 5 seconds. The AI provider and key the agents use are set on AI Connections.
+        </p>
+      </InfoNote>
 
       {/* Stats summary */}
       {!isLoading && !isError && (
