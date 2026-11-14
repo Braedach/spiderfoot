@@ -15,7 +15,7 @@ This fork's builds are release candidates published by `deploy/publish.sh`; the 
    and the shared model cache.
 2. On the host: `chown -R 1000:1000 /srv/spiderfoot/embeddings-cache`. The API and workers run non-root; without this the
    model download fails silently and embeddings fall back to meaningless `mock` vectors.
-3. Set `SPIDERFOOT_TAG=v6.1.0-bd.1-rc.31`, stop the whole stack, start it.
+3. Set `SPIDERFOOT_TAG=v6.1.0-bd.1-rc.31` and **redeploy** the stack (not just Stop and Start, which reuses the old containers and image).
 4. Scans now run on the Celery worker (2 at a time, extra scans wait in the queue). If a scan seems stuck in `STARTING`,
    check `sf-celery-worker-active`.
 5. A stored `_embedding_provider` of `mock` overrides the new default. Set Embeddings to `fastembed` under Settings,

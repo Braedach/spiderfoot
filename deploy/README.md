@@ -113,11 +113,14 @@ not update them. For each deploy:
 1. Paste the stack file from the tag you are deploying into the deploy tool (Dockhand), if its version header changed.
 2. Do any host-side step the release notes list (for example `chown -R 1000:1000 /srv/spiderfoot/embeddings-cache`).
 3. Set `SPIDERFOOT_TAG=v6.1.0-bd.1-rcN` in the stack's environment, and nothing else.
-4. Stop the whole stack, then start it. A single stop and start is enough: there is no GPU device to strip any more
-   (removed in stack-podman 2.13.0), and the stack comes up as one unit.
+4. **Redeploy** the stack (in Dockhand: Redeploy; with compose: `up -d`, or `down` then `up -d`). Do **not** just Stop
+   and Start: that restarts the existing stopped containers, which keep their old image and environment, so the new tag
+   and stack file are ignored (rc.31 once came up on rc.29 this way). Redeploy recreates any container whose image,
+   environment or definition changed. There is no GPU device to strip any more (removed in stack-podman 2.13.0), so the
+   stack comes up as one unit.
 5. Check every container is `healthy` and that the running image tags are the new ones
-   (`podman ps --format '{{.Names}} {{.Image}} {{.Status}}'`). If a service is still on the old tag, the tag change was
-   not saved before the redeploy.
+   (`podman ps --format '{{.Names}} {{.Image}} {{.Status}}'`). If a service is still on the old tag, the stack was
+   started rather than redeployed, or the tag change was not saved first.
 
 ### Tag scheme
 
