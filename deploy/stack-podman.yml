@@ -1,6 +1,6 @@
 # =============================================================================
 # deploy/stack-podman.yml  (was stack-spiderfoot-podman.yml in the repo root until 2.8.0)
-# Version: 2.16.2
+# Version: 2.16.3
 # Created: 2026-08-06
 # Updated: 2026-11-14
 #
@@ -99,6 +99,8 @@
 #       to investigate. IDS/IPS systems may react, to the scans and to Tor.
 #
 # Changelog:
+#   2.16.3 (2026-11-14) - sf-tor healthcheck fixed: podman-compose re-splits the command on spaces, so the 2.16.0 check failed with a
+#     Python syntax error and sf-tor was reported unhealthy although Tor was running. Also includes the 2.16.2 Summary rewrite.
 #   2.16.2 (2026-11-14) - Comments only: the Summary is rewritten to describe the stack as it is now (services, AI, Tor, modules, images
 #     and tags, the deployment sequence). Removed the out-of-date GPU, torch, old tag scheme and early-fork notes; their history stays below.
 #     The development host is ceros (renamed from claude on 2026-11-02). No change to any service.
@@ -629,7 +631,9 @@ services:
     environment:
       - TZ=${TZ}
     healthcheck:
-      test: ["CMD", "python3", "-c", "import socket; s=socket.create_connection(('127.0.0.1',9050),3); s.sendall(bytes([5,1,0])); assert s.recv(2)==bytes([5,0])"]
+      # No spaces inside the python code: podman-compose 1.3.0 re-splits a healthcheck command on spaces, which broke
+      # the first version of this check ("import" arrived alone and the container was reported unhealthy).
+      test: ["CMD", "python3", "-c", "__import__('socket').create_connection(('127.0.0.1',9050),3).close()"]
       interval: 30s
       timeout: 5s
       retries: 5
