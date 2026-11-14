@@ -109,6 +109,9 @@
 #     - IDS/IPS systems may go ballistic
 #
 # Changelog:
+#   2.14.0 (2026-11-14) - sf-api and both Celery workers now get SF_EMBEDDING_PROVIDER/MODEL/DIMENSIONS=fastembed and the embeddings cache (read-only),
+#     like sf-agents. They had none, so scan findings were being indexed with mock (meaningless) vectors while sf-agents searched with fastembed.
+#     Needs the cache directory to exist and be populated (sf-agents fills it); findings indexed before this change should be re-indexed.
 #   2.13.0 (2026-11-14) - sf-agents: the NVIDIA CDI device (nvidia.com/gpu=all) is removed, matching stack-docker.yml. The image is CPU-only
 #     (fastembed), so it was never used, and it failed to resolve on a compose redeploy, which forced a hand-edited stack on every deploy.
 #     With it gone the whole stack can be stopped, SPIDERFOOT_TAG changed, and started again as one unit.
@@ -299,9 +302,17 @@ services:
       - SF_DEPLOYMENT_MODE=${SF_DEPLOYMENT_MODE}
       - SF_POSTGRES_DSN=${SF_DATABASE_URL}
       - SF_REDIS_URL=${SF_REDIS_URL}
+      - HF_HOME=/home/spiderfoot/.cache/huggingface
+      - SF_EMBEDDING_PROVIDER=fastembed
+      - SF_EMBEDDING_MODEL=all-MiniLM-L6-v2
+      - SF_EMBEDDING_DIMENSIONS=384
       - SF_LOG_FORMAT=${SF_LOG_FORMAT}
       - SF_JWT_SECRET=${SF_JWT_SECRET_KEY}
       - SF_ADMIN_PASSWORD=${SF_ADMIN_PASSWORD}
+    volumes:
+      # Same model cache sf-agents uses (read-only here): scan findings must be
+      # indexed with the model the searches use, or similarity is meaningless.
+      - /srv/spiderfoot/embeddings-cache:/home/spiderfoot/.cache/huggingface:ro
     depends_on:
       - sf-postgres
       - sf-redis
@@ -340,6 +351,10 @@ services:
       - SF_POSTGRES_DSN=${SF_DATABASE_URL}
       - SF_JWT_SECRET=${SF_JWT_SECRET_KEY}
       - SF_REDIS_URL=${SF_REDIS_URL}
+      - HF_HOME=/home/spiderfoot/.cache/huggingface
+      - SF_EMBEDDING_PROVIDER=fastembed
+      - SF_EMBEDDING_MODEL=all-MiniLM-L6-v2
+      - SF_EMBEDDING_DIMENSIONS=384
       - SF_LOG_FORMAT=${SF_LOG_FORMAT}
       # Real-time Qdrant indexing via EventBus - CURRENTLY INERT. The
       # scanner-side publish code (commit 1bead36e) was reverted on
@@ -352,6 +367,10 @@ services:
       # stack-spiderfoot-podman.yml's git history / PR #393 for the fix.
       - SF_EVENTBUS_BACKEND=redis
       - SF_EVENTBUS_REDIS_URL=${SF_REDIS_URL}
+    volumes:
+      # Same model cache sf-agents uses (read-only here): scan findings must be
+      # indexed with the model the searches use, or similarity is meaningless.
+      - /srv/spiderfoot/embeddings-cache:/home/spiderfoot/.cache/huggingface:ro
     depends_on:
       - sf-postgres
       - sf-redis
@@ -390,12 +409,20 @@ services:
       - SF_POSTGRES_DSN=${SF_DATABASE_URL}
       - SF_JWT_SECRET=${SF_JWT_SECRET_KEY}
       - SF_REDIS_URL=${SF_REDIS_URL}
+      - HF_HOME=/home/spiderfoot/.cache/huggingface
+      - SF_EMBEDDING_PROVIDER=fastembed
+      - SF_EMBEDDING_MODEL=all-MiniLM-L6-v2
+      - SF_EMBEDDING_DIMENSIONS=384
       - SF_LOG_FORMAT=${SF_LOG_FORMAT}
       # Real-time Qdrant indexing via EventBus - CURRENTLY INERT, same as
       # sf-celery-worker above (reverted 2026-09-11, kept for later).
       - SF_EVENTBUS_BACKEND=redis
       - SF_EVENTBUS_REDIS_URL=${SF_REDIS_URL}
       - NMAP_PRIVILEGED=1
+    volumes:
+      # Same model cache sf-agents uses (read-only here): scan findings must be
+      # indexed with the model the searches use, or similarity is meaningless.
+      - /srv/spiderfoot/embeddings-cache:/home/spiderfoot/.cache/huggingface:ro
     depends_on:
       - sf-postgres
       - sf-redis

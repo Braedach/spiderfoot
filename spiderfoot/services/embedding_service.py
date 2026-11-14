@@ -80,7 +80,7 @@ class EmbeddingConfig:
         import os
         e = env or os.environ
         return cls(
-            provider=EmbeddingProvider(e.get("SF_EMBEDDING_PROVIDER", "mock")),
+            provider=EmbeddingProvider(e.get("SF_EMBEDDING_PROVIDER", "fastembed")),
             model_name=e.get("SF_EMBEDDING_MODEL", "all-MiniLM-L6-v2"),
             dimensions=int(e.get("SF_EMBEDDING_DIMENSIONS", "384")),
             api_key=e.get("SF_EMBEDDING_API_KEY", ""),
