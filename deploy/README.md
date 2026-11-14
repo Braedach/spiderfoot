@@ -137,7 +137,9 @@ were structural, so the fixes are rules, not one-off patches:
   Taken so far: `certifi` and Pillow 13 (critical CA-trust and image-decoding
   findings), on 2026-10-24 `brotli` 1.2.1 (critical), `filelock` 4.2.1 and
   `pypdf` 6.21.2 (high), and on 2026-10-28 `dnspython` 2.9.0 in both locks
-  (high — DoS via DNS compression pointer traversal, CVE-2026-114605), plus the
+  (high — DoS via DNS compression pointer traversal, CVE-2026-114605), on 2026-11-14
+  `soupsieve` 4.0.1 (high — polynomial-time DoS in selector parsing, fixed in 4.0, which
+  was 10 days old; bs4 CSS selection re-verified against it), plus the
   `cryptography` override in the tools lock. Each is an `--exclude-newer-package`
   date in the compile command below, and must pass the scan gate. Move them back
   under the 14-day rule at the next rebuild — **do a plain recompile without
