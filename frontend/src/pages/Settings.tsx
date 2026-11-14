@@ -17,11 +17,13 @@ import {
   type ToastType,
 } from '../components/ui';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
+import { LOG_FONT_SIZES, setLogFontSize, useLogFontSize, type LogFontSize } from '../lib/logFontSize';
 
 export default function SettingsPage() {
   useDocumentTitle('Settings');
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<SettingsTab>('system');
+  const logFontSize = useLogFontSize();
   const [selectedSection, setActiveSection] = useState('global:core');
   const [search, setSearch] = useState('');
   const [toast, setToast] = useState<{ type: ToastType; message: string } | null>(null);
@@ -207,6 +209,25 @@ export default function SettingsPage() {
           <p>The embedding, reranking and vector-search settings behind correlation and AI reports. The LLM provider itself (and its API key) is set on AI Connections.</p>
         )}
       </InfoNote>
+
+      {tab === 'system' && (
+        <div className="card mt-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Log text size</h3>
+            <p className="text-xs text-dark-400 mt-1">Size of the text in a scan&apos;s Log tab. Saved in this browser only.</p>
+          </div>
+          <select
+            aria-label="Log text size"
+            className="input-field w-auto min-w-[160px] text-sm"
+            value={logFontSize}
+            onChange={(e) => setLogFontSize(e.target.value as LogFontSize)}
+          >
+            {(Object.keys(LOG_FONT_SIZES) as LogFontSize[]).map((k) => (
+              <option key={k} value={k}>{LOG_FONT_SIZES[k].label}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mt-4">
         {/* Sidebar */}

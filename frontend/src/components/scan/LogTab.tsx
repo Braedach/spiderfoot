@@ -3,10 +3,12 @@ import { useQuery } from '@tanstack/react-query';
 import { scanApi, formatEpoch, type ScanLogEntry } from '../../lib/api';
 import { ScrollText, Download } from 'lucide-react';
 import { SearchInput, EmptyState, TableSkeleton } from '../ui';
+import { LOG_FONT_SIZES, useLogFontSize } from '../../lib/logFontSize';
 
 function LogTab({ scanId, isRunning = false }: { scanId: string; isRunning?: boolean }) {
   const [logFilter, setLogFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
+  const logFontSize = useLogFontSize();
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['scan-logs', scanId],
@@ -88,7 +90,7 @@ function LogTab({ scanId, isRunning = false }: { scanId: string; isRunning?: boo
                   <th className="table-header">Message</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-dark-700/30 font-mono text-xs">
+              <tbody className="divide-y divide-dark-700/30 font-mono" style={{ fontSize: LOG_FONT_SIZES[logFontSize].px }}>
                 {filteredLogs.map((log: ScanLogEntry, i: number) => (
                   <tr key={log.rowid ?? i} className="table-row">
                     <td className="table-cell text-dark-500 whitespace-nowrap">{formatEpoch(log.generated)}</td>
