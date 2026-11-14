@@ -74,8 +74,8 @@ interface GroupMeta {
 
 export const GLOBAL_GROUPS: Record<string, GroupMeta> = {
   ai: { tab: 'ai', label: 'AI Provider', description: 'The LLM used for report generation and RAG analysis (Anthropic, OpenAI, Ollama, or a local/mock provider).', order: 0, hideFromSettingsSidebar: true },
-  embedding: { tab: 'ai', label: 'Embeddings (RAG)', description: 'Model used to turn scan events into vectors for semantic correlation.', order: 1 },
-  reranker: { tab: 'ai', label: 'Reranker (RAG)', description: 'Model used to re-score and filter vector search results.', order: 2 },
+  embedding: { tab: 'ai', label: 'Embeddings (RAG)', description: 'Turns each scan finding into a list of numbers that captures its meaning, so related findings can be found by similarity for correlation and AI reports. Use "fastembed" (runs locally on the CPU; nothing leaves the stack). "mock" produces meaningless placeholder vectors, which makes similarity results and reports unreliable.', order: 1 },
+  reranker: { tab: 'ai', label: 'Reranker (RAG)', description: 'A second pass over the closest matches the vector search returns: it scores each one more carefully and keeps only the best few (Top K, above the score threshold), so the AI is shown the most relevant findings. "mock" skips this and keeps the vector-search order. The local cross-encoder option is not installed in this build, and the hosted options (Cohere, Jina) send finding text to a third party.', order: 2 },
   vector: { tab: 'ai', label: 'Vector Search', description: 'Qdrant vector database and the vector-based correlation engine.', order: 3 },
   network: { tab: 'system', label: 'Network & Proxy', description: 'DNS (used for scan targets and public names only; stack services use the container network DNS), SOCKS proxy, and outbound HTTP request behaviour.', order: 4 },
   database: { tab: 'data', label: 'Database', description: 'PostgreSQL connection used for scan data storage.', order: 5 },
