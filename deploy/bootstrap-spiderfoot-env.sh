@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Script: bootstrap-spiderfoot-env.sh
-# Version: 1.3.0
+# Version: 1.4.1
 # Created: 2026-08-06
-# Updated: 2026-10-24
+# Updated: 2026-11-14
 #
 # Summary:
 #   Purpose:
@@ -16,7 +16,7 @@
 #     SF_ADMIN_PASSWORD locks you out of the UI until you find the new
 #     one.
 #
-#     Run it on the host that RUNS the stack (baden for production, claude
+#     Run it on the host that RUNS the stack (baden for production, ceros
 #     for development), never on the build host: the build host has no
 #     reason to ever see these values. Run it separately on each so the two
 #     deployments get DIFFERENT secrets - the development host must never
@@ -52,7 +52,7 @@
 #       file's OWN variable names, not what the app reads directly - the
 #       stack yml maps them to SF_POSTGRES_DSN / SF_JWT_SECRET at
 #       container-injection time (confirmed from the app's own source
-#       during the claude build). Keep that mapping in the yml, don't
+#       during the first build on ceros, then named claude). Keep that mapping in the yml, don't
 #       rename these here to match
 #     - SPIDERFOOT_TAG is written BLANK on purpose. The stacks require an exact
 #       published tag (see deploy/README.md) and refuse to start without one,
@@ -64,6 +64,8 @@
 #       since a human has to get the values out to store them elsewhere
 #
 # Changelog:
+#   1.4.1 (2026-11-14) - Comments only: the development host is ceros (renamed from claude on 2026-11-02); the header's
+#     version line had stayed at 1.3.0 through 1.4.0 and is corrected.
 #   1.4.0 (2026-11-05) - No longer writes or asks for ANTHROPIC_API_KEY: the LLM provider and key are set in the GUI
 #                        (AI Connections), not in the environment.
 #   1.3.0 (2026-10-24) - No longer generates SF_LLM_API_KEY: it only authenticated agents to the LiteLLM proxy, which is gone.

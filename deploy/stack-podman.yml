@@ -1,59 +1,56 @@
 # =============================================================================
 # deploy/stack-podman.yml  (was stack-spiderfoot-podman.yml in the repo root until 2.8.0)
-# Version: 2.16.1
+# Version: 2.16.2
 # Created: 2026-08-06
 # Updated: 2026-11-14
 #
 # Summary:
 #   Purpose:
-#     Self-hosted OSINT correlation platform (poppopjmp/spiderfoot v6.1.0, microservices fork).
-#     Standalone manual investigation dashboard - separate from the osint stack's n8n automation pipeline.
-#     This is the Podman PRODUCTION deployment (baden). The development/sandbox
-#     deployment on claude is deploy/stack-docker.yml. Only ever PULLS the
-#     images deploy/publish.sh builds and pushes - it never builds anything.
-#     See deploy/README.md for the build -> test -> release flow.
+#     Self-hosted OSINT platform: this fork of poppopjmp/spiderfoot v6.1.0 (the microservices SpiderFoot).
+#     A standalone, manual investigation dashboard.
+#     This is the Podman PRODUCTION deployment (baden). The Docker development/sandbox deployment (ceros) is
+#     deploy/stack-docker.yml; the two files describe the same stack and are kept in step. This file only ever
+#     PULLS the published images - it never builds anything. See deploy/README.md for the build, test and release flow.
 #
-#     AI report generation (sf-agents) calls Anthropic's API (Claude Sonnet 5.5) directly through the official SDK.
-#     No proxy and no local Ollama. The provider and its API key are set in the GUI (AI Connections), not in the environment.
-#     Single network for isolation
-#     Tor: the sf-tor service is a Tor client used ONLY for .onion addresses by the dark-web modules (Settings > Tor,
-#     default sf-tor:9050). It publishes no port and is on by default, so this host makes Tor connections from the
-#     moment the stack starts; an IDS/IPS may flag them. To run without Tor, delete the sf-tor service and turn off
-#     "Use Tor" in Settings. The general outbound proxy (Settings > Network & Proxy) is a separate setting.
+#   Services (9; all on the internal network spiderfoot-net, only the UI publishes a port):
+#     sf-postgres               PostgreSQL 15: scans, results, settings
+#     sf-redis                  Redis 7: Celery broker, scan heartbeats and progress
+#     sf-qdrant                 Qdrant: vector index of scan findings (rebuildable from Postgres)
+#     sf-api                    REST API (spiderfoot-api image)
+#     sf-celery-worker          general worker: reports, exports, agents, monitoring (spiderfoot-scanner image)
+#     sf-celery-worker-active   scan worker with the active recon tools, 2 scans at a time (spiderfoot-active-scanner
+#                               image). Behind the "scan" profile: COMPOSE_PROFILES=scan must be set, or no scan can run.
+#     sf-frontend-ui            web UI on host port 5001 (spiderfoot-frontend image)
+#     sf-agents                 AI report and analysis agents (spiderfoot-base image); also joins llm-net to reach Ollama
+#     sf-tor                    Tor client for the dark-web modules (spiderfoot-base image), no published port
 #
-#     110 of SpiderFoot's 310 modules need an API key; 80 of those are free (sign up, generate a key)
-#     Highest-value free ones:
-#        - Shodan, VirusTotal, AlienVault OTX, Censys, BinaryEdge, Hunter.io, AbuseIPDB, IPInfo.io, WhoisXML API, CertSpotter, FullHunt.
-#     Full list: docs/free-api-modules.md
+#   AI:
+#     The LLM provider (Anthropic, OpenAI, DeepSeek, Ollama or Mock), its key and its model are set in the GUI
+#     (AI Connections) and stored encrypted. There is no LLM key in the environment and no LLM proxy.
+#     Embeddings are local (fastembed, CPU, about 67 MB); there is no GPU device and no torch in any image.
 #
-#  Functionality:
-#     - New - The answer is no till I fix what was intended from the fork
-#     - Get that going and working as intended - then I will think about it.  Would like to add SmartAI functionality but lets see.
+#   Tor:
+#     sf-tor is used ONLY for .onion addresses by the dark-web modules (Settings > Tor, default sf-tor:9050). It is on
+#     by default, so this host makes Tor connections from the moment the stack starts; an IDS/IPS may flag them. To
+#     run without Tor, delete the sf-tor service and turn off "Use Tor" in Settings. The general outbound proxy
+#     (Settings > Network & Proxy) is a separate setting.
 #
-#  GPU Passthrough:
-#     - This is your fault
-#     - current implementation uses torch which is massive and unwieldy
-#     - torch takes the results of the scan and reduced the calls to the AI decreasing time and cost
-#     - Get rid of the current solution and make it better and smaller.
+#   Modules:
+#     About 295 modules. 121 need an API key, and 104 of those have a free tier (sign up, generate a key). Keys are
+#     entered on the Modules page. Highest-value free ones: Shodan, VirusTotal, AlienVault OTX, Censys, BinaryEdge,
+#     Hunter.io, AbuseIPDB, IPInfo.io, WhoisXML API, CertSpotter, FullHunt. 28 modules drive an external tool and run
+#     only on sf-celery-worker-active.
 #
-#   Builds
-#     - 6.1.0-g4b0231b2 is NOT good - do not use. Real Postgres connection-leak bug in ReportStore's read-only methods (get/list_reports/count never
-#       committed, leaving transactions open indefinitely) - causes AI report generation to appear to hang/spin after a few uses, once enough stuck
-#       connections pile up blocking the reports table. See Changelog 2.4.0.
-#     - 6.1.0-gb05e98c3 is NOT good - do not use. Despite its own changelog entry (2.4.0) claiming otherwise, the fix above never
-#       actually shipped in code - only in docs. See Changelog 2.6.0 for the full correction.
-#     - 6.1.0-g95d573f9 was the last known-good build under the OLD tagging scheme (2026-09-22) - the ReportStore fix genuinely
-#       applied this time, plus the same missing-commit pattern fixed across 17 more spiderfoot/db/ methods. Verified live on
-#       baden via direct stress-test. See Changelog 2.6.0.
-#     - TAGGING CHANGED in 2.8.0. The <VERSION>-g<sha> scheme is retired. Images are now tagged by deploy/publish.sh as
-#       v<upstream base>-bd.<N> (release) or v<upstream base>-bd.<N>-rc.<M> (test build), e.g. v6.1.0-bd.1. An -rc tag never
-#       moves :latest. SPIDERFOOT_TAG is REQUIRED and has no default: pin production to an exact release tag. No v*-bd.*
-#       build has been verified known-good yet - record the first one here once it has soaked on claude and then baden.
-#     - Remove other builds prior to starting major modifications
+#   Images and tags:
+#     Images are built and pushed by deploy/publish.sh on the build host (davros), never by GitHub Actions, and are
+#     tagged v<upstream base>-bd.<N> for a release or v<upstream base>-bd.<N>-rc.<M> for a release candidate,
+#     e.g. v6.1.0-bd.1-rc.36. An -rc tag never moves :latest, and this stack never uses :latest: SPIDERFOOT_TAG is
+#     REQUIRED and has no default. No non-rc release exists yet. Which candidates were validated live, and which
+#     must not be run (rc.32 and rc.33: database connection leak), is recorded in deploy/README.md.
+#     The stack file is not inside the images: a new tag does not update it. Take the file from the tag you deploy.
 #
 #   Usage:
-#     UI at http://localhost:5001
-#     Reverse proxy will require configuration along with appropriate CNAMES
+#     UI at http://localhost:5001. A reverse proxy in front of it needs its own configuration and DNS names.
 #
 #     FULL DEPLOYMENT SEQUENCE, from nothing, on baden:
 #       1. Generate the runtime secrets (one time only, ever), on the host that runs the stack:
@@ -64,55 +61,47 @@
 #               cat /srv/spiderfoot/stack-spiderfoot-env.env
 #       2. Create the data directories:
 #             - mkdir -p /srv/spiderfoot/{postgres,redis,qdrant,embeddings-cache} && chown -R 1000:1000 /srv/spiderfoot/embeddings-cache
-#          Dockhand deploys with Docker Compose, which silently drops Podman-only volume flags (":U" etc.), so ownership is
-#          NOT applied automatically: set it on the host (postgres data dir owned by uid 70, the postgres:alpine user).
-#       3. In Dockhand, create the stack on the baden environment:
+#          The compose engine does not apply Podman's ":U" ownership flag, so ownership is set on the host: the
+#          postgres data dir is owned by uid 70 (the postgres:alpine user). sf-tor needs no directory.
+#       3. In Dockhand (which runs this file with podman-compose), create the stack on the baden environment:
 #          - Paste or sync this file
 #          - Supply the values from /srv/spiderfoot/stack-spiderfoot-env.env as the stack's environment, and set
-#            SPIDERFOOT_TAG to an exact published tag (see Builds above). The stack refuses to start without it.
+#            SPIDERFOOT_TAG to an exact published tag. The stack refuses to start without it.
 #          - Deploy
-#       4. Confirm all 8 containers report healthy (9 with the `scan` profile; sf-tor is one of the 8), then log in at the UI above with the admin password from step 1.
-#
-#       5. To upgrade: change SPIDERFOOT_TAG to the new exact tag and redeploy. Updates are deliberate, never automatic
-#          (Watchtower was purged 30 Sep 2026).
+#       4. Confirm all 9 containers report healthy (8 if COMPOSE_PROFILES does not include "scan"), then log in at the
+#          UI above with the admin password from step 1. The dashboard's System health should show Tor as "working"
+#          within about a minute.
+#       5. To upgrade: paste the stack file from the new tag if its version changed, change SPIDERFOOT_TAG to the new
+#          exact tag and REDEPLOY. Do not Stop and Start: that reuses the old containers, images and definition.
+#          Updates are deliberate, never automatic. Read UPGRADING.md first when the release notes say "breaking".
 #
 #   Prerequisites:
-#    - CNAME entries appropriate for you deployment
-#    - Working Podman managed LXC Debian
-#    - Reverse proxy system - network modification may be required due to your network structure
-#    - The tag you deploy has been published by deploy/publish.sh (see deploy/README.md)
+#     - A Podman host (a Debian LXC here) with podman-compose
+#     - The tag in SPIDERFOOT_TAG has been published by deploy/publish.sh (see deploy/README.md)
+#     - /srv/spiderfoot/* exist with the ownership from step 2
+#     - DNS names and a reverse proxy for the UI, as your network requires
+#     - An AI provider and key, entered in the GUI under AI Connections after first login (not an environment variable)
 #
 #   Warnings:
-#     - Bumped sf-qdrant v1.19.1 -> v1.20.0 (2026-11-13), one minor version. Checked Qdrant's own
-#       1.20 release notes and blog upgrade guide first: no storage/snapshot format change (unlike
-#       the 1.12.4->1.19.1 jump below), and the breaking items in 1.20 (internal cluster auth
-#       defaulting on when api_key is set, alt_api_key-only clusters needing 1.19.2 first, inline
-#       storage needing hnsw_config.memory) are all cluster/inline-storage specific - this is a
-#       single-node deployment with no api_key/alt_api_key/cluster config, and create_collection()
-#       (spiderfoot/ai/qdrant_client.py) never sets on_disk/inline storage. Plain tag bump, no
-#       volume wipe needed. Same reasoning as below still applies if this turns out wrong: nothing
-#       stored in Qdrant is anything other than a reconstructable derivative of Postgres scan data.
-#     - BREAKING CHANGE (2.3.0, 2026-09-16): sf-qdrant jumped v1.12.4 -> v1.19.1, a 7-minor-version bump.
-#       Qdrant's own upgrade docs are explicit that a single-node deployment cannot skip minor versions with
-#       existing data on disk. Confirmed the hard way here: bumping the tag and restarting in place crash-looped
-#       immediately (RocksDB->Gridstore storage format incompatibility). Safe fix, NOT a generic answer to every
-#       Qdrant upgrade - only correct because nothing this stack stores in Qdrant is anything other than a
-#       reconstructable derivative of Postgres scan data (confirmed by tracing every write path into it fork-wide,
-#       2026-09-16 - see PR history). Stop the container and wipe its volume entirely, then restart clean:
-#           - podman stop sf-qdrant
-#           - rm -rf /srv/spiderfoot/qdrant/collections /srv/spiderfoot/qdrant/aliases /srv/spiderfoot/qdrant/.deleted /srv/spiderfoot/qdrant/raft_state.json
-#           - podman start sf-qdrant
-#       Tested live on baden.
-#     - BREAKING CHANGE (2.1.0, 2026-09-12): image tags 6.1.0-g529d9da2 and later have NO torch/sentence-transformers anywhere 
-#       SF_EMBEDDING_PROVIDER=sentence_transformer silently degrades to mock (fake) embeddings on those tags, not an error. 
-#       This file already runs fastembed - see Changelog 2.1.0.
+#     - SPIDERFOOT_TAG is REQUIRED and has no default; -rc tags never move :latest, and this stack does not use :latest.
+#     - Keep this file and deploy/stack-docker.yml in step: a change made in one that is not made in the other defeats
+#       the point of a development stack. The one deliberate exception is sf-juiceshop, which exists only there.
+#     - Qdrant holds nothing that cannot be rebuilt from Postgres. A Qdrant upgrade that skips minor versions cannot
+#       reuse its data directory: stop sf-qdrant, clear /srv/spiderfoot/qdrant, start it and re-index (Changelog 2.3.0).
+#     - The embedding provider is fastembed. sentence_transformer silently degrades to mock (meaningless) embeddings
+#       on current images (Changelog 2.1.0).
 #     - depends_on is start-order only, not health-gated - deliberate.
-#     - read_only + tmpfs mode=1777 on the api/worker containers and nginx's tmpfs + cap_add [CHOWN, SETGID, SETUID] on the frontend were both found the hard way.
-#     - Runs 300+ modules incl. 33+ active recon tools (scan profile) that make outbound requests to third parties during scans
-#     - only scan targets you are authorised to investigate
-#     - IDS/IPS systems may go ballistic
+#     - read_only with tmpfs mode=1777 on the api and worker containers, and nginx's tmpfs with cap_add
+#       [CHOWN, SETGID, SETUID] on the frontend, were both found the hard way: do not "tidy" them.
+#     - podman-compose 1.3.0 cannot take a templated "external:" on a network (see the networks section and
+#       deploy/stack-podman.llm-external.yml).
+#     - Active recon tools make outbound requests to third parties during scans. Only scan targets you are authorised
+#       to investigate. IDS/IPS systems may react, to the scans and to Tor.
 #
 # Changelog:
+#   2.16.2 (2026-11-14) - Comments only: the Summary is rewritten to describe the stack as it is now (services, AI, Tor, modules, images
+#     and tags, the deployment sequence). Removed the out-of-date GPU, torch, old tag scheme and early-fork notes; their history stays below.
+#     The development host is ceros (renamed from claude on 2026-11-02). No change to any service.
 #   2.16.1 (2026-11-14) - Comments only: the Tor service is described in the Summary and step 4 counts sf-tor. No change to any service.
 #   2.16.0 (2026-11-14) - New service sf-tor (Tor client from the spiderfoot-base image, no published port), used only for .onion addresses
 #     by the dark-web modules (Settings > Tor, default sf-tor:9050). Needs images v6.1.0-bd.1-rc.35 or later (tor is in the base image from there).
