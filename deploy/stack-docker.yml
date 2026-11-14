@@ -1,6 +1,6 @@
 # =============================================================================
 # deploy/stack-docker.yml
-# Version: 2.6.4
+# Version: 2.6.5
 # Created: 2026-10-23
 # Updated: 2026-11-14
 #
@@ -106,6 +106,7 @@
 #       isolated for testing. IDS/IPS systems may react, to the scans and to Tor.
 #
 # Changelog:
+#   2.6.5 (2026-11-14) - Mirrors stack-podman.yml 2.16.4: sf-tor accepts its own loopback address (stops the healthcheck log noise).
 #   2.6.4 (2026-11-14) - Mirrors stack-podman.yml 2.16.3: sf-tor healthcheck written without spaces. Also includes the 2.6.3 Summary rewrite.
 #   2.6.3 (2026-11-14) - Comments only: the Summary now mirrors stack-podman.yml 2.16.2 section for section (services, AI, Tor, modules,
 #     images and tags, the deployment sequence); only the Docker commands and sf-juiceshop differ. The development host is ceros.
@@ -525,7 +526,9 @@ services:
       - "--SocksPort"
       - "0.0.0.0:9050"
       - "--SocksPolicy"
-      - "accept 10.0.0.0/8,accept 172.16.0.0/12,accept 192.168.0.0/16,reject *"
+      # 127.0.0.0/8 is the container's own loopback: the healthcheck connects from it. Without it Tor logged
+      # "Denying socks connection from untrusted address 127.0.0.1" every 30 seconds.
+      - "accept 127.0.0.0/8,accept 10.0.0.0/8,accept 172.16.0.0/12,accept 192.168.0.0/16,reject *"
       - "--DataDirectory"
       - "/tmp/tor"
       - "--ClientOnly"

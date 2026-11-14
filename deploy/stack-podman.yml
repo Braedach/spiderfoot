@@ -1,6 +1,6 @@
 # =============================================================================
 # deploy/stack-podman.yml  (was stack-spiderfoot-podman.yml in the repo root until 2.8.0)
-# Version: 2.16.3
+# Version: 2.16.4
 # Created: 2026-08-06
 # Updated: 2026-11-14
 #
@@ -99,6 +99,8 @@
 #       to investigate. IDS/IPS systems may react, to the scans and to Tor.
 #
 # Changelog:
+#   2.16.4 (2026-11-14) - sf-tor: the SOCKS access rule now accepts the container's own loopback address, so the healthcheck no longer
+#     produces a "Denying socks connection from untrusted address 127.0.0.1" log line every 30 seconds. No other change.
 #   2.16.3 (2026-11-14) - sf-tor healthcheck fixed: podman-compose re-splits the command on spaces, so the 2.16.0 check failed with a
 #     Python syntax error and sf-tor was reported unhealthy although Tor was running. Also includes the 2.16.2 Summary rewrite.
 #   2.16.2 (2026-11-14) - Comments only: the Summary is rewritten to describe the stack as it is now (services, AI, Tor, modules, images
@@ -613,7 +615,9 @@ services:
       - "--SocksPort"
       - "0.0.0.0:9050"
       - "--SocksPolicy"
-      - "accept 10.0.0.0/8,accept 172.16.0.0/12,accept 192.168.0.0/16,reject *"
+      # 127.0.0.0/8 is the container's own loopback: the healthcheck connects from it. Without it Tor logged
+      # "Denying socks connection from untrusted address 127.0.0.1" every 30 seconds.
+      - "accept 127.0.0.0/8,accept 10.0.0.0/8,accept 172.16.0.0/12,accept 192.168.0.0/16,reject *"
       - "--DataDirectory"
       - "/tmp/tor"
       - "--ClientOnly"
