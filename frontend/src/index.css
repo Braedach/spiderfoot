@@ -156,6 +156,19 @@
   .input-search {
     @apply input-field pl-10;
   }
+  /* `.input` is used across pages (Schedules, both IaC tabs, ...) but was never
+     defined, so those controls rendered as unstyled native elements. */
+  .input {
+    @apply input-field;
+  }
+  /* Native option lists ignore the field's own background, so a dark theme got
+     light text on a light list. Give them the theme's surface and text colours. */
+  select.input-field option,
+  select.input option,
+  select.input-field optgroup,
+  select.input optgroup {
+    @apply bg-dark-900 text-dark-100;
+  }
 
   /* ── Badges ──────────────────────────────────────────────── */
   .badge {
