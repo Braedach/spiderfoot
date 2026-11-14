@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import tempfile
+from urllib.parse import urlparse
 
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
 from spiderfoot import SpiderFootEvent
@@ -52,6 +53,7 @@ class sfp_tool_katana(SpiderFootAsyncPlugin):
         "extension_filter": "png,jpg,gif,svg,ico,woff,woff2,ttf,eot,css,mp4,mp3",
         "max_results": 5000,
         "run_timeout": 600,
+        "max_seed_urls": 25,
     }
 
     optdescs = {
@@ -67,6 +69,7 @@ class sfp_tool_katana(SpiderFootAsyncPlugin):
         "extension_filter": "File extensions to exclude (comma-separated).",
         "max_results": "Maximum endpoints to return.",
         "run_timeout": "Total run timeout in seconds.",
+        "max_seed_urls": "Maximum number of discovered URLs (beyond the target itself) to start a crawl from, one per host and top-level path. Each crawl already follows links to the configured depth, so crawling from every discovered URL repeats the same pages.",
     }
 
     results = None
@@ -75,6 +78,36 @@ class sfp_tool_katana(SpiderFootAsyncPlugin):
         super().setup(sfc, userOpts or {})
         self.errorState = False
         self.results = self.tempStorage()
+        self.seedKeys = set()
+        self.seedCount = 0
+
+    def _is_static_asset(self, url: str) -> bool:
+        """True for a URL that points at an image, stylesheet, font or media file: nothing to crawl."""
+        ext = os.path.splitext(urlparse(url).path)[1].lstrip(".").lower()
+        skip = {e.strip().lower() for e in str(self.opts.get("extension_filter", "")).split(",") if e.strip()}
+        return bool(ext) and ext in skip
+
+    @staticmethod
+    def _seed_key(url: str) -> str:
+        """One crawl per host and top-level path: deeper URLs are reached by the crawl itself."""
+        parsed = urlparse(url)
+        first = parsed.path.strip("/").split("/")[0] if parsed.path.strip("/") else ""
+        return f"{parsed.netloc.lower()}/{first}"
+
+    def _should_crawl_from(self, event) -> bool:
+        """Decide whether this event starts a new katana crawl."""
+        if event.eventType != "LINKED_URL_INTERNAL":
+            return True  # the target domain itself
+        if event.module == self.__name__:
+            return False  # our own output; the crawl that found it already followed it
+        if self._is_static_asset(event.data):
+            return False
+        key = self._seed_key(event.data)
+        if key in self.seedKeys or self.seedCount >= int(self.opts.get("max_seed_urls", 25)):
+            return False
+        self.seedKeys.add(key)
+        self.seedCount += 1
+        return True
 
     def watchedEvents(self):
         return ["DOMAIN_NAME", "LINKED_URL_INTERNAL"]
@@ -106,6 +139,10 @@ class sfp_tool_katana(SpiderFootAsyncPlugin):
         if data in self.results:
             return
         self.results[data] = True
+
+        if not self._should_crawl_from(event):
+            self.debug(f"katana: not starting a crawl from {data}")
+            return
 
         binary = self._find_binary()
         if not binary:
