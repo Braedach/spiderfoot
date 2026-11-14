@@ -12,10 +12,14 @@ procedure are in [`deploy/README.md`](deploy/README.md).
 - **Phone, email and name profiles follow what they find.** A name or email yields usernames and profile links, but the
   profiles listed only the modules that read the target itself, so those leads were never followed (the name profile ran
   3 working modules). They now include the follow-on modules that need no key: GitHub, Keybase, Venmo, Wikipedia edits,
-  Hudson Rock, Twitter, SlideShare and Myspace for names and emails (name profile 3 -> 11 modules, email 11 -> 18).
+  Hudson Rock, SlideShare and Myspace for names and emails (name profile 3 -> 10 modules, email 12 -> 15).
 - **Keyed modules join a profile automatically.** Each profile lists the keyed modules it can use (14 phone, 25 email,
   5 name, including every free-tier service). They are skipped, with no error, until their API key is saved on the Modules
   page, then run in the next scan. The By Profile cards show how many are active.
+- **Modules whose service is gone are no longer listed** (each checked against its real endpoint on 2026-11-14):
+  `sfp_callername` (callername.com is a parked domain) from the phone profile; `sfp_trumail` (its API now says Trumail
+  joined Emailable) and `sfp_searchcode` (API answers 404) from the email profile; `sfp_onionsearchengine` (its domain no
+  longer resolves) from the Dark Web profile. `sfp_twitter` is not used either: profile pages need a login.
 - `sfp_gravatar` is removed from the phone profile: it only reads email addresses, so it could never run on a phone number.
   A new test checks that every module named in these profiles can fire from the profile's own target.
 

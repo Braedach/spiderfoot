@@ -102,3 +102,22 @@ def test_credentials_detection_matches_the_modules_page():
 def test_optional_modules_round_trip_through_serialisation():
     p = ScanProfile(name="t", display_name="T", include_modules=["a"], optional_modules=["b"])
     assert ScanProfile.from_dict(p.to_dict()).optional_modules == ["b"]
+
+
+# Modules whose service was found dead, parked or login-walled on 2026-11-14 (see CHANGELOG, rc.37). A profile must not
+# list them: they cost time and add errors without ever returning data.
+KNOWN_DEAD = {"sfp_callername", "sfp_trumail", "sfp_searchcode", "sfp_twitter", "sfp_duckduckgo", "sfp_sublist3r",
+              "sfp_bgpview", "sfp_sorbs", "sfp_onionsearchengine", "sfp_tool_wappalyzer", "sfp_tool_phoneinfoga"}
+
+
+@pytest.mark.parametrize("profile_name", sorted(SEEDS))
+def test_no_known_dead_module_is_listed(profile_name):
+    p = get_profile_manager().get(profile_name)
+    assert not KNOWN_DEAD & set(p.include_modules + p.optional_modules), profile_name
+
+
+def test_the_dark_web_profile_excludes_the_dead_search_engine(catalog):
+    p = get_profile_manager().get("dark-web")
+    all_modules = {n: {"meta": catalog[n].get("meta", {})} for n in catalog}
+    resolved = p.resolve_modules(all_modules)
+    assert "sfp_onionsearchengine" not in resolved and "sfp_ahmia" in resolved

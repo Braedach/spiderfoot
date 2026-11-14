@@ -393,7 +393,7 @@ class ProfileManager:
             display_name="Phone Number Intelligence",
             description=(
                 "Carrier, region, country and infostealer-breach lookups for a phone-number target. The modules that "
-                "need no key run always (sfp_callername's caller-ID lookup covers US numbers only). Carrier, line-type "
+                "need no key run always. Carrier, line-type "
                 "and leak lookups (numverify, abstractapi, neutrinoapi, Twilio, IntelX and others) join automatically "
                 "once their API key is saved on the Modules page."
             ),
@@ -401,8 +401,8 @@ class ProfileManager:
             include_modules=[
                 "sfp_phone",          # phonenumbers lib: carrier/region/timezone/validity
                 "sfp_countryname",    # country from phone/IP/etc.
-                "sfp_callername",     # caller-ID lookup - US numbers only
                 "sfp_hudsonrock",     # Hudson Rock Cavalier: free infostealer-breach intel
+                # sfp_callername is not listed: callername.com is now a parked domain (checked 2026-11-14)
             ],
             optional_modules=[
                 "sfp_numverify", "sfp_abstractapi", "sfp_neutrinoapi", "sfp_twilio", "sfp_textmagic",   # carrier / line type
@@ -430,17 +430,17 @@ class ProfileManager:
                 "sfp_email",        # core extractor - finds more addresses in gathered data
                 "sfp_emailformat",  # guesses a company's email naming pattern from its domain
                 "sfp_debounce",     # disposable-email check (debounce.io)
-                "sfp_trumail",      # disposable-email check (trumail.io) - independent 2nd source
                 "sfp_pgp",          # PGP keyserver lookup
                 "sfp_gravatar",     # Gravatar presence check
                 "sfp_hudsonrock",   # Hudson Rock Cavalier: free infostealer-breach intel
                 "sfp_grep_app",     # search grep.app for leaked email mentions in public code
-                "sfp_searchcode",   # search searchcode.com for the same
                 "sfp_accounts",     # check the local-part as a username across 500+ sites
                 "sfp_wikileaks",    # search Wikileaks for mentions
                 "sfp_myspace",      # Myspace profile for the address
                 # follow-on: the usernames and profile URLs found above
-                "sfp_github", "sfp_keybase", "sfp_venmo", "sfp_wikipediaedits", "sfp_twitter", "sfp_slideshare",
+                "sfp_github", "sfp_keybase", "sfp_venmo", "sfp_wikipediaedits", "sfp_slideshare",
+                # not listed (checked 2026-11-14): sfp_trumail (its API now says Trumail joined Emailable),
+                # sfp_searchcode (API answers 404), sfp_twitter (profile pages need a login)
             ],
             optional_modules=[
                 "sfp_emailrep", "sfp_citadel", "sfp_ipqualityscore", "sfp_nameapi", "sfp_botscout",   # reputation
@@ -474,7 +474,7 @@ class ProfileManager:
                 "sfp_wikileaks",  # search Wikileaks for mentions
                 # follow-on: the usernames and profile URLs found above
                 "sfp_github", "sfp_keybase", "sfp_venmo", "sfp_wikipediaedits", "sfp_hudsonrock",
-                "sfp_twitter", "sfp_slideshare", "sfp_myspace",
+                "sfp_slideshare", "sfp_myspace",
             ],
             optional_modules=[
                 "sfp_socialprofiles", "sfp_tiktok_osint", "sfp_whoisfreaks", "sfp_sociallinks", "sfp_c99",
@@ -494,6 +494,8 @@ class ProfileManager:
             ),
             category=ProfileCategory.DARKWEB,
             include_flags=["tor"],
+            # as.onionsearchengine.com no longer resolves (checked 2026-11-14)
+            exclude_modules=["sfp_onionsearchengine"],
             max_threads=2,
             tags=["darkweb", "tor", "deep-web"],
         ))
