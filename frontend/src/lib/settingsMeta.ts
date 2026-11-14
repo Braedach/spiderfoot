@@ -60,7 +60,11 @@ export interface GlobalKeyMeta {
   description: string;
 }
 
+export type SettingsTab = 'system' | 'data' | 'ai' | 'modules';
+
 interface GroupMeta {
+  /** Which Settings tab the group appears under. */
+  tab: Exclude<SettingsTab, 'modules'>;
   label: string;
   description: string;
   order: number;
@@ -69,18 +73,18 @@ interface GroupMeta {
 }
 
 export const GLOBAL_GROUPS: Record<string, GroupMeta> = {
-  ai: { label: 'AI Provider', description: 'The LLM used for report generation and RAG analysis (Anthropic, OpenAI, Ollama, or a local/mock provider).', order: 0, hideFromSettingsSidebar: true },
-  embedding: { label: 'Embeddings (RAG)', description: 'Model used to turn scan events into vectors for semantic correlation.', order: 1 },
-  reranker: { label: 'Reranker (RAG)', description: 'Model used to re-score and filter vector search results.', order: 2 },
-  vector: { label: 'Vector Search', description: 'Qdrant vector database and the vector-based correlation engine.', order: 3 },
-  network: { label: 'Network & Proxy', description: 'DNS, SOCKS proxy, and outbound HTTP request behaviour.', order: 4 },
-  database: { label: 'Database', description: 'PostgreSQL connection used for scan data storage.', order: 5 },
-  cache_queue: { label: 'Cache & Queue', description: 'Redis-backed caching, the event bus, and background worker concurrency.', order: 6 },
-  storage: { label: 'Object Storage', description: 'MinIO/S3 buckets for reports, logs, and backups.', order: 7 },
-  elasticsearch: { label: 'Elasticsearch', description: 'Optional Elasticsearch export for scan events.', order: 8 },
-  web_api: { label: 'Web & API', description: 'Listener host/port and logging for the web UI and REST API.', order: 9 },
-  core: { label: 'Core', description: 'General scan engine behaviour.', order: 10 },
-  other: { label: 'Other', description: 'Options not yet categorised.', order: 99 },
+  ai: { tab: 'ai', label: 'AI Provider', description: 'The LLM used for report generation and RAG analysis (Anthropic, OpenAI, Ollama, or a local/mock provider).', order: 0, hideFromSettingsSidebar: true },
+  embedding: { tab: 'ai', label: 'Embeddings (RAG)', description: 'Model used to turn scan events into vectors for semantic correlation.', order: 1 },
+  reranker: { tab: 'ai', label: 'Reranker (RAG)', description: 'Model used to re-score and filter vector search results.', order: 2 },
+  vector: { tab: 'ai', label: 'Vector Search', description: 'Qdrant vector database and the vector-based correlation engine.', order: 3 },
+  network: { tab: 'system', label: 'Network & Proxy', description: 'DNS, SOCKS proxy, and outbound HTTP request behaviour.', order: 4 },
+  database: { tab: 'data', label: 'Database', description: 'PostgreSQL connection used for scan data storage.', order: 5 },
+  cache_queue: { tab: 'data', label: 'Cache & Queue', description: 'Redis-backed caching, the event bus, and background worker concurrency.', order: 6 },
+  storage: { tab: 'data', label: 'Object Storage', description: 'MinIO/S3 buckets for reports, logs, and backups.', order: 7 },
+  elasticsearch: { tab: 'data', label: 'Elasticsearch', description: 'Optional Elasticsearch export for scan events.', order: 8 },
+  web_api: { tab: 'system', label: 'Web & API', description: 'Listener host/port and logging for the web UI and REST API.', order: 9 },
+  core: { tab: 'system', label: 'Core', description: 'General scan engine behaviour.', order: 10 },
+  other: { tab: 'system', label: 'Other', description: 'Options not yet categorised.', order: 99 },
 };
 
 /**

@@ -5,15 +5,15 @@ import {
   configApi, dataApi, type Module,
 } from '../lib/api';
 import {
-  isCredentialOption, moduleHasCredential, metaForGlobalKey, GLOBAL_GROUPS,
+  isCredentialOption, moduleHasCredential, metaForGlobalKey, GLOBAL_GROUPS, type SettingsTab,
 } from '../lib/settingsMeta';
 import {
   Settings as SettingsIcon, Globe, KeyRound, Upload, Download,
   RotateCcw, Save, Eye, EyeOff, AlertTriangle,
-  Loader2,
+  Loader2, Database, Sparkles, Cpu,
 } from 'lucide-react';
 import {
-  PageHeader, SearchInput, Toast, ConfirmDialog, EmptyState,
+  PageHeader, SearchInput, Toast, ConfirmDialog, EmptyState, Tabs,
   Skeleton,
   type ToastType,
 } from '../components/ui';
@@ -22,7 +22,8 @@ import { useDocumentTitle } from '../hooks/useDocumentTitle';
 export default function SettingsPage() {
   useDocumentTitle('Settings');
   const queryClient = useQueryClient();
-  const [activeSection, setActiveSection] = useState('global:embedding');
+  const [tab, setTab] = useState<SettingsTab>('system');
+  const [selectedSection, setActiveSection] = useState('global:core');
   const [search, setSearch] = useState('');
   const [toast, setToast] = useState<{ type: ToastType; message: string } | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -60,13 +61,13 @@ export default function SettingsPage() {
     }
     const items: { key: string; label: string; count: number; isGlobal: boolean }[] = [];
     for (const [groupId, meta] of Object.entries(GLOBAL_GROUPS).sort((a, b) => a[1].order - b[1].order)) {
-      if (meta.hideFromSettingsSidebar) continue;
+      if (meta.hideFromSettingsSidebar || meta.tab !== tab) continue;
       const count = groupCounts.get(groupId) ?? 0;
       if (count === 0) continue;
       items.push({ key: `global:${groupId}`, label: meta.label, count, isGlobal: true });
     }
 
-    const sortedModules = [...modules]
+    const sortedModules = (tab === 'modules' ? [...modules] : [])
       .map((m) => ({
         mod: m,
         nonCredCount: Object.keys(m.opts ?? {}).filter((k) => !isCredentialOption(k)).length,
@@ -87,7 +88,10 @@ export default function SettingsPage() {
       return items.filter((i) => i.label.toLowerCase().includes(q) || i.key.toLowerCase().includes(q));
     }
     return items;
-  }, [globalOptions, modules, search]);
+  }, [globalOptions, modules, search, tab]);
+
+  /* The selection can belong to another tab; fall back to this tab's first section. */
+  const activeSection = sections.some((x) => x.key === selectedSection) ? selectedSection : (sections[0]?.key ?? '');
 
   const activeModule = activeSection.startsWith('global:') ? undefined : modules.find((m) => m.name === activeSection);
   const activeGroup = activeSection.startsWith('global:') ? activeSection.slice(7) : null;
@@ -223,7 +227,7 @@ export default function SettingsPage() {
         className="hidden"
         onChange={onImportFileChange}
       />
-      <PageHeader title="Settings" subtitle="Platform configuration, grouped by subsystem. Module API keys live on Data Source Credentials; the LLM provider on AI Connections.">
+      <PageHeader title="Settings" subtitle="Core platform configuration. Module API keys live on Data Source Credentials; the LLM provider on AI Connections.">
         <div className="flex gap-2">
           <button className="btn-secondary text-sm" onClick={handleImport}>
             <Upload className="h-3.5 w-3.5" /> Import
@@ -237,7 +241,18 @@ export default function SettingsPage() {
         </div>
       </PageHeader>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      <Tabs<SettingsTab>
+        tabs={[
+          { key: 'system', label: 'System', icon: SettingsIcon },
+          { key: 'data', label: 'Data & Storage', icon: Database },
+          { key: 'ai', label: 'AI & Search', icon: Sparkles },
+          { key: 'modules', label: 'Module Options', icon: Cpu },
+        ]}
+        active={tab}
+        onChange={setTab}
+      />
+
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mt-4">
         {/* Sidebar */}
         <div className="card p-0 overflow-hidden h-fit lg:sticky lg:top-4">
           <div className="p-3 border-b border-dark-700/50">

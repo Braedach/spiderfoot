@@ -1,4 +1,4 @@
-import { Outlet, NavLink } from 'react-router-dom';
+import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { healthApi } from '../lib/api';
@@ -27,6 +27,7 @@ import {
   Monitor,
   Cpu,
   Calendar,
+  ChevronRight,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { ModalShell } from './ui';
@@ -39,23 +40,89 @@ interface NavItem {
   name: string;
   to: string;
   icon: React.ComponentType<{ className?: string }>;
+  /** Only shown when the user holds this permission. */
+  permission?: string;
+  /** Only shown when signed in. */
+  authOnly?: boolean;
 }
 
-/* Navigation matches CherryPy: New Scan, Scans, Workspaces, Documentation, Settings
-   plus Dashboard (new) and Agents (from Services dropdown) */
-const navItems: NavItem[] = [
-  { name: 'Dashboard', to: '/', icon: LayoutDashboard },
-  { name: 'New Scan', to: '/scans/new', icon: PlusCircle },
-  { name: 'Scans', to: '/scans', icon: Radar },
-  { name: 'Schedules', to: '/schedules', icon: Calendar },
-  { name: 'Modules', to: '/modules', icon: Cpu },
-  { name: 'Agents', to: '/agents', icon: Bot },
-  { name: 'Workspaces', to: '/workspaces', icon: Briefcase },
-  { name: 'Documentation', to: '/documentation', icon: BookOpen },
-  { name: 'Settings', to: '/settings', icon: Settings },
-  { name: 'Data Source Credentials', to: '/credentials', icon: KeyRound },
-  { name: 'AI Connections', to: '/ai-connections', icon: Sparkles },
+interface NavGroup {
+  id: string;
+  /** Heading text; null renders the items with no heading. */
+  label: string | null;
+  items: NavItem[];
+}
+
+/* Grouped navigation. Order is the order of the workflow: look, investigate,
+   work with what was found, configure, administer. */
+const NAV_GROUPS: NavGroup[] = [
+  {
+    id: 'overview',
+    label: null,
+    items: [{ name: 'Dashboard', to: '/', icon: LayoutDashboard }],
+  },
+  {
+    id: 'investigate',
+    label: 'Investigate',
+    items: [
+      { name: 'New Scan', to: '/scans/new', icon: PlusCircle },
+      { name: 'Scans', to: '/scans', icon: Radar },
+      { name: 'Schedules', to: '/schedules', icon: Calendar },
+      { name: 'Workspaces', to: '/workspaces', icon: Briefcase },
+    ],
+  },
+  {
+    id: 'intelligence',
+    label: 'Intelligence',
+    items: [
+      { name: 'Modules', to: '/modules', icon: Cpu },
+      { name: 'Agents', to: '/agents', icon: Bot },
+    ],
+  },
+  {
+    id: 'configure',
+    label: 'Configure',
+    items: [
+      { name: 'Settings', to: '/settings', icon: Settings },
+      { name: 'Data Source Credentials', to: '/credentials', icon: KeyRound },
+      { name: 'AI Connections', to: '/ai-connections', icon: Sparkles },
+      // SpiderFoot's own REST tokens, not the third-party module keys above.
+      { name: 'Access Tokens', to: '/api-keys', icon: Fingerprint, authOnly: true },
+    ],
+  },
+  {
+    id: 'administration',
+    label: 'Administration',
+    items: [
+      { name: 'Users', to: '/users', icon: Users, permission: 'user:read' },
+      { name: 'SSO Settings', to: '/sso-settings', icon: Lock, permission: 'config:write' },
+    ],
+  },
+  {
+    id: 'help',
+    label: 'Help',
+    items: [{ name: 'Documentation', to: '/documentation', icon: BookOpen }],
+  },
 ];
+
+const NAV_COLLAPSED_KEY = 'sf-nav-collapsed';
+
+function loadCollapsed(): Record<string, boolean> {
+  try {
+    return JSON.parse(localStorage.getItem(NAV_COLLAPSED_KEY) || '{}') as Record<string, boolean>;
+  } catch {
+    return {};
+  }
+}
+
+function navLinkClass({ isActive }: { isActive: boolean }): string {
+  return clsx(
+    'flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors',
+    isActive
+      ? 'bg-spider-600/20 text-spider-400'
+      : 'text-dark-300 hover:bg-dark-800 hover:text-dark-100',
+  );
+}
 
 interface ServiceLink {
   name: string;
@@ -83,7 +150,26 @@ export default function Layout() {
   const [showAbout, setShowAbout] = useState(false);
   const [servicesOpen, setServicesOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(loadCollapsed);
+  const location = useLocation();
   const { user, isAuthenticated, logout, hasPermission } = useAuthStore();
+
+  const toggleGroup = (id: string) => {
+    setCollapsed((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      try { localStorage.setItem(NAV_COLLAPSED_KEY, JSON.stringify(next)); } catch { /* storage unavailable */ }
+      return next;
+    });
+  };
+
+  const itemVisible = (item: NavItem): boolean => {
+    if (item.permission) return isAuthenticated && hasPermission(item.permission);
+    if (item.authOnly) return isAuthenticated;
+    return true;
+  };
+
+  const isItemActive = (item: NavItem): boolean =>
+    item.to === '/' ? location.pathname === '/' : location.pathname === item.to || location.pathname.startsWith(item.to + '/');
   const { theme, setTheme } = useTheme();
 
   // Poll health dashboard so the services dropdown can show live status dots.
@@ -137,84 +223,44 @@ export default function Layout() {
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.to === '/'}
-              onClick={() => { if (window.innerWidth < 1024) setSidebarOpen(false); }}
-              className={({ isActive }) =>
-                clsx(
-                  'flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors',
-                  isActive
-                    ? 'bg-spider-600/20 text-spider-400'
-                    : 'text-dark-300 hover:bg-dark-800 hover:text-dark-100',
-                )
-              }
-            >
-              <item.icon className="h-4 w-4 flex-shrink-0" />
-              {item.name}
-            </NavLink>
-          ))}
-
-          {/* Admin-only nav items */}
-          {isAuthenticated && hasPermission('user:read') && (
-            <NavLink
-              to="/users"
-              onClick={() => { if (window.innerWidth < 1024) setSidebarOpen(false); }}
-              className={({ isActive }) =>
-                clsx(
-                  'flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors',
-                  isActive
-                    ? 'bg-spider-600/20 text-spider-400'
-                    : 'text-dark-300 hover:bg-dark-800 hover:text-dark-100',
-                )
-              }
-            >
-              <Users className="h-4 w-4 flex-shrink-0" />
-              Users
-            </NavLink>
-          )}
-
-          {/* SSO Settings (admin only) */}
-          {isAuthenticated && hasPermission('config:write') && (
-            <NavLink
-              to="/sso-settings"
-              onClick={() => { if (window.innerWidth < 1024) setSidebarOpen(false); }}
-              className={({ isActive }) =>
-                clsx(
-                  'flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors',
-                  isActive
-                    ? 'bg-spider-600/20 text-spider-400'
-                    : 'text-dark-300 hover:bg-dark-800 hover:text-dark-100',
-                )
-              }
-            >
-              <Lock className="h-4 w-4 flex-shrink-0" />
-              SSO Settings
-            </NavLink>
-          )}
-
-          {/* Access Tokens — SpiderFoot's own REST API auth tokens, not to be
-              confused with Data Source Credentials (third-party module keys) */}
-          {isAuthenticated && (
-            <NavLink
-              to="/api-keys"
-              onClick={() => { if (window.innerWidth < 1024) setSidebarOpen(false); }}
-              className={({ isActive }) =>
-                clsx(
-                  'flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors',
-                  isActive
-                    ? 'bg-spider-600/20 text-spider-400'
-                    : 'text-dark-300 hover:bg-dark-800 hover:text-dark-100',
-                )
-              }
-            >
-              <Fingerprint className="h-4 w-4 flex-shrink-0" />
-              Access Tokens
-            </NavLink>
-          )}
+        <nav className="flex-1 px-3 py-3 overflow-y-auto" aria-label="Main navigation">
+          {NAV_GROUPS.map((group) => {
+            const items = group.items.filter(itemVisible);
+            if (items.length === 0) return null;
+            // A collapsed group stays open while it holds the page being viewed.
+            const open = !group.label || !collapsed[group.id] || items.some(isItemActive);
+            return (
+              <div key={group.id} className="mb-2">
+                {group.label && (
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(group.id)}
+                    aria-expanded={open}
+                    className="w-full flex items-center gap-1.5 px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-dark-500 hover:text-dark-300 transition-colors"
+                  >
+                    <ChevronRight className={clsx('h-3 w-3 transition-transform', open && 'rotate-90')} />
+                    {group.label}
+                  </button>
+                )}
+                {open && (
+                  <div className="space-y-0.5">
+                    {items.map((item) => (
+                      <NavLink
+                        key={item.to}
+                        to={item.to}
+                        end={item.to === '/'}
+                        onClick={() => { if (window.innerWidth < 1024) setSidebarOpen(false); }}
+                        className={navLinkClass}
+                      >
+                        <item.icon className="h-4 w-4 flex-shrink-0" />
+                        {item.name}
+                      </NavLink>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </nav>
 
         {/* Theme toggle */}
