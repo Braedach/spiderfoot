@@ -239,8 +239,11 @@ class EmbeddingModelConfig:
 
 @dataclass
 class RerankerModelConfig:
-    """Reranker / cross-encoder settings for improving correlation accuracy."""
-    provider: str = "mock"
+    """Reranker settings for improving correlation accuracy.
+
+    "llm" scores candidates with the LLM chosen on AI Connections (no extra setup;
+    keeps the vector-search order if none is configured). "mock" does no real reranking."""
+    provider: str = "llm"
     model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     api_key: str = ""
     top_k: int = 10
