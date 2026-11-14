@@ -241,6 +241,48 @@ class TestModuleToolGobuster(TestModuleBase):
         module.fetch_url = MagicMock(side_effect=OSError("connection refused"))
         self.assertIsNone(module._detect_soft_404("http://target"))
 
+    def test_parse_output_captures_size_and_redirect_target(self):
+        out = (
+            "admin                (Status: 301) [Size: 0] [--> http://t/admin/]\n"
+            "robots.txt           (Status: 200) [Size: 43]\n"
+        )
+        res = self.module_class._parse_output(out)["results"]
+        self.assertEqual(res[0], {"path": "/admin/", "status": 301, "size": 0, "redirect": "http://t/admin/"})
+        self.assertEqual(res[1]["size"], 43)
+
+    def test_wildcard_flood_is_discarded(self):
+        """A WAF/rate limit answering every request identically made every wordlist entry a hit
+        (16,660 URL_FILE events on a live scan)."""
+        flood = "".join(f"word{i}.php  (Status: 403) [Size: 110]\n" for i in range(200))
+        real = "login               (Status: 200) [Size: 5120]\n"
+        results = self.module_class._parse_output(flood + real)["results"]
+        kept, dropped = self.module_class._drop_uniform_responses(results, 100)
+        self.assertEqual(dropped, 200)
+        self.assertEqual([r["path"] for r in kept], ["/login"])
+
+    def test_wildcard_redirect_to_a_fixed_page_is_discarded(self):
+        flood = "".join(f"w{i}  (Status: 302) [Size: 0] [--> https://t/home]\n" for i in range(150))
+        kept, dropped = self.module_class._drop_uniform_responses(self.module_class._parse_output(flood)["results"], 100)
+        self.assertEqual((kept, dropped), ([], 150))
+
+    def test_real_directory_redirects_are_kept(self):
+        """Each real directory redirects to its own trailing-slash URL, so none share a response."""
+        dirs = "".join(f"d{i}  (Status: 301) [Size: 0] [--> http://t/d{i}/]\n" for i in range(300))
+        results = self.module_class._parse_output(dirs)["results"]
+        kept, dropped = self.module_class._drop_uniform_responses(results, 100)
+        self.assertEqual((len(kept), dropped), (300, 0))
+
+    def test_small_groups_and_disabled_threshold_keep_everything(self):
+        few = "".join(f"w{i}  (Status: 403) [Size: 110]\n" for i in range(40))
+        results = self.module_class._parse_output(few)["results"]
+        self.assertEqual(self.module_class._drop_uniform_responses(results, 100)[1], 0)
+        flood = self.module_class._parse_output("".join(f"w{i}  (Status: 403) [Size: 1]\n" for i in range(500)))["results"]
+        self.assertEqual(self.module_class._drop_uniform_responses(flood, 0)[1], 0)
+
+    def test_results_without_sizes_are_never_filtered(self):
+        results = [{"path": f"/p{i}", "status": 200} for i in range(500)]
+        self.assertEqual(self.module_class._drop_uniform_responses(results, 100), (results, 0))
+
     def tearDown(self):
         """Clean up after each test."""
         super().tearDown()
