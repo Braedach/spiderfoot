@@ -28,7 +28,9 @@ class FakeStore:
 
 
 class FakeDb:
-    def __init__(self, *a, **k): pass
+    open_handles = 0  # every handle the config code opens must be closed again (pool leak guard)
+    def __init__(self, *a, **k): FakeDb.open_handles += 1
+    def close(self): FakeDb.open_handles -= 1
     def configSet(self, m):
         assert m, "configSet must not be called with nothing to write"
         FakeStore.rows.update(m)
@@ -132,3 +134,15 @@ def test_global_setting_change_does_not_clobber_module_keys():
 
 def test_changed_keys_helper():
     assert Config._changed_keys({"a": 1, "b": 2, "c": 3}, {"a": 1, "b": 9}) == {"b": 2, "c": 3}
+
+
+
+def test_config_code_closes_every_db_handle():
+    """Saving and reloading must not leave a pooled connection checked out (rc.33 leaked one per call)."""
+    FakeDb.open_handles = 0
+    a, b = worker(), worker()
+    a.set_module_options("sfp_virustotal", {"api_key": "vt-key"})
+    b.reload()
+    b.refresh_if_stale(max_age=0)
+    assert dependencies.get_fresh_config_values().get("sfp_virustotal:api_key") == "vt-key"
+    assert FakeDb.open_handles == 0
