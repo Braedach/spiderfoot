@@ -48,6 +48,8 @@ async def list_entity_types(api_key: str = optional_auth_dep) -> dict:
                 return {"entity_types": codes}
         except Exception:
             pass
+        finally:
+            dbh.close()
         # Fallback to config-based event types
         sf = SpiderFoot(config.get_config())
         types = sf.getEventTypes()

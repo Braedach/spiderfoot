@@ -107,8 +107,12 @@ class Config:
         # Normal flow: read from DB, merge, wrap in AppConfig
         self.defaultConfig = default_config.copy()
         dbh = SpiderFootDb(self.defaultConfig, init=True)
+        try:
+            stored = dbh.configGet()
+        finally:
+            dbh.close()
         sf = SpiderFoot(self.defaultConfig)
-        merged = sf.configUnserialize(dbh.configGet(), self.defaultConfig)
+        merged = sf.configUnserialize(stored, self.defaultConfig)
 
         # Load modules from filesystem (same as sf_orchestrator)
         if not merged.get('__modules__'):
@@ -223,7 +227,11 @@ class Config:
                 flat = self.get_config()
                 changed = self._changed_keys(self._serialise(), self._synced)
                 if changed:
-                    SpiderFootDb(flat).configSet(changed)
+                    _db = SpiderFootDb(flat)
+                    try:
+                        _db.configSet(changed)
+                    finally:
+                        _db.close()
                     self.log.info("Configuration saved to database (%d changed keys)", len(changed))
             except Exception as exc:
                 self.log.warning("Failed to save config to DB: %s", exc)
@@ -236,8 +244,12 @@ class Config:
             try:
                 flat = self.get_config()
                 dbh = SpiderFootDb(flat)
+                try:
+                    stored = dbh.configGet()
+                finally:
+                    dbh.close()
                 sf = SpiderFoot(flat)
-                merged = sf.configUnserialize(dbh.configGet(), flat)
+                merged = sf.configUnserialize(stored, flat)
                 self._app_config = AppConfig.from_dict(merged)
                 self._app_config.apply_env_overrides()
                 self._mark_synced()
@@ -442,7 +454,10 @@ def get_fresh_config_values() -> dict[str, str]:
     """
     try:
         dbh = SpiderFootDb(get_app_config().get_config())
-        return dbh.configGet()
+        try:
+            return dbh.configGet()
+        finally:
+            dbh.close()
     except Exception:
         logging.getLogger("spiderfoot.api").warning(
             "Failed to read fresh config values from the database; "

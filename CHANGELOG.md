@@ -16,6 +16,10 @@ procedure are in [`deploy/README.md`](deploy/README.md).
 - The Data Source Credentials page is removed; module options and API keys are edited on the Modules page.
 
 ### Fixed
+- **Database connection leak (rc.34):** the rc.33 configuration refresh opened a database handle on almost every request and
+  never returned it, so each API worker ran out of pooled connections within minutes of real use (dashboard stopped
+  updating, scan launches and other calls answered 500). Every config read/write now closes its handle, and a dropped
+  handle returns its connection by itself. Database error messages no longer contain the connection string (it carried the password).
 - **Scope escape (security):** active modules followed discovery data onto shared Cloudflare/Fastly infrastructure and
   the strict-scope gate rejected every full-URL event; both fixed (deterministic CDN-range check, URL reduced to its FQDN).
 - **Silent module failures:** seven modules' own `_maxthreads` option was overwritten by the global key; four modules had

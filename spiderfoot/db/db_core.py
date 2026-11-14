@@ -13,6 +13,7 @@ Core DB connection, locking, schema management, and shared resources for SpiderF
 """
 from __future__ import annotations
 
+import re
 import logging
 import threading
 import psycopg2
@@ -433,8 +434,28 @@ class DbCore:
         createSchemaQueries.insert(0, schema_version_table)
     SCHEMA_VERSION = 1  # Increment this on every schema change
 
+    @staticmethod
+    def _redact_dsn(text) -> str:
+        """Mask the userinfo (user:password@) of any connection URL in text."""
+        return re.sub(r"(\w+://)[^/@\s]*@", r"\1***@", str(text))
+
     def _log_db_error(self, msg, exc):
-        log.error("[DB] %s: %s", msg, exc)
+        log.error("[DB] %s: %s", self._redact_dsn(msg), self._redact_dsn(exc))
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        # Safety net: a handle that is dropped without close() must not keep its pooled
+        # connection checked out (a leak here exhausts the pool and 500s every request).
+        try:
+            if getattr(self, "conn", None) is not None:
+                self.close()
+        except Exception:
+            pass
 
     def __init__(self, opts: dict, init: bool = False) -> None:
         """
@@ -483,8 +504,8 @@ class DbCore:
                 self.dbh = self.conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
                 self._owns_pooled_conn = True
             except Exception as e:
-                self._log_db_error(f"Error connecting to PostgreSQL database {database_path}", e)
-                raise OSError(f"Error connecting to PostgreSQL database {database_path}") from e
+                self._log_db_error("Error connecting to PostgreSQL database", e)
+                raise OSError("Error connecting to PostgreSQL database") from e
             with self.dbhLock:
                 try:
                     self.create()
