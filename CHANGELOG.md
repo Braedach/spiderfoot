@@ -20,6 +20,12 @@ procedure are in [`deploy/README.md`](deploy/README.md).
   A new test checks that every module named in these profiles can fire from the profile's own target.
 
 ### Fixed (rc.37)
+- **Name searches carried the quote marks into everything.** A name target is typed in quotes (`"Leon Scott"`) to mark
+  its type, but the API passed the quotes on as part of the value. The root event, and every username derived from it,
+  contained them: sfp_accounts searched 500 sites for `"leonscott"` and reported `https://www.patreon.com/"leonscott"`
+  as an account, and GitHub, Keybase and the other username modules looked up text no site has. The scanner now strips
+  the type-marking quotes for name, username and bitcoin-address targets (the older command-line path already did).
+  This is the main reason name scans came back thin and partly wrong.
 - **Spider fetched every page twice:** `http://site:80/a` and `http://site/a` are one URL, but were treated as two, so a
   site reached both by name and by an open-port event was crawled, reported and stored twice (14% of one scan's URLs).
   The default port is now dropped and the scheme and host are lower-cased.

@@ -82,6 +82,25 @@ def startSpiderFootScanner(loggingQueue: Any, *args, **kwargs) -> SpiderFootScan
         return SpiderFootScanner(*args, **kwargs)
 
 
+# Target types that are written in double quotes to tell them apart from other types ("John Smith" is a name,
+# John Smith is nothing). The quotes are syntax, not part of the value.
+QUOTED_TARGET_TYPES = ("HUMAN_NAME", "USERNAME", "BITCOIN_ADDRESS")
+
+
+def clean_target_value(value: str, target_type: str) -> str:
+    """The target value without the quote marks that mark its type.
+
+    The API passes a name target on exactly as typed, quotes included. The root event then carried the quote marks,
+    and so did every username derived from it: sfp_accounts searched 500 sites for ``"leonscott"`` and reported
+    ``https://www.patreon.com/"leonscott"`` as an account, while the modules that follow usernames (GitHub, Keybase)
+    looked up the quoted text and found nothing. (The older core/scan.py path already stripped them.)
+    """
+    if target_type in QUOTED_TARGET_TYPES and isinstance(value, str):
+        cleaned = value.strip().strip('"').strip()
+        return cleaned or value
+    return value
+
+
 class SpiderFootScanner():
     """SpiderFootScanner object.
 
@@ -156,7 +175,7 @@ class SpiderFootScanner():
 
         self.__scanName = scanName
         self.__scanId = scanId
-        self.__targetValue = targetValue
+        self.__targetValue = clean_target_value(targetValue, targetType)
         self.__targetType = targetType
 
         # Filter out empty/whitespace-only entries
