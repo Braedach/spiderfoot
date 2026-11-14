@@ -27,13 +27,14 @@ deploy/
 └── requirements*.in / .lock    # hash-locked Python: the app, and the active scanner's tools
 ```
 
-**`stack-podman.yml` must be run with `podman-compose`, not Docker Compose's own CLI (`docker-compose`/`docker compose`,
-even when it is the plugin configured to talk to the podman socket).** `sf-agents`'s GPU passthrough uses Podman's own
-CDI device syntax (`devices: - nvidia.com/gpu=all`); Docker Compose's device handling treats that string as a literal
-host device path and fails with `stat nvidia.com/gpu=all: no such file or directory` — confirmed live on baden
-2026-11-05 trying to deploy `rc.18`. `podman-compose` is the one that understands it.
+**`stack-podman.yml` is deployed with `podman-compose`** (in production, through the deploy tool). It used to be a
+hard requirement: `sf-agents` had a GPU device in Podman's own CDI syntax, which Docker Compose's CLI cannot parse.
+That device was removed in stack-podman 2.13.0, but the file has not been tested with Docker Compose's CLI since, so
+`podman-compose` remains the supported way to run it.
 
-Both stacks run the same 8 services (7, plus the active-scan worker under the `scan` profile) and only ever **pull** images. They never
+Both stacks run the same 9 services (8, plus the active-scan worker under the `scan` profile): `sf-postgres`,
+`sf-redis`, `sf-qdrant`, `sf-api`, `sf-celery-worker`, `sf-celery-worker-active`, `sf-frontend-ui`, `sf-agents` and
+`sf-tor`. The development stack can also start `sf-juiceshop` (profile `testing`). They only ever **pull** images. They never
 build anything. The development stack mirrors production on purpose: what is
 tested there is what runs here.
 
@@ -49,7 +50,7 @@ and has proven itself to be very competant, and is capable of push-back on devel
 |---|---|---|
 | 1. Develop | workstation | branch off `main`, commit, push the branch, open a PR (do not merge yet) |
 | 2. Test build | workstation, then build host | create an **annotated** tag (`git tag -a`) and push it, then run `publish.sh` on the build host in a **login shell**. Exact commands in "Cutting a build" below |
-| 3. Soak | development host | paste the stack file from the same tag into the deploy tool, set `SPIDERFOOT_TAG`, stop and start the stack, test ("Deploying a build" below) |
+| 3. Soak | development host | paste the stack file from the same tag into the deploy tool, set `SPIDERFOOT_TAG`, **redeploy** the stack, then soak and test ("Deploying a build" below) |
 | 4. Merge | GitHub | merge the PR once step 3 is satisfactory |
 | 5. Release | build host | tag the merged commit `v6.1.0-bd.1`, push it, `./deploy/publish.sh v6.1.0-bd.1` |
 | 6. Deploy | production host | set `SPIDERFOOT_TAG=v6.1.0-bd.1` in the stack's environment and redeploy |
@@ -62,9 +63,9 @@ Every command, in order. Replace `N` with the next free rc number (`git tag -l '
 
 ```bash
 git checkout main && git pull --ff-only          # or the branch tip you are testing
-git tag -a v6.1.0-bd.1-rcN -m "rcN: one line on what changed" HEAD
-git push origin v6.1.0-bd.1-rcN
-git ls-remote --tags origin | grep rcN           # must list the tag, and a "^{}" line for the commit
+git tag -a v6.1.0-bd.1-rc.N -m "rc.N: one line on what changed" HEAD
+git push origin v6.1.0-bd.1-rc.N
+git ls-remote --tags origin | grep 'rc\.N'           # must list the tag, and a "^{}" line for the commit
 ```
 
 The tag must be **annotated** (`-a`, with a message). `publish.sh` rejects a lightweight tag with
@@ -74,7 +75,7 @@ published: a fix gets the next rc number.
 **2. Build host (`davros`, LXC 103 on the Proxmox host): start the build in the background.**
 
 ```bash
-ssh root@<proxmox-host> "pct exec 103 -- bash -lc 'cd /opt/spiderfoot/src && nohup ./deploy/publish.sh v6.1.0-bd.1-rcN > /opt/spiderfoot/spiderfoot-build-rcN.log 2>&1 < /dev/null &'"
+ssh root@<proxmox-host> "pct exec 103 -- bash -lc 'cd /opt/spiderfoot/src && nohup ./deploy/publish.sh v6.1.0-bd.1-rc.N > /opt/spiderfoot/spiderfoot-build-rcN.log 2>&1 < /dev/null &'"
 ```
 
 - Use `bash -lc` (a **login** shell). `git` lives in `/usr/local/bin`, which a plain `pct exec … bash -c` does not have
@@ -91,7 +92,7 @@ ssh root@<proxmox-host> "pct exec 103 -- tail -n 40 /opt/spiderfoot/spiderfoot-b
 
 The log has a lot of Docker output; the lines that matter start with `[INFO]`, `[OK]`, `[WARN]`, `[ERROR]` or `[scan]`.
 
-Healthy order: `Source at v…-rcN (<commit>)`, five `<image>: built`, `All 5 images carry revision <commit>`, five
+Healthy order: `Source at v…-rc.N (<commit>)`, five `<image>: built`, `All 5 images carry revision <commit>`, five
 `[scan] <image>: PASS`, `Scan gate passed for all 5 images`, `Pushed 5 images at …`, `Release: https://github.com/…`,
 `Build and publish complete`. The images exist in the registry only after `Pushed 5 images`.
 
@@ -112,7 +113,7 @@ not update them. For each deploy:
 
 1. Paste the stack file from the tag you are deploying into the deploy tool (Dockhand), if its version header changed.
 2. Do any host-side step the release notes list (for example `chown -R 1000:1000 /srv/spiderfoot/embeddings-cache`).
-3. Set `SPIDERFOOT_TAG=v6.1.0-bd.1-rcN` in the stack's environment, and nothing else.
+3. Set `SPIDERFOOT_TAG=v6.1.0-bd.1-rc.N` in the stack's environment, and nothing else.
 4. **Redeploy** the stack (in Dockhand: Redeploy; with compose: `up -d`, or `down` then `up -d`). Do **not** just Stop
    and Start: that restarts the existing stopped containers, which keep their old image and environment, so the new tag
    and stack file are ignored (rc.31 once came up on rc.29 this way). Redeploy recreates any container whose image,
@@ -831,7 +832,7 @@ chown -R 1000:1000 /srv/spiderfoot/embeddings-cache   # api and workers run non-
 # then set SPIDERFOOT_TAG in the file it wrote, deploy the stack, and set the AI provider and key in the GUI
 ```
 
-State is bind-mounted at an absolute `/srv/spiderfoot/<service>` path, not a
+`sf-tor` needs no directory and no setting. State is bind-mounted at an absolute `/srv/spiderfoot/<service>` path, not a
 relative one and not a named volume, so it is visible and backupable as plain
 files. Compose silently drops Podman-only mount flags such as `:U`, so
 directory ownership is set on the host (postgres data dir: uid 70).
@@ -889,8 +890,10 @@ fork's own.
 - AI features call Anthropic directly (Claude Sonnet 5.5, see "AI model") (`sf-agents`; the provider and key are set in
   the GUI, see "AI providers"). There is no LLM proxy: the LiteLLM gateway was removed
   after its supply-chain breach, and it had only relayed to Anthropic anyway.
-- This runs 300+ OSINT modules, including active recon tools that make
+- This runs about 290 OSINT modules, including active recon tools that make
   outbound requests to third parties. Only scan targets you are authorised to
   investigate.
+- `sf-tor` connects to the Tor network from the moment the stack starts (see "Tor" above). It keeps no state on
+  disk: its circuit data lives in tmpfs and is rebuilt on every start.
 - Never commit an `*.env` file, the GHCR token, or any API key. `*.env` is
   gitignored; keep it that way.
