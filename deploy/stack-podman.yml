@@ -1,6 +1,6 @@
 # =============================================================================
 # deploy/stack-podman.yml  (was stack-spiderfoot-podman.yml in the repo root until 2.8.0)
-# Version: 2.14.0
+# Version: 2.15.0
 # Created: 2026-08-06
 # Updated: 2026-11-14
 #
@@ -59,7 +59,7 @@
 #             - Re-running it is always safe and never rotates anything. If the secrets are lost later, read the file:
 #               cat /srv/spiderfoot/stack-spiderfoot-env.env
 #       2. Create the data directories:
-#             - mkdir -p /srv/spiderfoot/{postgres,redis,qdrant,embeddings-cache}
+#             - mkdir -p /srv/spiderfoot/{postgres,redis,qdrant,embeddings-cache} && chown -R 1000:1000 /srv/spiderfoot/embeddings-cache
 #          Dockhand deploys with Docker Compose, which silently drops Podman-only volume flags (":U" etc.), so ownership is
 #          NOT applied automatically: set it on the host (postgres data dir owned by uid 70, the postgres:alpine user).
 #       3. In Dockhand, create the stack on the baden environment:
@@ -109,6 +109,10 @@
 #     - IDS/IPS systems may go ballistic
 #
 # Changelog:
+#   2.15.0 (2026-11-14) - sf-api and both Celery workers share sf-agents' persistent model cache (/srv/spiderfoot/embeddings-cache) instead of
+#     downloading the ~90 MB embedding model into /tmp on every start. The directory must be writable by uid 1000 (they run non-root):
+#         chown -R 1000:1000 /srv/spiderfoot/embeddings-cache      (sf-agents runs as root, so it is unaffected)
+#     No HuggingFace key is needed: the model is a public download. Verified as uid 1000, read-only root, bind mount: real vectors.
 #   2.14.0 (2026-11-14) - sf-api and both Celery workers now get SF_EMBEDDING_PROVIDER/MODEL/DIMENSIONS=fastembed (and FASTEMBED_CACHE_PATH on
 #     /tmp), like sf-agents. They had none, so scan findings were indexed with mock (meaningless) vectors while sf-agents searched with
 #     fastembed. They download the ~67 MB model on first use after a start. sf-agents now keeps its model in the persistent
@@ -310,11 +314,13 @@ services:
       - SF_EMBEDDING_PROVIDER=fastembed
       - SF_EMBEDDING_MODEL=all-MiniLM-L6-v2
       - SF_EMBEDDING_DIMENSIONS=384
-      - FASTEMBED_CACHE_PATH=/tmp/fastembed_cache
-      - HF_HOME=/tmp/hf_home
+      - FASTEMBED_CACHE_PATH=/home/spiderfoot/.cache/huggingface/fastembed
+      - HF_HOME=/home/spiderfoot/.cache/huggingface
       - SF_LOG_FORMAT=${SF_LOG_FORMAT}
       - SF_JWT_SECRET=${SF_JWT_SECRET_KEY}
       - SF_ADMIN_PASSWORD=${SF_ADMIN_PASSWORD}
+    volumes:
+      - /srv/spiderfoot/embeddings-cache:/home/spiderfoot/.cache/huggingface
     depends_on:
       - sf-postgres
       - sf-redis
@@ -356,8 +362,8 @@ services:
       - SF_EMBEDDING_PROVIDER=fastembed
       - SF_EMBEDDING_MODEL=all-MiniLM-L6-v2
       - SF_EMBEDDING_DIMENSIONS=384
-      - FASTEMBED_CACHE_PATH=/tmp/fastembed_cache
-      - HF_HOME=/tmp/hf_home
+      - FASTEMBED_CACHE_PATH=/home/spiderfoot/.cache/huggingface/fastembed
+      - HF_HOME=/home/spiderfoot/.cache/huggingface
       - SF_LOG_FORMAT=${SF_LOG_FORMAT}
       # Real-time Qdrant indexing via EventBus - CURRENTLY INERT. The
       # scanner-side publish code (commit 1bead36e) was reverted on
@@ -370,6 +376,8 @@ services:
       # stack-spiderfoot-podman.yml's git history / PR #393 for the fix.
       - SF_EVENTBUS_BACKEND=redis
       - SF_EVENTBUS_REDIS_URL=${SF_REDIS_URL}
+    volumes:
+      - /srv/spiderfoot/embeddings-cache:/home/spiderfoot/.cache/huggingface
     depends_on:
       - sf-postgres
       - sf-redis
@@ -411,14 +419,16 @@ services:
       - SF_EMBEDDING_PROVIDER=fastembed
       - SF_EMBEDDING_MODEL=all-MiniLM-L6-v2
       - SF_EMBEDDING_DIMENSIONS=384
-      - FASTEMBED_CACHE_PATH=/tmp/fastembed_cache
-      - HF_HOME=/tmp/hf_home
+      - FASTEMBED_CACHE_PATH=/home/spiderfoot/.cache/huggingface/fastembed
+      - HF_HOME=/home/spiderfoot/.cache/huggingface
       - SF_LOG_FORMAT=${SF_LOG_FORMAT}
       # Real-time Qdrant indexing via EventBus - CURRENTLY INERT, same as
       # sf-celery-worker above (reverted 2026-09-11, kept for later).
       - SF_EVENTBUS_BACKEND=redis
       - SF_EVENTBUS_REDIS_URL=${SF_REDIS_URL}
       - NMAP_PRIVILEGED=1
+    volumes:
+      - /srv/spiderfoot/embeddings-cache:/home/spiderfoot/.cache/huggingface
     depends_on:
       - sf-postgres
       - sf-redis
