@@ -38,22 +38,30 @@ Both stacks run the same 9 services (8, plus the active-scan worker under the `s
 build anything. The development stack mirrors production on purpose: what is
 tested there is what runs here.
 
-## The flow: branch → test build → release
+## The flow: branch → merge → test build → release
 
-Nothing is pushed to `main`. Work happens on a branch, is tested as a
-**release candidate** on the development host, and only then merged and
-released.  An AI does the grunt work under human supervision.  It is fast & efficient,
+Nothing is pushed straight to `main`. Work happens on a branch and reaches `main` only through a pull request, once
+its unit tests pass. Every build, test builds included, is made from a tagged commit on `main`. A **release
+candidate** is then deployed and soaked, and a problem it shows is fixed by the next pull request and the next
+candidate, never by changing a published tag. A release is cut only from a commit whose candidate has passed.
+An AI does the grunt work under human supervision.  It is fast & efficient,
 but follows guidelines set within another repository.  The AI model employed is mid-level
 and has proven itself to be very competant, and is capable of push-back on development decisions.
 
 | Step | Where | Command / action |
 |---|---|---|
-| 1. Develop | workstation | branch off `main`, commit, push the branch, open a PR (do not merge yet) |
-| 2. Test build | workstation, then build host | create an **annotated** tag (`git tag -a`) and push it, then run `publish.sh` on the build host in a **login shell**. Exact commands in "Cutting a build" below |
-| 3. Soak | development host | paste the stack file from the same tag into the deploy tool, set `SPIDERFOOT_TAG`, **redeploy** the stack, then soak and test ("Deploying a build" below) |
-| 4. Merge | GitHub | merge the PR once step 3 is satisfactory |
-| 5. Release | build host | tag the merged commit `v6.1.0-bd.1`, push it, `./deploy/publish.sh v6.1.0-bd.1` |
-| 6. Deploy | production host | set `SPIDERFOOT_TAG=v6.1.0-bd.1` in the stack's environment and redeploy |
+| 1. Develop | workstation | branch off `main`, commit, run the unit tests, push the branch, open a PR |
+| 2. Merge | GitHub | merge the PR (merge commit) once the tests pass and the change has been reviewed; delete the branch |
+| 3. Test build | workstation, then build host | on `main`, create an **annotated** tag `v6.1.0-bd.1-rc.N` (`git tag -a`) and push it, then run `publish.sh` on the build host in a **login shell**. Exact commands in "Cutting a build" below |
+| 4. Soak | test host | paste the stack file from the same tag into the deploy tool if its version changed, set `SPIDERFOOT_TAG`, **redeploy** the stack, then soak and test ("Deploying a build" below). The test host is the development host, or the production host while it is the only deployment in use |
+| 5. Fix forward | workstation | anything the soak shows goes back to step 1 and ships as the next candidate. Write the release notes for each candidate, with a **Breaking change** section when it needs one |
+| 6. Release | build host | tag the commit of the candidate that passed as `v6.1.0-bd.1`, push it, `./deploy/publish.sh v6.1.0-bd.1` |
+| 7. Deploy | production host | set `SPIDERFOOT_TAG=v6.1.0-bd.1` in the stack's environment and redeploy |
+
+Why merge before building: a candidate built from a branch tip is not the code that ends up on `main` once other
+work merges, so the thing that soaked is not the thing that is released. Building from `main` means the tag, the
+images and the history all name the same commit. The cost is that an unproven change is on `main` before it has run
+live; the unit tests and the review are the gate for that, and `main` is never deployed without a tag.
 
 ### Cutting a build, step by step
 
@@ -62,7 +70,7 @@ Every command, in order. Replace `N` with the next free rc number (`git tag -l '
 **1. Workstation: tag the commit and push the tag.**
 
 ```bash
-git checkout main && git pull --ff-only          # or the branch tip you are testing
+git checkout main && git pull --ff-only          # builds are always cut from main
 git tag -a v6.1.0-bd.1-rc.N -m "rc.N: one line on what changed" HEAD
 git push origin v6.1.0-bd.1-rc.N
 git ls-remote --tags origin | grep 'rc\.N'           # must list the tag, and a "^{}" line for the commit

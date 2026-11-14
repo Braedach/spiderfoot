@@ -1,6 +1,6 @@
 # =============================================================================
 # deploy/stack-docker.yml
-# Version: 2.6.1
+# Version: 2.6.2
 # Created: 2026-10-23
 # Updated: 2026-11-14
 #
@@ -12,7 +12,7 @@
 #     production. Only ever PULLS the images deploy/publish.sh builds and
 #     pushes; it never builds anything.
 #
-#     Branch work is tested here first as an -rc build (e.g. v6.1.0-bd.1-rc.1),
+#     A release candidate (an -rc tag cut from main, e.g. v6.1.0-bd.1-rc.1) is tested here first,
 #     and only a tag that has soaked here is released and deployed to baden.
 #     See deploy/README.md for the whole flow.
 #
@@ -32,7 +32,7 @@
 #     mkdir -p /srv/spiderfoot/{postgres,redis,qdrant,embeddings-cache} && chown -R 1000:1000 /srv/spiderfoot/embeddings-cache
 #     docker compose -f stack-docker.yml --env-file /srv/spiderfoot/stack-spiderfoot-env.env up -d
 #
-#     Test a branch: publish an -rc tag on davros, set SPIDERFOOT_TAG to it,
+#     Test a candidate: publish an -rc tag on davros, set SPIDERFOOT_TAG to it,
 #     then `docker compose ... pull && docker compose ... up -d`.
 #
 #   Prerequisites:
@@ -62,6 +62,7 @@
 #       isolated for testing.
 #
 # Changelog:
+#   2.6.2 (2026-11-14) - Comments only: candidates are cut from main after the PR is merged (deploy/README.md, "The flow").
 #   2.6.1 (2026-11-14) - Comments only: the Tor service is described in the Summary. No change to any service.
 #   2.6.0 (2026-11-14) - Mirrors stack-podman.yml 2.16.0: new service sf-tor (Tor client, no published port), used only for .onion addresses.
 #     Needs images v6.1.0-bd.1-rc.35 or later.
