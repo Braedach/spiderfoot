@@ -179,11 +179,13 @@ export default function DashboardPage() {
                         return (order[a.status] ?? 2) - (order[b.status] ?? 2);
                       })
                       .map(([name, comp]) => (
-                      <div key={name} className="flex items-center justify-between text-xs">
+                      <div key={name} className="flex items-center justify-between text-xs" title={comp.message ?? undefined}>
                         <span className="text-dark-300 capitalize">{name.replace(/_/g, ' ')}</span>
                         <span className="flex items-center gap-2">
                           <span className={comp.status === 'up' ? 'health-up' : comp.status === 'degraded' ? 'health-degraded' : comp.status === 'unknown' ? 'health-unknown' : 'health-down'}>
-                            {comp.status === 'up' ? 'healthy' : comp.status === 'unknown' ? 'n/a' : comp.status}
+                            {name === 'tor'
+                              ? (comp.status === 'up' ? 'working' : comp.status === 'unknown' ? (comp.message?.startsWith('Checking') ? 'checking' : 'not configured') : 'not working')
+                              : (comp.status === 'up' ? 'healthy' : comp.status === 'unknown' ? 'n/a' : comp.status)}
                           </span>
                           {comp.latency_ms != null && <span className="text-dark-600 tabular-nums">{comp.latency_ms}ms</span>}
                         </span>

@@ -68,7 +68,7 @@ LABEL org.opencontainers.image.title="SpiderFoot Base" \
 # does not touch those, and apt is purged below, so this is the only chance.
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     libxml2 libxslt1.1 libjpeg62-turbo zlib1g \
-    dnsutils ca-certificates \
+    dnsutils ca-certificates tor \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copy the locked venv from the builder

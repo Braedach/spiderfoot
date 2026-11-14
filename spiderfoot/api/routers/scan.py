@@ -67,6 +67,10 @@ class ScanRequest(BaseModel):
     type_filter: list[str] | None = Field(None, description="List of event types to include")
     engine: str | None = Field(None, description="Scan engine profile name (from /api/engines)")
     profile: str | None = Field(None, description="Scan profile name (e.g. 'tools-only', 'quick-recon')")
+    selection: str | None = Field(
+        None, max_length=80,
+        description="How the module list was chosen (e.g. 'Use case: Footprint'); shown in Scan Settings",
+    )
     stealth_level: str | None = Field(
         None,
         description="Stealth level: none, low, medium, high, maximum (maps to paranoid)",
@@ -111,6 +115,41 @@ def _profile_to_dict(p, all_modules: dict) -> dict:
         "max_threads": p.max_threads,
         "timeout_minutes": p.timeout_minutes,
     }
+
+
+# Modules never picked automatically: they are known to give unreliable results or are retired.
+# A profile or an explicit module list can still name them.
+_AUTO_EXCLUDED_FLAGS = {"errorprone", "deprecated"}
+
+
+def _module_flags(info: dict) -> set[str]:
+    """Flags of a module as loaded into the config (``meta.flags``)."""
+    meta = info.get("meta") if isinstance(info, dict) else None
+    flags = (meta or {}).get("flags") if isinstance(meta, dict) else None
+    return set(flags or info.get("flags") or []) if isinstance(info, dict) else set()
+
+
+def _reliable_modules(sf: SpiderFoot, names: list[str]) -> list[str]:
+    """Drop error-prone and deprecated modules from an automatically built list."""
+    loaded = sf.opts.get("__modules__") or {}
+    return [n for n in names if not (_module_flags(loaded.get(n, {})) & _AUTO_EXCLUDED_FLAGS)]
+
+
+def _modules_for_required_data(sf: SpiderFoot, event_types: list[str]) -> list[str]:
+    """Modules needed to produce the given data types.
+
+    Starts with every module that produces one of the types, then keeps adding the modules that
+    produce what those modules need as input, until nothing new is added (the classic SpiderFoot
+    "by required data" selection). Error-prone and deprecated modules are left out.
+    """
+    selected = set(_reliable_modules(sf, sf.modulesProducing(list(event_types))))
+    frontier = set(selected)
+    while frontier:
+        needed = [e for e in sf.eventsToModules(list(frontier)) if e not in ("*", "ROOT")]
+        found = set(_reliable_modules(sf, sf.modulesProducing(needed))) if needed else set()
+        frontier = found - selected
+        selected |= frontier
+    return sorted(selected)
 
 
 @router.get("/scan-profiles", summary="List available scan profiles")
@@ -757,6 +796,7 @@ async def create_scan(
 
         sf = SpiderFoot(config.get_config())
         sf_config = config.get_config()
+        selection = "All modules"
 
         # If an engine profile is specified, load it and merge settings
         if scan_request.engine:
@@ -766,6 +806,7 @@ async def create_scan(
                 engine = loader.load(scan_request.engine)
                 modules = engine.get_enabled_modules()
                 sf_config = engine.to_sf_config(sf_config)
+                selection = f"Engine: {scan_request.engine}"
                 log.info("Using scan engine '%s' for scan %s", scan_request.engine, scan_id)
             except Exception as e:
                 log.warning("Invalid engine configuration: %s", e)
@@ -783,6 +824,11 @@ async def create_scan(
                     )
                 all_mods = _get_all_modules_dict()
                 modules = profile.resolve_modules(all_mods)
+                # A profile is more than a module list: apply its settings to this scan only.
+                sf_config = {**sf_config, **(profile.option_overrides or {})}
+                if profile.max_threads:
+                    sf_config["_maxthreads"] = int(profile.max_threads)
+                selection = f"Profile: {profile.display_name}"
                 log.info(
                     "Using scan profile '%s' (%d modules) for scan %s",
                     scan_request.profile, len(modules), scan_id,
@@ -792,9 +838,22 @@ async def create_scan(
             except Exception as e:
                 log.warning("Invalid scan profile: %s", e)
                 raise HTTPException(status_code=422, detail="Invalid scan profile")
+        elif scan_request.modules:
+            modules = list(scan_request.modules)
+            selection = scan_request.selection or f"Custom module list ({len(modules)} modules)"
+        elif scan_request.type_filter:
+            # "By Required Data": run the modules that can produce the requested data types.
+            modules = _modules_for_required_data(sf, scan_request.type_filter)
+            if not modules:
+                raise HTTPException(status_code=422, detail="No module produces the requested data types")
+            selection = f"Required data: {len(scan_request.type_filter)} types"
         else:
-            all_modules = sf.modulesProducing(["*"])
-            modules = scan_request.modules if scan_request.modules else all_modules
+            # "All modules": everything that is reliable. Includes active tools and dark-web modules.
+            modules = _reliable_modules(sf, sf.modulesProducing(["*"]))
+            selection = "All modules"
+
+        # Recorded with the scan's configuration so Scan Settings can show how it was launched.
+        sf_config = {**sf_config, "_scan_selection": "".join(c for c in selection if c.isprintable())[:120]}
 
         if not modules:
             modules = ["sfp__stor_db"]

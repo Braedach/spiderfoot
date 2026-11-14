@@ -9,9 +9,11 @@ function SettingsTab({ scanId, scan }: { scanId: string; scan?: Scan }) {
     queryFn: ({ signal }) => scanApi.options(scanId, signal),
   });
 
-  const scanOptions = options?.options ?? options ?? {};
+  // The endpoint answers { meta, config, configdesc }; the settings are under `config`.
+  const scanOptions: Record<string, unknown> = options?.config ?? options?.options ?? {};
+  const selection = (scanOptions._scan_selection as string | undefined) || scan?.profile || 'Not recorded (launched before rc.35)';
 
-  const globalEntries = Object.entries(scanOptions).filter(([k]) => !k.includes(':'));
+  const globalEntries = Object.entries(scanOptions).filter(([k]) => !k.includes(':') && k !== '_scan_selection');
   const moduleEntries = Object.entries(scanOptions).filter(([k]) => k.includes(':'));
   const moduleGroups = new Map<string, [string, unknown][]>();
   moduleEntries.forEach(([k, v]) => {
@@ -30,7 +32,7 @@ function SettingsTab({ scanId, scan }: { scanId: string; scan?: Scan }) {
             ['Name', scan?.name],
             ['Target', scan?.target],
             ['Status', scan?.status],
-            ['Profile', scan?.profile],
+            ['Module selection', selection],
             ['Created', formatEpoch(scan?.created ?? 0)],
             ['Started', formatEpoch(scan?.started ?? 0)],
             ['Ended', formatEpoch(scan?.ended ?? 0)],

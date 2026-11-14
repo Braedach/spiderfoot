@@ -20,6 +20,7 @@ from __future__ import annotations
 # Will import from .config, .network, .logging, .helpers as needed
 
 from copy import deepcopy
+import functools
 import logging
 import ssl
 import dns.resolver
@@ -270,12 +271,13 @@ class SpiderFoot:
         compatibility.
         """
         # If an explicit stealth_engine was supplied, use the simple path
+        _opts = getattr(self, "opts", None)
         if stealth_engine is not None:
             return fetchUrl(
                 url, cookies, timeout, useragent, headers, noLog,
                 postData, disableContentEncoding, sizeLimit,
                 headOnly, verify,
-                stealth_engine=stealth_engine,
+                stealth_engine=stealth_engine, opts=_opts,
             )
 
         # Auto-create the full stealth middleware from scan config
@@ -293,14 +295,14 @@ class SpiderFoot:
                 sizeLimit=sizeLimit,
                 headOnly=headOnly,
                 verify=verify,
-                _original_fetch=fetchUrl,
+                _original_fetch=functools.partial(fetchUrl, opts=_opts),
             )
 
         # No stealth — plain fetch
         return fetchUrl(
             url, cookies, timeout, useragent, headers, noLog,
             postData, disableContentEncoding, sizeLimit,
-            headOnly, verify,
+            headOnly, verify, opts=_opts,
         )
 
     # ── Stealth context management ────────────────────────────────────

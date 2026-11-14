@@ -22,6 +22,7 @@ import logging
 import os
 import platform
 import sys
+import threading
 import time
 from typing import Any
 
@@ -170,6 +171,11 @@ def _get_metrics_text() -> str:
 
 def _check_minio() -> dict[str, Any]:
     """Check MinIO/S3 connectivity and bucket status."""
+    import os
+    if not os.environ.get("SF_MINIO_ENDPOINT", "").strip():
+        # Not deployed: do not probe the default localhost:9000, whose connection retries
+        # added about six seconds to every dashboard refresh.
+        return {"status": "unknown", "message": "Not configured"}
     try:
         from spiderfoot.storage.minio_manager import get_storage_manager
         mgr = get_storage_manager()
@@ -261,6 +267,79 @@ def _check_postgresql() -> dict[str, Any]:
 
 
 # -----------------------------------------------------------------------
+# Tor check
+# -----------------------------------------------------------------------
+
+_TOR_CHECK_URL = "https://check.torproject.org/api/ip"
+_TOR_OK_TTL = 300.0      # seconds a "working" result is reused
+_TOR_RETRY_TTL = 60.0    # seconds any other result is reused
+_tor_lock = threading.Lock()
+_tor_state: dict[str, Any] = {"result": None, "at": 0.0, "key": "", "running": False}
+
+
+def _probe_tor(host: str, port: int) -> dict[str, Any]:
+    """Is the Tor SOCKS port answering, and does a request through it leave via Tor?"""
+    import socket
+    try:
+        with socket.create_connection((host, port), timeout=4) as sock:
+            sock.settimeout(4)
+            sock.sendall(b"\x05\x01\x00")          # SOCKS5 greeting, "no authentication"
+            if sock.recv(2) != b"\x05\x00":
+                return {"status": "down", "message": f"{host}:{port} is not answering as a SOCKS5 proxy"}
+    except OSError:
+        return {"status": "down", "message": f"Tor proxy {host}:{port} is not reachable"}
+    try:
+        import requests
+        proxy = f"socks5h://{host}:{port}"
+        resp = requests.get(_TOR_CHECK_URL, proxies={"http": proxy, "https": proxy}, timeout=25)
+        if resp.ok and resp.json().get("IsTor") is True:
+            return {"status": "up", "message": "Working: requests leave through the Tor network"}
+        return {"status": "degraded", "message": "Proxy answers, but the test request did not leave through Tor"}
+    except Exception as e:
+        log.info("Tor exit check failed: %s", type(e).__name__)
+        return {"status": "degraded", "message": "Proxy answers, but Tor has no working circuit yet"}
+
+
+def _check_tor() -> dict[str, Any]:
+    """Tor status for the dashboard: working, not working, or not configured.
+
+    The probe opens a Tor circuit, which is slow, so it runs in the background and its result
+    is reused for a few minutes; the dashboard never waits for it.
+    """
+    try:
+        from spiderfoot.api.dependencies import get_app_config
+        from spiderfoot.sflib.proxy import as_bool
+        opts = get_app_config().get_config()
+        enabled = as_bool(opts.get("_tor_enabled", False))
+        host = str(opts.get("_tor_host") or "").strip()
+        port = int(opts.get("_tor_port") or 0)
+    except Exception as e:
+        log.warning("Tor health check could not read the configuration: %s", e)
+        return {"status": "unknown", "message": "Configuration unavailable"}
+    if not enabled or not host or not port:
+        return {"status": "unknown", "message": "Not configured (turned off in Settings > Tor)"}
+
+    key = f"{host}:{port}"
+    now = time.monotonic()
+    with _tor_lock:
+        cached = _tor_state["result"] if _tor_state["key"] == key else None
+        ttl = _TOR_OK_TTL if cached and cached.get("status") == "up" else _TOR_RETRY_TTL
+        fresh = cached is not None and now - _tor_state["at"] < ttl
+        if not fresh and not _tor_state["running"]:
+            _tor_state["running"] = True
+
+            def _run() -> None:
+                result = _probe_tor(host, port)
+                with _tor_lock:
+                    _tor_state.update(result=result, at=time.monotonic(), key=key, running=False)
+
+            threading.Thread(target=_run, name="tor-health", daemon=True).start()
+    if cached is None:
+        return {"status": "unknown", "message": "Checking..."}
+    return {**cached, "endpoint": key}
+
+
+# -----------------------------------------------------------------------
 # Subsystem registry — run all checks
 # -----------------------------------------------------------------------
 
@@ -270,6 +349,7 @@ _SUBSYSTEM_CHECKS = {
     "celery": _check_celery,
     "vector": _check_vector,
     "minio": _check_minio,
+    "tor": _check_tor,
     "app_config": _check_app_config,
     "report_storage": _check_report_storage,
     "scan_hooks": _check_scan_hooks,

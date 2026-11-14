@@ -15,6 +15,28 @@ procedure are in [`deploy/README.md`](deploy/README.md).
 - Defaults changed: embeddings `fastembed` (was `mock`), reranker `llm` (sends candidate finding text to the active AI provider).
 - The Data Source Credentials page is removed; module options and API keys are edited on the Modules page.
 
+### Added (rc.35)
+- **Tor for dark-web modules:** a `sf-tor` service in both stack files (stack-podman 2.16.0, stack-docker 2.6.0), on by
+  default, with no published port. A new Settings section "Tor" (Use Tor, host, port; default `sf-tor:9050`). Tor is used
+  only for `.onion` addresses; ordinary requests never pass through it. The dashboard's System health shows Tor as
+  working, not working or not configured.
+- **Scan Settings shows how a scan was launched** ("Module selection": the profile, use case, required data or custom list).
+- A scan waiting for a free worker is shown as **Queued**.
+
+### Changed (rc.35)
+- **New Scan, All Modules** now means every reliable module: error-prone and retired modules are left out, dark-web
+  modules are included.
+- A scan **profile** now applies its own settings (thread limit, option overrides) as well as its module list.
+- The Dark Web profile no longer rewrites the general proxy setting; it uses the Tor setting.
+
+### Fixed (rc.35)
+- **New Scan, By Required Data** ran every module: the server dropped the selected data types. It now runs the modules
+  that produce the selected data plus the modules that feed them.
+- **Outbound proxy setting had no effect:** the proxy type was used as a URL scheme (`5://`, `tor://`), which the HTTP
+  library rejects, and one fetch path ignored the setting. SOCKS4, SOCKS5 and HTTP proxies now work.
+- The dashboard health call took about six seconds on every refresh because it probed an object store that is not deployed.
+- Scan Settings listed the response envelope instead of the scan's settings.
+
 ### Fixed
 - **Database connection leak (rc.34):** the rc.33 configuration refresh opened a database handle on almost every request and
   never returned it, so each API worker ran out of pooled connections within minutes of real use (dashboard stopped

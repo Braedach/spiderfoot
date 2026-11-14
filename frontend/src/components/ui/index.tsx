@@ -536,7 +536,8 @@ export function StatusBadge({ status }: { status: string }) {
   return (
     <span className={clsx('badge', badgeClass)}>
       <span className={dotClass} />
-      {status}
+      {/* CREATED = accepted and waiting for a free scan worker */}
+      {s === 'CREATED' ? 'QUEUED' : status}
     </span>
   );
 }

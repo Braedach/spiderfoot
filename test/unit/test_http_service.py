@@ -89,7 +89,7 @@ class TestHttpService(unittest.TestCase):
         self.http.config.proxy_port = 9050
         proxies = self.http._get_proxy_dict()
         self.assertIn("http", proxies)
-        self.assertIn("socks5://proxy.local:9050", proxies["http"])
+        self.assertIn("socks5h://proxy.local:9050", proxies["http"])  # names resolve at the proxy
     
     def test_get_proxy_dict_with_auth(self):
         self.http.config.proxy_type = "socks5"
