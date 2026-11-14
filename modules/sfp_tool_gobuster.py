@@ -68,6 +68,7 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
         "extensions": "php,asp,aspx,jsp,html,htm,js",
         "use_proxy": False,
         "soft_404_detection": True,
+        "uniform_response_threshold": 100,
         "max_targets": 25,
         # Remote execution options
         "remote_enabled": False,
@@ -90,6 +91,7 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
         "follow_redirects": "Follow redirects (gobuster -r)",
         "extensions": "Comma-separated list of file extensions to look for (gobuster -x).",
         "use_proxy": "Use the configured SpiderFoot proxy for scanning.",
+        "uniform_response_threshold": "Discard results when this many different paths all come back with the identical status, size and redirect target (a wildcard or a WAF/rate-limit answering every request). 0 disables.",
         "soft_404_detection": "Probe a random nonexistent path first and exclude any hit with the same "
         "content length (gobuster -xl). Without this, a single-page app that serves its index page "
         "for every path (Angular/React/Vue client-side routing) makes EVERY wordlist entry a false "
@@ -154,8 +156,36 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
             redirect = re.search(r"\[-->\s*(\S+?)\]", m.group(3))
             if redirect and redirect.group(1).endswith("/") and not path.endswith("/"):
                 path += "/"
-            results.append({"path": path, "status": int(m.group(2))})
+            size = re.search(r"\[Size:\s*(\d+)\]", m.group(3))
+            results.append({
+                "path": path,
+                "status": int(m.group(2)),
+                "size": int(size.group(1)) if size else None,
+                "redirect": redirect.group(1) if redirect else None,
+            })
         return {"results": results}
+
+    @staticmethod
+    def _drop_uniform_responses(results: list[dict], threshold: int) -> tuple[list[dict], int]:
+        """Remove results that are one repeated answer rather than distinct findings.
+
+        When the target (or a WAF in front of it) answers every guessed path the same way, for
+        example a rate-limit or bot-challenge page, gobuster reports every wordlist entry as a hit.
+        If ``threshold`` or more different paths share the same (status, size, redirect target) they
+        are that one repeated answer and are dropped. Real directory redirects each point at their
+        own path, so they never form such a group. Returns (kept, dropped_count).
+        """
+        if threshold <= 0 or any(r.get("size") is None for r in results):
+            return results, 0
+        groups: dict[tuple, int] = {}
+        for r in results:
+            key = (r.get("status"), r.get("size"), r.get("redirect"))
+            groups[key] = groups.get(key, 0) + 1
+        uniform = {k for k, n in groups.items() if n >= threshold}
+        if not uniform:
+            return results, 0
+        kept = [r for r in results if (r.get("status"), r.get("size"), r.get("redirect")) not in uniform]
+        return kept, len(results) - len(kept)
 
     def _detect_soft_404(self, target_url: str) -> str | None:
         """Probe a random, near-certainly-nonexistent path and return its content
@@ -431,9 +461,18 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
             # Debug: Log parsed results
             self.debug(f"Parsed gobuster results: {results}")
 
+            found = results.get("results", [])
+            found, dropped = self._drop_uniform_responses(found, int(self.opts.get("uniform_response_threshold", 100) or 0))
+            if dropped:
+                self.info(
+                    f"gobuster: discarded {dropped} of {dropped + len(found)} results for {eventData}: "
+                    f"{dropped} different paths all returned the identical response (a wildcard, or a "
+                    f"WAF/rate limit answering every request), so they are not real findings"
+                )
+
             emitted_any = False
             # Process the results
-            for result in results.get("results", []):
+            for result in found:
                 path = result.get("path")
                 status = result.get("status")
 
