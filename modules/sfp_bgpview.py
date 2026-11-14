@@ -26,9 +26,9 @@ class sfp_bgpview(SpiderFootAsyncPlugin):
 
     meta = {
         'name': "BGPView",
-        'summary': "Obtain network information from BGPView API.",
-        'flags': [],
-        'useCases': ["Investigate", "Footprint", "Passive"],
+        'summary': "Deprecated: bgpview.io no longer resolves. Obtain network information from BGPView API.",
+        'flags': ["deprecated"],
+        'useCases': [],
         'categories': ["Search Engines"],
         'dataSource': {
             'website': "https://bgpview.io/",

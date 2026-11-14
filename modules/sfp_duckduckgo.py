@@ -24,9 +24,9 @@ class sfp_duckduckgo(SpiderFootAsyncPlugin):
     """DuckDuckGo plugin for querying DuckDuckGo's API."""
     meta = {
         'name': "DuckDuckGo",
-        'summary': "Query DuckDuckGo's API for descriptive information about your target.",
-        'flags': [],
-        'useCases': ["Footprint", "Investigate", "Passive"],
+        'summary': "Deprecated: the instant-answer API no longer answers. Query DuckDuckGo's API for descriptive information about your target.",
+        'flags': ["deprecated"],
+        'useCases': [],
         'categories': ["Search Engines"],
         'dataSource': {
             'website': "https://duckduckgo.com/",

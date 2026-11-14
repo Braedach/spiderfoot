@@ -26,9 +26,9 @@ class sfp_callername(SpiderFootAsyncPlugin):
 
     meta = {
         'name': "CallerName",
-        'summary': "Lookup US phone number location and reputation information.",
-        'flags': [],
-        'useCases': ["Footprint", "Investigate", "Passive"],
+        'summary': "Deprecated: callername.com is a parked domain. Lookup US phone number location and reputation information.",
+        'flags': ["deprecated"],
+        'useCases': [],
         'categories': ["Real World"],
         'dataSource': {
             'website': "http://callername.com/",

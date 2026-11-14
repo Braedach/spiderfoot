@@ -28,9 +28,9 @@ class sfp_sorbs(SpiderFootAsyncPlugin):
 
     meta = {
         'name': "SORBS",
-        'summary': "Query the SORBS database for open relays, open proxies, vulnerable servers, etc.",
-        'flags': [],
-        'useCases': ["Investigate", "Passive"],
+        'summary': "Deprecated: the SORBS service no longer resolves. Query the SORBS database for open relays, open proxies, vulnerable servers, etc.",
+        'flags': ["deprecated"],
+        'useCases': [],
         'categories': ["Reputation Systems"],
         'dataSource': {
             'website': "http://www.sorbs.net/",

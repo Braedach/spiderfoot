@@ -27,9 +27,9 @@ class sfp_zonefiles(SpiderFootAsyncPlugin):
 
     meta = {
         'name': "ZoneFile.io",
-        'summary': "Search ZoneFiles.io Domain query API for domain information.",
-        'flags': ["apikey"],
-        'useCases': ["Footprint", "Investigate", "Passive"],
+        'summary': "Deprecated: zonefiles.io no longer resolves. Search ZoneFiles.io Domain query API for domain information.",
+        'flags': ["apikey", "deprecated"],
+        'useCases': [],
         'categories': ["Passive DNS"],
         "dataSource": {
             "website": "https://zonefiles.io",

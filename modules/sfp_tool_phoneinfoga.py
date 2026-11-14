@@ -14,9 +14,9 @@ class sfp_tool_phoneinfoga(SpiderFootAsyncPlugin):
 
     meta = {
         "name": "Tools - PhoneInfoga",
-        "summary": "Gather phone number intelligence using PhoneInfoga.",
-        "flags": ["tool", "invasive", "apikey"],
-        "useCases": ["Investigate"],
+        "summary": "Deprecated: its project last released in 2024, the tool and its server are not in the image, and its offline scan repeats sfp_phone. Gather phone number intelligence using PhoneInfoga.",
+        "flags": ["tool", "invasive", "apikey", "deprecated"],
+        "useCases": [],
         "categories": ["Content Analysis"],
         "labels": ["tool", "invasive", "apikey"],
         "toolDetails": {

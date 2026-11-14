@@ -27,8 +27,9 @@ class sfp_sublist3r(SpiderFootAsyncPlugin):
 
     meta = {
         "name": "Sublist3r PassiveDNS",
-        "summary": "Passive subdomain enumeration using Sublist3r's API",
-        "useCases": ["Investigate", "Footprint", "Passive"],
+        "summary": "Deprecated: its API no longer answers (invalid certificate). Passive subdomain enumeration using Sublist3r's API",
+        "flags": ["deprecated"],
+        "useCases": [],
         "categories": ["Passive DNS"],
         "dataSource": {
             "website": "https://api.sublist3r.com",

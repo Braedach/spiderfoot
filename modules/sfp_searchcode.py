@@ -28,9 +28,9 @@ class sfp_searchcode(SpiderFootAsyncPlugin):
 
     meta = {
         'name': "searchcode",
-        'summary': "Search searchcode for code repositories mentioning the target domain.",
-        'flags': [],
-        'useCases': ["Investigate", "Footprint", "Passive"],
+        'summary': "Deprecated: the code search API answers 404. Search searchcode for code repositories mentioning the target domain.",
+        'flags': ["deprecated"],
+        'useCases': [],
         'categories': ["Search Engines"],
         'dataSource': {
             'model': "FREE_NOAUTH_UNLIMITED",
