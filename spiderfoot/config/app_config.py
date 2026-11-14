@@ -224,8 +224,11 @@ class QdrantVectorDBConfig:
 
 @dataclass
 class EmbeddingModelConfig:
-    """Embedding model settings for vectorising OSINT events."""
-    provider: str = "mock"
+    """Embedding model settings for vectorising OSINT events.
+
+    "fastembed" runs locally on the CPU (nothing leaves the stack). "mock" yields
+    meaningless hash-derived vectors, so it must never be the default."""
+    provider: str = "fastembed"
     model: str = "all-MiniLM-L6-v2"
     dimensions: int = 384
     api_key: str = ""
