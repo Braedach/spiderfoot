@@ -14,7 +14,7 @@ An internal-use fork of [poppopjmp/spiderfoot](https://github.com/poppopjmp/spid
 
 Expect this to keep changing. Bugs are still being found, mostly old ones that only become visible once a scan is validated live rather than just unit-tested, and the build tags reflect that.
 
-- **Builds:** `v6.1.0-bd.1-rc.27` is deployed; `rc.28` is the current release candidate, being validated. Every build passes the scan gate on all 5 images (Trivy and `npm audit`). No non-`rc` release has been cut yet.
+- **Builds:** `v6.1.0-bd.1-rc.31` is the current release candidate, being deployed and validated (`rc.27` was the last build validated live). Every build passes the scan gate on all 5 images (Trivy and `npm audit`). No non-`rc` release has been cut yet.
 - **Scope guard:** invasive modules are gated three ways before dispatch (see [How a scan flows](#how-a-scan-flows)): the target must match, the address must not sit in a published Cloudflare or Fastly range, and it must not have been proven shared by another module. Validated live against phone, email, name, domain and IP targets. ASN is the one target type not yet explicitly exercised.
 - **Scan execution:** scans no longer run inside API workers, and a scan whose process dies is detected and marked failed instead of staying `RUNNING` forever (see [Where a scan executes](#where-a-scan-executes)).
 - **Module catalog:** every module's `setup()` is exercised by a catalog-wide test, because modules that fail to load were previously invisible. Key-free scan profiles exist for phone-number, email-address and person-name targets. Dead and superseded modules have been removed.
@@ -44,12 +44,14 @@ Expect this to keep changing. Bugs are still being found, mostly old ones that o
 
 **AI reports**
 - Report generation returned empty or generic output (nine stacked bugs across service access, database wiring, event mapping, vector indexing and timeouts). Reports are now persisted server-side, the analysed-event cap is configurable (`SF_REPORT_MAX_EVENTS_PER_SCAN`), and deleting a scan removes its vectors.
-- Local embeddings use `fastembed` (about 67 MB, no GPU needed) instead of `sentence-transformers` and `torch` (over 1 GB); `SF_EMBEDDING_PROVIDER=fastembed` is the default, and the old `sentence_transformer` value is no longer installed and silently degrades to meaningless hash-derived embeddings. GPU passthrough is supported but not built.
+- Local embeddings use `fastembed` (about 67 MB, no GPU needed) instead of `sentence-transformers` and `torch` (over 1 GB); `SF_EMBEDDING_PROVIDER=fastembed` is the default (and the reranker defaults to `llm`, using the AI Connections provider), and the old `sentence_transformer` value is no longer installed and silently degrades to meaningless hash-derived embeddings. GPU passthrough is supported but not built.
 - `sf-agents` calls Anthropic directly through the official SDK (no proxy), with a server-side fallback model for requests the primary model's safeguards decline.
 - **AI Connections:** the LLM provider (Anthropic, OpenAI, DeepSeek, Ollama or Mock), its API key and its model are set **only in the GUI**. There is no LLM API key in the environment variables: the stacks, env templates and bootstrap script do not carry one, and `ANTHROPIC_API_KEY` should not be set. Keys are stored encrypted (using a key derived from `SF_JWT_SECRET_KEY`, so rotating that secret means entering them again) and never shown again; the model is chosen from the list the provider offers. One provider is active at a time, with no automatic fallback between providers, so scan findings only go to the one you chose. See [`deploy/README.md`](deploy/README.md) for the details. Ollama needs a network route from `sf-api` and `sf-agents`: see "Ollama and the LLM network" in [`deploy/README.md`](deploy/README.md), which also explains why the maintainer's production stack reuses an existing `llm-net`.
 
 **Frontend**
-- A dedicated Data Source Credentials page and an AI Connections page; Settings grouped by subsystem; SpiderFoot's own REST tokens renamed "Access Tokens" to stop clashing with module API keys.
+- Left navigation in labelled, collapsible groups; Settings is core-only, in tabs (System, Data & Storage, AI & Search); an AI Connections page; SpiderFoot's own REST tokens are "Access Tokens" so they do not clash with module API keys.
+- Module options and third-party API keys are edited on the Modules page (the separate Data Source Credentials page is gone; its URL redirects).
+- Short explainers on the Modules, Settings and New Scan pages, a Log text size setting, and the IaC selectors and other controls that were rendering unstyled now follow the theme in dark mode.
 - New Scan dims modules that cannot run against the chosen target type.
 - The workspace IaC Map diagram renders (it was blank, a sanitiser stripped the SVG), and several authorisation-redirect and race-condition bugs are fixed.
 
@@ -92,15 +94,33 @@ Scans never run inside an API worker. uvicorn's supervisor kills any worker that
 flowchart LR
     C["client"] -->|"POST /api/scans"| A["sf-api worker<br/>creates the scan row, returns 201"]
     A --> D{"Celery broker<br/>reachable?"}
-    D -->|yes| Q[("Redis 'scan' queue")] --> W["sf-celery-worker-active<br/>runs the scan"]
+    D -->|yes| Q[("Redis 'scan' queue")] --> W["sf-celery-worker-active<br/>runs the scan (2 at a time, the rest wait in the queue)"]
     D -->|"no (logged as a warning)"| R["detached process<br/>spiderfoot.scan.isolated_runner<br/>own session, survives API restarts"]
     W --> H["heartbeat thread<br/>sf:scan:alive:ID, 90s TTL, refreshed every 15s"]
     R --> H
     H -.->|key vanishes| X["scan reaper in every API worker<br/>RUNNING with no heartbeat for 180s -> ERROR-FAILED<br/>ABORT-REQUESTED -> ABORTED"]
 ```
 
+- The DNS server setting (`1.1.1.1` by default) is used only to look up scan targets and other public names. Names inside the stack (`sf-redis`, `sf-postgres`, ...) always resolve through the container network's own DNS. This was once broken: the override applied to every name, so the API could not find Redis, the Celery check failed, and every scan silently fell back to running inside the API worker.
 - The API workers' health-check timeout is `SF_API_WORKER_HEALTHCHECK_TIMEOUT` (default 120s, uvicorn's own default is 5s).
 - Reaper tuning: `SF_SCAN_REAP_GRACE` (180s), `SF_SCAN_HEARTBEAT_INTERVAL` (15s), `SF_SCAN_HEARTBEAT_TTL` (90s), `SF_SCAN_STARTING_MAX_AGE` (6h, a scan may legitimately wait in the Celery queue). With Redis down the reaper does nothing rather than reaping blind.
+
+### After a scan: indexing and AI reports
+
+```mermaid
+flowchart LR
+    S["scan findings<br/>(stored in Postgres as they are found)"] --> E["embed each finding<br/>fastembed, local CPU<br/>model kept in /srv/spiderfoot/embeddings-cache"]
+    E --> Q[("Qdrant<br/>one collection per scan")]
+    R["report or correlation request"] --> V["embed the question,<br/>find the closest findings in Qdrant"]
+    Q --> V
+    V --> K["reranker (default: llm)<br/>re-scores the candidates, keeps the best few"]
+    K --> L["LLM writes the report<br/>(provider chosen on AI Connections)"]
+    L --> O["report stored server-side"]
+```
+
+- **What leaves the stack:** embedding is local, so nothing. The `llm` reranker and the report writer both send finding text to the one provider active on AI Connections (Ollama keeps it on your network; Anthropic and OpenAI are third parties). The `openai` and `huggingface` embedding providers would also send it out, and are not the default.
+- Embeddings and the reranker are separate models from the report-writing LLM. Claude cannot produce embeddings, and indexing and searching must use the same embedding model, so changing it means re-indexing earlier scans. `mock` yields meaningless vectors and is never the default.
+- No HuggingFace key is needed: `fastembed` makes a one-time anonymous download of a public model into the bind-mounted cache, shared by the API, both Celery workers and `sf-agents`.
 
 ## Deploying this fork
 
