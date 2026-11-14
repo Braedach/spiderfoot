@@ -18,6 +18,8 @@ from spiderfoot.helpers import SpiderFootHelpers
 from spiderfoot.config.app_config import AppConfig
 import multiprocessing as mp
 import logging
+import threading
+import time
 from typing import Any, Generator
 
 security = HTTPBearer(auto_error=False)
@@ -52,11 +54,18 @@ class Config:
 
         self.log = logging.getLogger("spiderfoot.api")
         self.loggingQueue = mp.Queue()
+        # The API runs several worker processes, each with its own copy of this config. Saves write only
+        # the keys that changed since this copy last synced with the database, so one worker can never
+        # overwrite another's change with its stale values.
+        self._lock = threading.RLock()
+        self._synced: dict[str, Any] = {}
+        self._synced_at = 0.0
 
         if _app_config is not None:
             self._app_config = _app_config
             if not self._app_config.version:
                 self._app_config.version = __version__
+            self._mark_synced()
             return
 
         # Build legacy default dict
@@ -92,6 +101,7 @@ class Config:
         if _skip_db:
             self._app_config = AppConfig.from_dict(default_config)
             self._app_config.apply_env_overrides()
+            self._mark_synced()
             return
 
         # Normal flow: read from DB, merge, wrap in AppConfig
@@ -140,6 +150,7 @@ class Config:
 
         self._app_config = AppConfig.from_dict(merged)
         self._app_config.apply_env_overrides()
+        self._mark_synced()
 
     # ------------------------------------------------------------------
     # Typed access
@@ -182,35 +193,72 @@ class Config:
         """Set a single configuration option."""
         self._app_config.merge({key: value})
 
-    def save_config(self) -> None:
-        """Persist current config to the database."""
+    def _serialise(self) -> dict[str, Any]:
+        """The config flattened into the key/value pairs stored in tbl_config."""
+        from spiderfoot.sflib import configSerialize
+        return configSerialize(self.get_config(), filterSystem=True)
+
+    def _mark_synced(self) -> None:
+        """Record the current state as 'what the database holds'."""
         try:
-            flat = self.get_config()
-            dbh = SpiderFootDb(flat)
-            # configSet only handles scalar values; configSerialize flattens the
-            # config (including __modules__.*.opts) into storable key/value pairs.
-            from spiderfoot.sflib import configSerialize
-            serialised = configSerialize(flat, filterSystem=True)
-            if serialised:
-                dbh.configSet(serialised)
-                self.log.info("Configuration saved to database (%d keys)", len(serialised))
-            else:
-                self.log.warning("save_config: serialised config is empty — nothing written")
+            self._synced = self._serialise()
         except Exception as exc:
-            self.log.warning("Failed to save config to DB: %s", exc)
+            self.log.warning("Could not snapshot config: %s", exc)
+        self._synced_at = time.monotonic()
+
+    @staticmethod
+    def _changed_keys(current: dict[str, Any], synced: dict[str, Any]) -> dict[str, Any]:
+        """The keys in ``current`` whose value differs from what was last synced."""
+        return {k: v for k, v in current.items() if k not in synced or synced[k] != v}
+
+    def save_config(self) -> None:
+        """Persist this worker's changes to the database, then pick up everyone else's.
+
+        Only keys that changed since the last sync are written. Writing the whole config
+        from one worker's (possibly stale) memory used to overwrite changes saved through
+        another worker, so of several API keys entered one after another only the last survived.
+        """
+        with self._lock:
+            try:
+                flat = self.get_config()
+                changed = self._changed_keys(self._serialise(), self._synced)
+                if changed:
+                    SpiderFootDb(flat).configSet(changed)
+                    self.log.info("Configuration saved to database (%d changed keys)", len(changed))
+            except Exception as exc:
+                self.log.warning("Failed to save config to DB: %s", exc)
+                return
+            self.reload()
 
     def reload(self) -> None:
         """Re-read config from DB and apply env overrides."""
-        try:
-            flat = self.get_config()
-            dbh = SpiderFootDb(flat)
-            sf = SpiderFoot(flat)
-            merged = sf.configUnserialize(dbh.configGet(), flat)
-            self._app_config = AppConfig.from_dict(merged)
-            self._app_config.apply_env_overrides()
-            self.log.info("Configuration reloaded from database")
-        except Exception as exc:
-            self.log.warning("Failed to reload config from DB: %s", exc)
+        with self._lock:
+            try:
+                flat = self.get_config()
+                dbh = SpiderFootDb(flat)
+                sf = SpiderFoot(flat)
+                merged = sf.configUnserialize(dbh.configGet(), flat)
+                self._app_config = AppConfig.from_dict(merged)
+                self._app_config.apply_env_overrides()
+                self._mark_synced()
+                self.log.info("Configuration reloaded from database")
+            except Exception as exc:
+                self.log.warning("Failed to reload config from DB: %s", exc)
+
+    def refresh_if_stale(self, max_age: float = 2.0) -> None:
+        """Re-read from the database when this worker's copy is older than ``max_age`` seconds."""
+        if time.monotonic() - self._synced_at > max_age:
+            self.reload()
+
+    def set_module_options(self, module_name: str, options: dict[str, Any]) -> bool:
+        """Set options on one module and save, as one step. False if the module is unknown."""
+        with self._lock:
+            modules = self.get_config().get("__modules__", {})
+            if module_name not in modules:
+                return False
+            modules[module_name].setdefault("opts", {}).update(options)
+            self.save_config()
+            return True
 
     # ------------------------------------------------------------------
     # Validation (real implementation via AppConfig)
@@ -349,6 +397,8 @@ def get_app_config() -> Config:
     global app_config
     if app_config is None:
         app_config = Config()
+    else:
+        app_config.refresh_if_stale()
     return app_config
 
 

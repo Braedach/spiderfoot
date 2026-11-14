@@ -236,13 +236,10 @@ async def update_module_options(
     """
     try:
         config = get_app_config()
-        modules = config.get_config().get("__modules__", {})
-        if module_name not in modules:
-            raise HTTPException(status_code=404, detail="Module not found")
         try:
-            # Update only the nested 'opts' sub-dict, never the module metadata keys
-            modules[module_name].setdefault('opts', {}).update(options.options)
-            config.save_config()
+            # Updates only the nested 'opts' sub-dict, never the module metadata keys
+            if not config.set_module_options(module_name, options.options):
+                raise HTTPException(status_code=404, detail="Module not found")
             return {"success": True, "message": f"Module {module_name} options updated"}
         except KeyError as ke:
             # If Config.update_module_config raises KeyError with 404, return 404
