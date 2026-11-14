@@ -116,8 +116,11 @@ class sfp_webserver(SpiderFootAsyncPlugin):
         # banners and therefore classifying them further (type and version,
         # possibly OS. This could also trigger additional tests, such as 404s
         # and other errors to see what the header looks like.
+        # A banner or technology is a fact about the host, and every page of a site returns the
+        # same one: report each (host, value) once per scan, not once per page.
+        host = self.sf.urlFQDN(eventSource)
         server = jdata.get('server')
-        if server:
+        if server and self._first_time("WEBSERVER_BANNER", host, server):
             self.info(f"Found web server: {server} ({eventSource})")
             evt = SpiderFootEvent("WEBSERVER_BANNER",
                                   server, self.__name__, event)
@@ -155,9 +158,19 @@ class sfp_webserver(SpiderFootAsyncPlugin):
         if '.php' in eventSource:
             tech.append("PHP")
 
-        for t in set(tech):
+        for t in sorted(set(tech)):
+            if not self._first_time("WEBSERVER_TECHNOLOGY", host, t):
+                continue
             evt = SpiderFootEvent("WEBSERVER_TECHNOLOGY",
                                   t, self.__name__, event)
             self.notifyListeners(evt)
+
+    def _first_time(self, event_type: str, host: str, value: str) -> bool:
+        """True the first time this (type, host, value) is seen in the scan."""
+        key = f"{event_type}\x00{host}\x00{value}"
+        if key in self.results:
+            return False
+        self.results[key] = True
+        return True
 
 # End of sfp_webserver class

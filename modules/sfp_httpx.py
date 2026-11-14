@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import tempfile
+import urllib.parse
 from typing import Any
 
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
@@ -77,11 +78,42 @@ class sfp_httpx(SpiderFootAsyncPlugin):
     }
 
     results = None
+    emitted = None
 
     def setup(self, sfc, userOpts=None):
         super().setup(sfc, userOpts or {})
         self.errorState = False
         self.results = self.tempStorage()
+        # (event type, data) already reported in this scan. A web server's banner, technology and
+        # open port are facts about the host, not about each page: report each once.
+        self.emitted = self.tempStorage()
+
+    @staticmethod
+    def _origin(url: str) -> str | None:
+        """``scheme://host[:port]`` of a URL, or None when it is not an http(s) URL."""
+        try:
+            parts = urllib.parse.urlsplit(url)
+        except ValueError:
+            return None
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            return None
+        host = parts.hostname.lower()
+        if ":" in host:
+            host = f"[{host}]"
+        default = 443 if parts.scheme == "https" else 80
+        try:
+            port = parts.port or default
+        except ValueError:
+            return None
+        return f"{parts.scheme}://{host}" if port == default else f"{parts.scheme}://{host}:{port}"
+
+    def _emit(self, event_type: str, data: str, parent_event: Any) -> None:
+        """Report an event once per scan, however many probes return the same fact."""
+        key = f"{event_type}\x00{data}"
+        if key in self.emitted:
+            return
+        self.emitted[key] = True
+        self.notifyListeners(SpiderFootEvent(event_type, data, self.__name__, parent_event))
 
     def watchedEvents(self):
         return [
@@ -190,66 +222,53 @@ class sfp_httpx(SpiderFootAsyncPlugin):
         port = result.get("port", "")
         tls = result.get("tls", {})
 
-        # URL
-        if url:
-            evt = SpiderFootEvent("URL_WEB", url, self.__name__, parent_event)
-            self.notifyListeners(evt)
+        # The origin httpx reached is now known; a later link to the same site need not be probed.
+        origin = self._origin(url) if url else None
+        if origin:
+            self.results[origin] = True
 
-        # HTTP status code
+        if url:
+            self._emit("URL_WEB", url, parent_event)
+
         if status_code:
             data = f"{url} [{status_code}]"
             if title:
                 data += f" [{title}]"
-            evt = SpiderFootEvent("HTTP_CODE", data, self.__name__, parent_event)
-            self.notifyListeners(evt)
+            self._emit("HTTP_CODE", data, parent_event)
 
-        # Web server
         if web_server:
-            evt = SpiderFootEvent(
-                "WEBSERVER_BANNER", f"{host}: {web_server}", self.__name__, parent_event
-            )
-            self.notifyListeners(evt)
+            self._emit("WEBSERVER_BANNER", f"{host}: {web_server}", parent_event)
 
-        # Technologies
-        if technologies:
-            for tech in technologies:
-                evt = SpiderFootEvent(
-                    "WEBSERVER_TECHNOLOGY", f"{host}: {tech}", self.__name__, parent_event
-                )
-                self.notifyListeners(evt)
+        for tech in technologies or []:
+            self._emit("WEBSERVER_TECHNOLOGY", f"{host}: {tech}", parent_event)
 
-        # Open port
         if port:
-            evt = SpiderFootEvent(
-                "TCP_PORT_OPEN", f"{host}:{port}", self.__name__, parent_event
-            )
-            self.notifyListeners(evt)
+            self._emit("TCP_PORT_OPEN", f"{host}:{port}", parent_event)
 
-        # CDN detection
         if cdn and cdn_name:
-            evt = SpiderFootEvent(
-                "CDN_DETECTED", f"{host}: {cdn_name}", self.__name__, parent_event
-            )
-            self.notifyListeners(evt)
+            self._emit("CDN_DETECTED", f"{host}: {cdn_name}", parent_event)
 
-        # TLS certificate info
         if tls and tls.get("subject_dn"):
-            tls_data = json.dumps(tls, indent=2)
-            evt = SpiderFootEvent(
-                "SSL_CERTIFICATE_RAW", tls_data, self.__name__, parent_event
-            )
-            self.notifyListeners(evt)
+            self._emit("SSL_CERTIFICATE_RAW", json.dumps(tls, indent=2), parent_event)
 
-        # Raw data for full record
-        raw = json.dumps(result, indent=2)
-        evt = SpiderFootEvent("RAW_RIR_DATA", raw, self.__name__, parent_event)
-        self.notifyListeners(evt)
+        # Full record of this probe
+        self._emit("RAW_RIR_DATA", json.dumps(result, indent=2), parent_event)
 
     def handleEvent(self, event):
         data = event.data
 
         if self.errorState:
             return
+
+        # httpx answers "is there a web server here, and what is it": a question about a site, not
+        # about each page. A discovered link is therefore reduced to its origin (scheme, host, port)
+        # and each origin is probed once. Probing every link separately re-ran httpx hundreds of
+        # times per site and reported the same banner, technology and open port each time
+        # (2,449 of 5,560 events in one scan of a small site). Pages are the spider's job.
+        if event.eventType == "LINKED_URL_INTERNAL":
+            data = self._origin(data)
+            if not data:
+                return
 
         if data in self.results:
             self.debug(f"Skipping already-scanned target: {data}")
@@ -267,11 +286,8 @@ class sfp_httpx(SpiderFootAsyncPlugin):
             self.errorState = True
             return
 
-        # Clean target
-        target = data
-        if target.startswith("http://") or target.startswith("https://"):
-            pass  # URLs used as-is
-        # else: hostname or IP
+        target = data  # a host name, an IP address, host:port, or an origin URL
+        is_url = target.startswith(("http://", "https://"))
 
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".txt", delete=False
@@ -284,7 +300,8 @@ class sfp_httpx(SpiderFootAsyncPlugin):
         try:
             cmd = self._build_cmd(
                 httpx_path, input_path, output_path,
-                explicit_port=(event.eventType == "TCP_PORT_OPEN"),
+                # An origin URL names its own port too: probe it, not the fixed port list.
+                explicit_port=(event.eventType == "TCP_PORT_OPEN" or is_url),
             )
             self.debug(f"Running: {' '.join(cmd)}")
 

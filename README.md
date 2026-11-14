@@ -14,7 +14,7 @@ An internal-use fork of [poppopjmp/spiderfoot](https://github.com/poppopjmp/spid
 
 Expect this to keep changing. Bugs are still being found, mostly old ones that only become visible once a scan is validated live rather than just unit-tested, and the build tags reflect that.
 
-- **Builds:** `v6.1.0-bd.1-rc.31` is the current release candidate, being deployed and validated (`rc.27` was the last build validated live). Every build passes the scan gate on all 5 images (Trivy and `npm audit`). No non-`rc` release has been cut yet.
+- **Builds:** `v6.1.0-bd.1-rc.35` is the current release candidate, being deployed and validated (`rc.34` was the last build validated live, with a 30 minute soak). `rc.35` is a breaking change for an existing stack: see [`UPGRADING.md`](UPGRADING.md). Every build passes the scan gate on all 5 images (Trivy and `npm audit`). No non-`rc` release has been cut yet.
 - **Scope guard:** invasive modules are gated three ways before dispatch (see [How a scan flows](#how-a-scan-flows)): the target must match, the address must not sit in a published Cloudflare or Fastly range, and it must not have been proven shared by another module. Validated live against phone, email, name, domain and IP targets. ASN is the one target type not yet explicitly exercised.
 - **Scan execution:** scans no longer run inside API workers, and a scan whose process dies is detected and marked failed instead of staying `RUNNING` forever (see [Where a scan executes](#where-a-scan-executes)).
 - **Module catalog:** every module's `setup()` is exercised by a catalog-wide test, because modules that fail to load were previously invisible. Key-free scan profiles exist for phone-number, email-address and person-name targets. Dead and superseded modules have been removed.
@@ -39,6 +39,10 @@ Expect this to keep changing. Bugs are still being found, mostly old ones that o
 - **Scan engine and API:** the scan-progress API returned 404 for every scan; the "modules running" count was always 0 because the engine's own running-module check was blind to every module; the export endpoints crashed or silently returned nothing; configuration saved through one API worker was lost or overwritten by another (saves now write only the keys that changed, and each worker refreshes its copy from the database).
 - **Scope escape:** active modules followed discovery data onto shared infrastructure (a target's own subdomain resolving to a Cloudflare or Fastly edge serving unrelated tenants), and the strict-scope check rejected every full-URL event, which silently stopped five web-fuzzing tool modules from ever running. Both fixed.
 - **Silent module failures:** seven modules' own `_maxthreads` option was always overwritten by the global setting of the same name; four modules had a `setup()` signature the engine could not call; eight modules could hang an entire scan forever on one unresponsive host, with no error. All fixed and covered by tests.
+- **Dark web and proxy:** the outbound proxy setting had no effect and Tor could not work at all. The stacks now run a Tor client (`sf-tor`, no published port) that is used only for `.onion` addresses, with its own Settings section and a status on the dashboard; SOCKS4, SOCKS5 and HTTP proxies work independently of it.
+- **New Scan selections:** "By Required Data" ran every module, and a profile applied only its module list. Each selection now runs what the screen says, and Scan Settings records how a scan was launched.
+- **Result floods:** gobuster, katana, httpx and ffuf each reported the same thing hundreds of times or reported junk as findings (a WAF answering every path, one probe per discovered link, Windows device names); each now reports a site's facts once.
+- **File metadata:** documents and images were downloaded as text, so no file was ever read; they are now downloaded as bytes and PDF, Office, JPEG and TIFF metadata is extracted.
 - **Dead scans:** scans ran inside API worker processes that uvicorn's supervisor kills when they are slow to answer a health ping, taking the scan with them and leaving it `RUNNING` permanently.
 - **Database:** Postgres connections were leaked by reads that never committed (`ConfigManager`, `AuthService`, `ReportStore` and 17 more methods in the core database layer), eventually blocking the whole API.
 
@@ -52,7 +56,7 @@ Expect this to keep changing. Bugs are still being found, mostly old ones that o
 - Left navigation in labelled, collapsible groups; Settings is core-only, in tabs (System, Data & Storage, AI & Search); an AI Connections page; SpiderFoot's own REST tokens are "Access Tokens" so they do not clash with module API keys.
 - Module options and third-party API keys are edited on the Modules page (the separate Data Source Credentials page is gone; its URL redirects).
 - Short explainers on the Modules, Settings and New Scan pages, a Log text size setting, and the IaC selectors and other controls that were rendering unstyled now follow the theme in dark mode.
-- New Scan dims modules that cannot run against the chosen target type.
+- New Scan dims modules that cannot run against the chosen target type. Scan Settings shows the module selection used, a scan waiting for a worker reads Queued, and the dashboard shows whether Tor is working.
 - The workspace IaC Map diagram renders (it was blank, a sanitiser stripped the SVG), and several authorisation-redirect and race-condition bugs are fixed.
 
 ## How a scan flows

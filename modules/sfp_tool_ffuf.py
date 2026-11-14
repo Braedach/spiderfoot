@@ -13,10 +13,25 @@ import json
 import os
 import subprocess
 import tempfile
+import urllib.parse
 
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
 from spiderfoot import SpiderFootEvent
 from spiderfoot.url_targets import directory_base
+
+# Names Windows reserves for devices. A request for one (with or without an extension) is answered
+# by the operating system, not by the web application.
+_WINDOWS_DEVICES = {"con", "prn", "aux", "nul"} | {f"com{i}" for i in range(1, 10)} | {f"lpt{i}" for i in range(1, 10)}
+
+
+def _is_windows_device_name(url: str) -> bool:
+    """True when the last path segment of the URL is a Windows reserved device name."""
+    try:
+        path = urllib.parse.urlsplit(url).path
+    except ValueError:
+        return False
+    leaf = path.rstrip("/").rsplit("/", 1)[-1].lower()
+    return leaf.split(".", 1)[0] in _WINDOWS_DEVICES
 
 
 class sfp_tool_ffuf(SpiderFootAsyncPlugin):
@@ -185,6 +200,7 @@ class sfp_tool_ffuf(SpiderFootAsyncPlugin):
                         return
 
                 results = data_json.get("results", [])
+                skipped = 0
                 for result in results:
                     url = result.get("url", "")
                     status = result.get("status", 0)
@@ -193,6 +209,11 @@ class sfp_tool_ffuf(SpiderFootAsyncPlugin):
                     if not url or url in self.results:
                         continue
                     self.results[url] = True
+                    if _is_windows_device_name(url):
+                        # A Windows-hosted server answers "200, 0 bytes" for the reserved device
+                        # names (con, aux, nul, com1...) in EVERY directory. They are not pages.
+                        skipped += 1
+                        continue
 
                     evt = SpiderFootEvent(
                         "LINKED_URL_INTERNAL", url, self.__name__, event
@@ -205,7 +226,8 @@ class sfp_tool_ffuf(SpiderFootAsyncPlugin):
                     )
                     self.notifyListeners(evt)
 
-                self.info(f"ffuf found {len(results)} paths on {base_url}")
+                self.info(f"ffuf found {len(results) - skipped} paths on {base_url}"
+                          + (f" ({skipped} Windows device names ignored)" if skipped else ""))
 
         except subprocess.TimeoutExpired:
             self.error(f"ffuf timed out for {base_url}")
