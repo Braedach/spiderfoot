@@ -5,6 +5,23 @@ For the full list of changes see [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
+## Upgrading the fork build (`v6.1.0-bd.1-rc.N`) to rc.31
+
+This fork's builds are release candidates published by `deploy/publish.sh`; the build and deploy procedure is in
+[`deploy/README.md`](deploy/README.md). **rc.31 is a breaking change** for an existing stack:
+
+1. Take the stack file from the same tag (`deploy/stack-podman.yml` 2.15.0 or `deploy/stack-docker.yml` 2.5.0). The stack
+   files are not inside the images, so a new tag does not update them. The API and workers now need the embedding settings
+   and the shared model cache.
+2. On the host: `chown -R 1000:1000 /srv/spiderfoot/embeddings-cache`. The API and workers run non-root; without this the
+   model download fails silently and embeddings fall back to meaningless `mock` vectors.
+3. Set `SPIDERFOOT_TAG=v6.1.0-bd.1-rc.31`, stop the whole stack, start it.
+4. Scans now run on the Celery worker (2 at a time, extra scans wait in the queue). If a scan seems stuck in `STARTING`,
+   check `sf-celery-worker-active`.
+5. A stored `_embedding_provider` of `mock` overrides the new default. Set Embeddings to `fastembed` under Settings,
+   AI & Search, and re-index scans indexed earlier.
+6. Module API keys are now entered on the Modules page (`/credentials` redirects there).
+
 ## Upgrading to v6.1.0 (from 6.0.x)
 
 **v6.1.0 is a hardening and test-maturity release.** There are **no breaking

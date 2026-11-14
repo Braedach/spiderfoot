@@ -48,11 +48,76 @@ and has proven itself to be very competant, and is capable of push-back on devel
 | Step | Where | Command / action |
 |---|---|---|
 | 1. Develop | workstation | branch off `main`, commit, push the branch, open a PR (do not merge yet) |
-| 2. Test build | build host | tag the branch tip `v6.1.0-bd.1-rc.1`, `git push origin <tag>`, then `./deploy/publish.sh v6.1.0-bd.1-rc.1` |
-| 3. Soak | development host | set `SPIDERFOOT_TAG=v6.1.0-bd.1-rc.1`, `docker compose … pull && up -d`, test |
+| 2. Test build | workstation, then build host | create an **annotated** tag (`git tag -a`) and push it, then run `publish.sh` on the build host in a **login shell**. Exact commands in "Cutting a build" below |
+| 3. Soak | development host | paste the stack file from the same tag into the deploy tool, set `SPIDERFOOT_TAG`, stop and start the stack, test ("Deploying a build" below) |
 | 4. Merge | GitHub | merge the PR once step 3 is satisfactory |
 | 5. Release | build host | tag the merged commit `v6.1.0-bd.1`, push it, `./deploy/publish.sh v6.1.0-bd.1` |
 | 6. Deploy | production host | set `SPIDERFOOT_TAG=v6.1.0-bd.1` in the stack's environment and redeploy |
+
+### Cutting a build, step by step
+
+Every command, in order. Replace `N` with the next free rc number (`git tag -l 'v6.1.0-bd.1-rc.*' | sort -V | tail -1`).
+
+**1. Workstation: tag the commit and push the tag.**
+
+```bash
+git checkout main && git pull --ff-only          # or the branch tip you are testing
+git tag -a v6.1.0-bd.1-rcN -m "rcN: one line on what changed" HEAD
+git push origin v6.1.0-bd.1-rcN
+git ls-remote --tags origin | grep rcN           # must list the tag, and a "^{}" line for the commit
+```
+
+The tag must be **annotated** (`-a`, with a message). `publish.sh` rejects a lightweight tag with
+"Tag … does not exist on origin" even when it was pushed. Never reuse or move a tag that has been
+published: a fix gets the next rc number.
+
+**2. Build host (`davros`, LXC 103 on the Proxmox host): start the build in the background.**
+
+```bash
+ssh root@<proxmox-host> "pct exec 103 -- bash -lc 'cd /opt/spiderfoot/src && nohup ./deploy/publish.sh v6.1.0-bd.1-rcN > /opt/spiderfoot/spiderfoot-build-rcN.log 2>&1 < /dev/null &'"
+```
+
+- Use `bash -lc` (a **login** shell). `git` lives in `/usr/local/bin`, which a plain `pct exec … bash -c` does not have
+  on its `PATH`, and the script then fails with `git: command not found`.
+- Run it from `/opt/spiderfoot/src`, the dedicated clone. `publish.sh` fetches the tag and checks it out there itself.
+- `nohup … &` with a log file lets the build outlive the SSH session. A full build takes about 35-45 minutes.
+- Only one build at a time: `publish.sh` removes the project's local images before and after a run.
+
+**3. Watch it.**
+
+```bash
+ssh root@<proxmox-host> "pct exec 103 -- tail -n 40 /opt/spiderfoot/spiderfoot-build-rcN.log"
+```
+
+The log has a lot of Docker output; the lines that matter start with `[INFO]`, `[OK]`, `[WARN]`, `[ERROR]` or `[scan]`.
+
+Healthy order: `Source at v…-rcN (<commit>)`, five `<image>: built`, `All 5 images carry revision <commit>`, five
+`[scan] <image>: PASS`, `Scan gate passed for all 5 images`, `Pushed 5 images at …`, `Release: https://github.com/…`,
+`Build and publish complete`. The images exist in the registry only after `Pushed 5 images`.
+
+**4. If the scan gate fails:** nothing is pushed. The per-image reports are in
+`/opt/spiderfoot/.spiderfoot-publish/scan-<tag>/` (`trivy-<image>.json`; the fixable HIGH/CRITICAL findings are the
+blockers). Fix it (usually a dependency bump, see "Bumping pins" and the written exceptions under "Supply-chain
+policy"), merge the fix by PR, then cut the **next** rc. Example: rc.28 failed on `soupsieve` 3.0.4 (a newly published
+HIGH, fixed in 4.0); the lock was bumped and rc.29 passed.
+
+**5. Edit the release notes if the build is a breaking change.** `publish.sh` creates the GitHub pre-release. If the new
+build needs a new stack file, new environment variables, a host-side step or changes a default, put a **Breaking change**
+section at the top of the notes saying what and why (`gh release edit <tag> --notes-file …`).
+
+### Deploying a build
+
+The stack files (`deploy/stack-podman.yml`, `deploy/stack-docker.yml`) are **not inside the images**, so a new tag does
+not update them. For each deploy:
+
+1. Paste the stack file from the tag you are deploying into the deploy tool (Dockhand), if its version header changed.
+2. Do any host-side step the release notes list (for example `chown -R 1000:1000 /srv/spiderfoot/embeddings-cache`).
+3. Set `SPIDERFOOT_TAG=v6.1.0-bd.1-rcN` in the stack's environment, and nothing else.
+4. Stop the whole stack, then start it. A single stop and start is enough: there is no GPU device to strip any more
+   (removed in stack-podman 2.13.0), and the stack comes up as one unit.
+5. Check every container is `healthy` and that the running image tags are the new ones
+   (`podman ps --format '{{.Names}} {{.Image}} {{.Status}}'`). If a service is still on the old tag, the tag change was
+   not saved before the redeploy.
 
 ### Tag scheme
 
@@ -705,6 +770,21 @@ saving the 3.2 GB `active-scanner` image for scanning ran out of space. The stal
 and refuses to start with under 12 GB free (see "Prerequisites"). The same run also confirmed the build token
 now read from `/etc/davros/ghcr-token` works (GHCR login succeeded).
 
+**2026-11-14: rc.29 to rc.31, and why a stack-file change shipped with them.**
+- rc.28 built but failed the scan gate on `soupsieve` 3.0.4 (HIGH, fixed in 4.0); nothing was pushed. The lock was bumped
+  to 4.0.1 under a written exception and rc.29 passed.
+- The "sf-api worker crashes" overnight were uvicorn's supervisor SIGKILLing API workers that missed its 5 s health ping,
+  taking the scans running inside them. Scans now run outside the API workers, a Redis heartbeat plus a reaper marks dead
+  scans failed, and the health-check timeout is configurable (`SF_API_WORKER_HEALTHCHECK_TIMEOUT`, default 120 s).
+- Scans never reached the Celery workers because the external-DNS override (`dns.resolver.override_system_resolver`)
+  applied to every name, so `sf-redis` stopped resolving inside the API. Fixed in rc.30: internal names always use the
+  container network's DNS.
+- rc.31: grouped navigation, tabbed Settings, module options and API keys edited on the Modules page, `fastembed` as the
+  real default (the API and workers were indexing with fake `mock` vectors while `sf-agents` searched with `fastembed`),
+  an `llm` reranker, and stack files 2.15.0 (Podman) / 2.5.0 (Docker) that give the API and workers the embedding
+  settings and the shared model cache. **Breaking:** needs the new stack file and
+  `chown -R 1000:1000 /srv/spiderfoot/embeddings-cache`.
+
 ## Deploy
 
 Production (Podman, `stack-podman.yml`) and development (Docker,
@@ -713,6 +793,7 @@ sequence. In short:
 
 ```bash
 mkdir -p /srv/spiderfoot/{postgres,redis,qdrant,embeddings-cache}
+chown -R 1000:1000 /srv/spiderfoot/embeddings-cache   # api and workers run non-root and share this model cache
 ./deploy/bootstrap-spiderfoot-env.sh    # see "Generating the secrets" below
 # then set SPIDERFOOT_TAG in the file it wrote, deploy the stack, and set the AI provider and key in the GUI
 ```

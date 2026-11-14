@@ -3,6 +3,33 @@
 All notable changes to SpiderFoot are documented in this file.  
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — braedach fork builds (`v6.1.0-bd.1-rc.N`)
+
+Fork-specific changes since 6.1.0, shipped as release candidates. The per-build record and the build and deploy
+procedure are in [`deploy/README.md`](deploy/README.md).
+
+### Breaking (rc.31)
+- Needs the updated stack file (`deploy/stack-podman.yml` 2.15.0, `deploy/stack-docker.yml` 2.5.0) and
+  `chown -R 1000:1000 /srv/spiderfoot/embeddings-cache` on the host.
+- Scans are now run by the Celery worker (2 at a time, the rest queue) instead of inside an API worker.
+- Defaults changed: embeddings `fastembed` (was `mock`), reranker `llm` (sends candidate finding text to the active AI provider).
+- The Data Source Credentials page is removed; module options and API keys are edited on the Modules page.
+
+### Fixed
+- **Scope escape (security):** active modules followed discovery data onto shared Cloudflare/Fastly infrastructure and
+  the strict-scope gate rejected every full-URL event; both fixed (deterministic CDN-range check, URL reduced to its FQDN).
+- **Silent module failures:** seven modules' own `_maxthreads` option was overwritten by the global key; four modules had
+  an unusable `setup()` signature; eight modules could hang a whole scan forever on one unresponsive host. All fixed and tested.
+- **Dead scans:** scans ran inside API workers that uvicorn's supervisor SIGKILLs when slow to answer a health ping, and a
+  dead scan stayed `RUNNING` forever. Scans now run outside the workers; a heartbeat and reaper mark dead scans failed.
+- **DNS override:** the external DNS server applied to every name, so the API could not resolve `sf-redis` and scans never
+  reached Celery. Internal names now always use the container network's DNS.
+- **Embeddings:** the API and workers indexed findings with meaningless `mock` vectors while `sf-agents` searched with `fastembed`.
+
+### Added
+- LLM reranker (default) that uses the provider chosen on AI Connections; grouped navigation, tabbed Settings, a Log text
+  size setting and explainers in the web UI; a catalog-wide test that every module's `setup()` works.
+
 ## [6.1.0] — 2026-06-02
 
 A hardening and test-maturity release. A multi-pass audit (see `AUDIT.md`) raised
