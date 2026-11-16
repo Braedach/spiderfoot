@@ -167,3 +167,79 @@ class TestModulePhone(TestModuleBase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Behaviour tests (2026-11-16): the module used to report only the carrier and returned early when there was none.
+# Numbers are libphonenumber's own example numbers, not real people's.
+
+import json as _json
+
+from spiderfoot import SpiderFootEvent as _Ev
+
+MOBILE = "+61412345678"          # an Australian mobile range
+FIXED = "+61892345678"           # an Australian fixed line (Perth area)
+GARBAGE = "+999"
+
+
+class TestPhoneDescribe(TestModuleBase):
+
+    def _module(self):
+        m = sfp_phone()
+        m.__name__ = "sfp_phone"
+        m.setup(SpiderFoot(self.default_options), {})
+        self.events = []
+        m.notifyListeners = self.events.append
+        return m
+
+    def _run(self, number):
+        m = self._module()
+        m.handleEvent(_Ev("PHONE_NUMBER", number, "test", _Ev("ROOT", "root", "", None)))
+        return {e.eventType: e.data for e in self.events}
+
+    def test_a_mobile_is_described_even_when_the_carrier_is_unknown(self):
+        out = self._run(MOBILE)
+        assert out["PHONE_NUMBER_TYPE"] == "Mobile"
+        assert "RAW_RIR_DATA" in out                       # the old code returned early and emitted nothing here
+
+    def test_the_raw_record_has_every_fact_and_the_porting_caveat(self):
+        raw = _json.loads(self._run(MOBILE)["RAW_RIR_DATA"])
+        for key in ("number", "international", "national", "country_calling_code", "region_code", "valid", "possible",
+                    "line_type", "location", "carrier", "time_zones", "note"):
+            assert key in raw, key
+        assert raw["number"] == MOBILE and raw["valid"] is True and raw["region_code"] == "AU"
+        assert raw["national"].startswith("0412") and raw["international"].startswith("+61")
+        assert "ported" in raw["note"] and "original" in raw["note"]
+
+    def test_a_fixed_line_gets_a_location(self):
+        out = self._run(FIXED)
+        assert out["PHONE_NUMBER_TYPE"] == "Fixed line"
+        assert out["GEOINFO"] == "Armadale"                # the geocoder lookup was commented out before
+
+    def test_an_invalid_number_is_reported_as_invalid_and_not_typed(self):
+        out = self._run(GARBAGE)
+        if "RAW_RIR_DATA" in out:
+            assert _json.loads(out["RAW_RIR_DATA"])["valid"] is False
+        assert "PHONE_NUMBER_TYPE" not in out
+
+    def test_an_unparseable_value_is_ignored_quietly(self):
+        assert self._run("not a number") == {}
+
+    def test_one_failing_lookup_never_hides_the_others(self):
+        from unittest import mock
+        m = self._module()
+        with mock.patch("modules.sfp_phone.geocoder.description_for_number", side_effect=RuntimeError("boom")):
+            m.handleEvent(_Ev("PHONE_NUMBER", MOBILE, "test", _Ev("ROOT", "root", "", None)))
+        types = {e.eventType for e in self.events}
+        assert "PHONE_NUMBER_TYPE" in types and "RAW_RIR_DATA" in types
+
+    def test_extraction_from_web_content_still_works(self):
+        m = self._module()
+        m.handleEvent(_Ev("TARGET_WEB_CONTENT", "Call us on +61 8 9234 5678 today", "test",
+                          _Ev("ROOT", "root", "", None)))
+        assert [e.data for e in self.events if e.eventType == "PHONE_NUMBER"] == [FIXED]
+
+    def test_produced_events_are_declared(self):
+        produced = sfp_phone().producedEvents()
+        for etype in ("PHONE_NUMBER", "PROVIDER_TELCO", "PHONE_NUMBER_TYPE", "GEOINFO", "RAW_RIR_DATA"):
+            assert etype in produced

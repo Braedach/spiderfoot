@@ -8,6 +8,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Fork-specific changes since 6.1.0, shipped as release candidates. The per-build record and the build and deploy
 procedure are in [`deploy/README.md`](deploy/README.md).
 
+### Changed (rc.40)
+- **Phone numbers are described in full.** `sfp_phone` reported only the carrier and returned early when there was none. It now also reports whether the number is valid, the line type (mobile, fixed line, VoIP, toll free and so on), the region where the library knows one, time zones and the standard formats (E.164, international, national), as a structured record, with the line type and location also as their own events. The carrier is the original allocation: a ported number still shows the original, which the record says. No key is needed. Live carrier, line-type and leak data still come from the keyed modules (numverify, abstractapi and others) once their keys are saved.
+
 ### Fixed (rc.39)
 - **`dnspython` 2.9.2** in both locks (high severity, GHSA-vvf4-9x63-8xvv; the rc.38 candidate failed the scan gate on 2.9.0 and 2.9.1, so it was never published and its tag has no release or images; rc.39 carries everything listed under rc.38). A named exception to the 14-day cool-down; nothing else moved.
 

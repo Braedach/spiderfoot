@@ -16,10 +16,11 @@ from __future__ import annotations
 # Licence:     MIT
 # -------------------------------------------------------------------------------
 
-import phonenumbers
-from phonenumbers import carrier
+import json
 
-# from phonenumbers import geocoder
+import phonenumbers
+from phonenumbers import PhoneNumberFormat, PhoneNumberType, carrier, geocoder, timezone
+
 from spiderfoot import SpiderFootEvent
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
 
@@ -30,7 +31,7 @@ class sfp_phone(SpiderFootAsyncPlugin):
 
     meta = {
         'name': "Phone Number Extractor",
-        'summary': "Identify phone numbers in scraped webpages.",
+        'summary': "Identify phone numbers in scraped webpages, and describe each one from Google's libphonenumber data: whether it is valid, the line type (mobile, landline, VoIP and so on), the region, time zones, the carrier it was originally allocated to, and its standard formats.",
         'flags': [],
         'useCases': ["Passive", "Footprint", "Investigate"],
         'categories': ["Content Analysis"],
@@ -57,7 +58,7 @@ class sfp_phone(SpiderFootAsyncPlugin):
 
     def producedEvents(self) -> list:
         """Return the list of events this module produces."""
-        return ['PHONE_NUMBER', 'PROVIDER_TELCO']
+        return ['PHONE_NUMBER', 'PROVIDER_TELCO', 'PHONE_NUMBER_TYPE', 'GEOINFO', 'RAW_RIR_DATA']
 
     def handleEvent(self, event: SpiderFootEvent) -> None:
         """Handle an event received by this module."""
@@ -96,37 +97,68 @@ class sfp_phone(SpiderFootAsyncPlugin):
                 self.debug(f"Error parsing phone number: {e}")
                 return
 
+            facts = self.describe(number)
+            source = event.moduleDataSource or "Unknown"
+
+            def emit(etype: str, data: str) -> None:
+                evt = SpiderFootEvent(etype, data, self.__name__, event)
+                evt.moduleDataSource = source
+                self.notifyListeners(evt)
+
+            if facts["carrier"]:
+                emit("PROVIDER_TELCO", facts["carrier"])
+            if facts["valid"] and facts["line_type"] != "Unknown":
+                emit("PHONE_NUMBER_TYPE", facts["line_type"])
+            if facts["location"]:
+                emit("GEOINFO", facts["location"])
+            emit("RAW_RIR_DATA", json.dumps(facts, indent=2))
+
+    _LINE_TYPES = {
+        PhoneNumberType.FIXED_LINE: "Fixed line",
+        PhoneNumberType.MOBILE: "Mobile",
+        PhoneNumberType.FIXED_LINE_OR_MOBILE: "Fixed line or mobile",
+        PhoneNumberType.TOLL_FREE: "Toll free",
+        PhoneNumberType.PREMIUM_RATE: "Premium rate",
+        PhoneNumberType.SHARED_COST: "Shared cost",
+        PhoneNumberType.VOIP: "VoIP",
+        PhoneNumberType.PERSONAL_NUMBER: "Personal number",
+        PhoneNumberType.PAGER: "Pager",
+        PhoneNumberType.UAN: "Universal access number",
+        PhoneNumberType.VOICEMAIL: "Voicemail",
+        PhoneNumberType.UNKNOWN: "Unknown",
+    }
+
+    NOTE = ("The carrier is the one the number range was originally allocated to. A number that has been ported to "
+            "another carrier still shows the original; only a live lookup service can tell the current one.")
+
+    def describe(self, number) -> dict:
+        """Everything libphonenumber knows about a parsed number (offline, no key).
+
+        Each lookup is independent, so one failing never hides the others.
+        """
+        def safe(fn, default):
             try:
-                number_carrier = carrier.name_for_number(number, 'en')
+                return fn()
             except Exception as e:
-                self.debug(f"Error retrieving phone number carrier: {e}")
-                return
+                self.debug(f"Phone lookup failed: {e}")
+                return default
 
-            if not number_carrier:
-                self.debug(f"No carrier information found for {eventData}")
-                return
-
-            evt = SpiderFootEvent(
-                "PROVIDER_TELCO", number_carrier, self.__name__, event)
-
-            if event.moduleDataSource:
-                evt.moduleDataSource = event.moduleDataSource
-            else:
-                evt.moduleDataSource = "Unknown"
-
-            self.notifyListeners(evt)
-
-            # try:
-            #     location = geocoder.description_for_number(number, 'en')
-            # except Exception as e:
-            #     self.debug('Error retrieving phone number location: ' + str(e))
-            #     return
-
-            # if location:
-            #     evt = SpiderFootEvent("GEOINFO", location, self.__name__, event)
-            #     self.notifyListeners(evt)
-            # else:
-            #     self.debug("No location information found for " + eventData)
+        facts = {
+            "number": safe(lambda: phonenumbers.format_number(number, PhoneNumberFormat.E164), str(number)),
+            "international": safe(lambda: phonenumbers.format_number(number, PhoneNumberFormat.INTERNATIONAL), ""),
+            "national": safe(lambda: phonenumbers.format_number(number, PhoneNumberFormat.NATIONAL), ""),
+            "country_calling_code": number.country_code,
+            "region_code": safe(lambda: phonenumbers.region_code_for_number(number), None),
+            "valid": safe(lambda: phonenumbers.is_valid_number(number), False),
+            "possible": safe(lambda: phonenumbers.is_possible_number(number), False),
+            "line_type": self._LINE_TYPES.get(safe(lambda: phonenumbers.number_type(number),
+                                                   PhoneNumberType.UNKNOWN), "Unknown"),
+            "location": safe(lambda: geocoder.description_for_number(number, "en"), "") or "",
+            "carrier": safe(lambda: carrier.name_for_number(number, "en"), "") or "",
+            "time_zones": [z for z in safe(lambda: timezone.time_zones_for_number(number), ()) if z != "Etc/Unknown"],
+            "note": self.NOTE,
+        }
+        return facts
 
     def registerEventEmitter(self, emitter: str) -> None:
         """Register event emitter"""
