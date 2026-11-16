@@ -56,6 +56,7 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
     }
 
     _runs = 0  # directories brute-forced so far this scan (reset in setup)
+    _dir_prints = None   # (path, content fingerprint) of directories already brute-forced, across origins
 
     # Default options
     opts = {
@@ -70,6 +71,9 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
         "soft_404_detection": True,
         "uniform_response_threshold": 100,
         "max_targets": 25,
+        "tls_skip_verify": True,
+        "max_runtime": 300,
+        "skip_equivalent_directories": True,
         # Remote execution options
         "remote_enabled": False,
         "remote_host": "",
@@ -97,6 +101,13 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
         "for every path (Angular/React/Vue client-side routing) makes EVERY wordlist entry a false "
         "'hit', each spawning its own crawl/probe downstream - confirmed live: a scan that should "
         "take minutes ran for 16+ hours against OWASP Juice Shop.",
+        "tls_skip_verify": "Do not verify TLS certificates (gobuster -k). This is a discovery tool and sends no credentials; "
+                           "without it every https target with an expired, self-signed or name-mismatched certificate "
+                           "(including any scan by IP address) fails with a TLS error and finds nothing.",
+        "max_runtime": "Most seconds one directory's brute-force may run before it is stopped and the results found so far are kept.",
+        "skip_equivalent_directories": "Skip a directory whose page is identical to one already brute-forced under another "
+                                       "origin (the same site reached by http and https, by name and by IP address): the "
+                                       "same wordlist would find the same things again.",
         "max_targets": "Maximum number of distinct directories to brute-force per scan. Each URL is reduced to "
         "its directory (query string and file name dropped), so page.jsp?id=1 and page.jsp?id=2 are one target.",
         "remote_enabled": "Enable remote execution via SSH (true/false)",
@@ -118,6 +129,7 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
         self.errorState = False
         self.results = self.tempStorage()
         self._runs = 0
+        self._dir_prints = self.tempStorage()
     # What events is this module interested in for input
     def watchedEvents(self) -> list:
         """Return the list of events this module watches."""
@@ -233,6 +245,23 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
         except OSError:
             pass
 
+    def _equivalent_directory_seen(self, url: str) -> bool:
+        """True when ``url``'s page matches the same path already brute-forced under another origin. Never raises."""
+        try:
+            from urllib.parse import urlsplit
+            from spiderfoot.sflib.catchall import content_fingerprint
+            res = self.fetch_url(url, timeout=int(self.opts.get("timeout", 30)), use_cache=False, sizeLimit=65536)
+            fp = content_fingerprint((res or {}).get("content"))
+            if fp is None:
+                return False
+            key = (urlsplit(url).path or "/", fp)
+            if key in self._dir_prints:
+                return True
+            self._dir_prints[key] = True
+            return False
+        except Exception:
+            return False
+
     def execute_command(self, cmd: list[str]):
         """Execute an external command safely (no shell) and return the output file path.
 
@@ -249,7 +278,7 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
                 full_cmd,
                 capture_output=True,
                 text=True,
-                timeout=self.opts.get("timeout", 30) * 10,  # generous wall-clock limit
+                timeout=int(self.opts.get("max_runtime", self.opts.get("timeout", 30) * 10)),  # wall-clock limit
             )
         except subprocess.TimeoutExpired:
             if os.path.getsize(output_file.name) > 0:
@@ -402,6 +431,11 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
             self.errorState = True
             return
 
+        if self.opts.get("skip_equivalent_directories", True) and self._equivalent_directory_seen(eventData):
+            self.info(f"gobuster: skipping {eventData}: its page is identical to a directory already brute-forced "
+                      "under another origin.")
+            return
+
         soft_404_length = self._detect_soft_404(eventData)
 
         # Build the gobuster command
@@ -432,6 +466,9 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
 
         if self.opts["follow_redirects"]:
             cmd.append("-r")
+
+        if self.opts.get("tls_skip_verify", True):
+            cmd.append("-k")
 
         if self.opts["extensions"]:
             cmd.extend(["-x", self.opts["extensions"]])

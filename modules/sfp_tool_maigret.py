@@ -61,7 +61,7 @@ class sfp_tool_maigret(SpiderFootAsyncPlugin):
         'top_sites': 500,
         'timeout': 15,
         'max_connections': 25,
-        'exclude_tags': "porn,erotic,webcam",
+        'exclude_tags': "porn,erotic,webcam,dating",
         'min_length': 4,
         'max_usernames': 10,
         'run_timeout': 900,
@@ -76,7 +76,7 @@ class sfp_tool_maigret(SpiderFootAsyncPlugin):
         'top_sites': "How many of the most popular sites to check (500 takes about a minute; the full list is about 5,900).",
         'timeout': "Seconds to wait for each site.",
         'max_connections': "How many sites to contact at once.",
-        'exclude_tags': "Comma-separated site tags to leave out (adult sites by default).",
+        'exclude_tags': "Comma-separated site tags to leave out (adult and dating sites by default: a name search there is both noisy and sensitive).",
         'min_length': "Shortest username to look up. Short names match many unrelated people.",
         'max_usernames': "Most usernames to look up in one scan.",
         'run_timeout': "Seconds to allow one username's search before giving up on it.",
@@ -147,6 +147,11 @@ class sfp_tool_maigret(SpiderFootAsyncPlugin):
             if proxy:
                 cmd.extend(['--proxy', proxy])
         return cmd
+
+    @staticmethod
+    def _countries(tags: list) -> list[str]:
+        """The site's country codes (Maigret tags such as "pl" or "cz"), upper-cased, for the scoring of the hit."""
+        return [str(t).upper() for t in tags if _COUNTRY_TAG.match(str(t))]
 
     @staticmethod
     def _category(tags: list) -> str:
@@ -236,6 +241,9 @@ class sfp_tool_maigret(SpiderFootAsyncPlugin):
             if self.checkForStop():
                 return
             text = f"{account['site']} (Category: {self._category(account['tags'])})\n<SFURL>{account['url']}</SFURL>"
+            countries = self._countries(account['tags'])
+            if countries:
+                text += f"\n(site countries: {', '.join(countries)})"
             self.notifyListeners(SpiderFootEvent("ACCOUNT_EXTERNAL_OWNED", text, self.__name__, event))
             if account["ids"]:
                 raw = json.dumps({"tool": "maigret", "site": account["site"], "url": account["url"],

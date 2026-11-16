@@ -76,7 +76,7 @@ class TestMaigretModule(TestModuleBase):
             self.assertNotIn(forbidden, cmd)
         self.assertEqual(cmd[cmd.index("--json") + 1], "simple")
         self.assertEqual(cmd[cmd.index("--top-sites") + 1], "500")
-        self.assertEqual(cmd[cmd.index("--exclude-tags") + 1], "porn,erotic,webcam")
+        self.assertEqual(cmd[cmd.index("--exclude-tags") + 1], "porn,erotic,webcam,dating")
         self.assertNotIn("--proxy", cmd)
 
     def test_a_configured_proxy_is_used_unless_switched_off(self):
@@ -92,7 +92,7 @@ class TestMaigretModule(TestModuleBase):
         accounts = self._of("ACCOUNT_EXTERNAL_OWNED")
         self.assertEqual(len(accounts), 2)                                   # not the similar one, not the unclaimed one
         self.assertIn("Example Pay (Category: apps, business, finance)\n<SFURL>https://pay.example/me/exampleuser</SFURL>", accounts)
-        self.assertIn("ExampleGist [Example] (Category: coding, sharing)\n<SFURL>https://gist.example/exampleuser</SFURL>", accounts)
+        self.assertIn("ExampleGist [Example] (Category: coding, sharing)\n<SFURL>https://gist.example/exampleuser</SFURL>\n(site countries: US)", accounts)
         self.assertFalse([a for a in accounts if "Similar" in a])
         self.assertEqual(self.errors, [])
 
@@ -203,3 +203,14 @@ class TestMaigretModule(TestModuleBase):
         m.getTarget = lambda: (_ for _ in ()).throw(RuntimeError("no scan"))
         m.handleEvent(self._ev("exampleuser"))
         self.assertEqual(self.calls, [])
+
+    def test_dating_sites_are_left_out_by_default_and_a_site_country_is_kept_for_scoring(self):
+        self.assertIn("dating", sfp_tool_maigret.opts["exclude_tags"].split(","))
+        self.assertEqual(sfp_tool_maigret._countries(["forum", "pl", "global", "cz"]), ["PL", "CZ"])
+        self.assertEqual(sfp_tool_maigret._countries(["forum", "global"]), [])
+        m = self._module(report=REPORT)
+        m.handleEvent(self._ev("exampleuser"))
+        with_country = [a for a in self._of("ACCOUNT_EXTERNAL_OWNED") if "ExampleGist" in a][0]
+        without = [a for a in self._of("ACCOUNT_EXTERNAL_OWNED") if "Example Pay" in a][0]
+        self.assertTrue(with_country.endswith("(site countries: US)"))
+        self.assertNotIn("site countries", without)                           # no country tag, no extra line

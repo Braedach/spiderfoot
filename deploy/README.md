@@ -911,7 +911,7 @@ fork's own.
 - AI features call Anthropic directly (Claude Sonnet 5.5, see "AI model") (`sf-agents`; the provider and key are set in
   the GUI, see "AI providers"). There is no LLM proxy: the LiteLLM gateway was removed
   after its supply-chain breach, and it had only relayed to Anthropic anyway.
-- This runs about 290 OSINT modules, including active recon tools that make
+- This runs 284 OSINT modules, including active recon tools that make
   outbound requests to third parties. Only scan targets you are authorised to
   investigate.
 - `sf-tor` connects to the Tor network from the moment the stack starts (see "Tor" above). It keeps no state on

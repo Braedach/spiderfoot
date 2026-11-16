@@ -92,6 +92,9 @@ class ConfigManager:
         '_searxng_timeout': 20,
         '_searxng_results': 10,
         '_strict_scope': True,
+        '_scope_guard_mode': 'log',
+        '_scope_asn_authorised': False,
+        '_scope_asn_max_addresses': 256,
     }
 
     # Configuration descriptions
@@ -143,6 +146,16 @@ class ConfigManager:
         '_searxng_timeout': "Seconds to wait for each SearXNG search.",
         '_searxng_results': "Results kept from each search.",
         '_modulesenabled': "Modules enabled for the scan.",
+        '_scope_guard_mode': (
+            "Scope guard for active modules (web and TLS probes, port scanners, crawlers). 'log' records what it would"
+            " block and blocks nothing extra; 'enforce' refuses contact with hosts outside the target's scope; 'off'"
+            " disables it. Passive lookups and identity tools are never blocked."
+        ),
+        '_scope_asn_authorised': (
+            "ASN scans: allow active contact with the ASN's registered addresses. Off by default; turn on only with"
+            " explicit authorisation for that ASN."
+        ),
+        '_scope_asn_max_addresses': "ASN scans with active contact authorised: the most distinct addresses contacted.",
         '_strict_scope': (
             "Block events from reaching invasive tool modules (port scanners, web/TLS"
             " probes, etc.) unless the event's data is within the scan target's own"

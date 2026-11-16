@@ -207,7 +207,7 @@ class ScanService:
         dbh = self._ensure_dbh()
         if filter_fp:
             return dbh.scanResultEvent(scan_id, filterFp=True) or []
-        return dbh.scanResultEvent(scan_id, event_type) or []
+        return dbh.scanResultEvent(scan_id, event_type or "ALL") or []
 
     def search_events(self, scan_id: str, *,
                       event_type: str = "", value: str = "") -> list:
