@@ -40,6 +40,8 @@ ACTIVE_MODULES: frozenset[str] = frozenset({
     "sfp_tool_onesixtyone", "sfp_tool_snallygaster", "sfp_tool_sslscan", "sfp_tool_sslyze",
     "sfp_tool_testsslsh", "sfp_tool_tlsx", "sfp_tool_wafw00f", "sfp_tool_whatweb", "sfp_spider",
     "sfp_cloudfront", "sfp_subdomain_takeover", "sfp_dnszonexfer",
+    # requests each discovered file link to check that the server really serves it (added with the verification)
+    "sfp_intfiles",
 })
 
 # Send a person's identifiers to many sites. Bounded by their own options (person_targets_only and caps), not by

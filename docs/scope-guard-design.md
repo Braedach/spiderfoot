@@ -1,6 +1,26 @@
 # Scope guard: design
 
-Status: DESIGN FOR REVIEW (nothing here is implemented yet). Written 2026-11-16 after the rc.39 validation scans.
+Status: IMPLEMENTED in log-only mode (2026-11-16). `spiderfoot/scan/scope_policy.py` holds the policy; the dispatch gate
+(`shouldDispatchToModule`) and the egress check (`fetch_url`) both use it. Setting `_scope_guard_mode`: `off`, `log`
+(default: decisions are recorded in the scan log, nothing extra is blocked) or `enforce`. Written after the rc.39
+validation scans.
+
+### What was built, and what it was checked against
+
+- 37 modules are classed active (`ACTIVE_MODULES`): the 12 flagged `invasive`, plus the web, TLS and crawling modules that
+  were never gated, plus `sfp_intfiles` (it now requests the files it reports). A test fails if a module flagged
+  `invasive` is not in the list.
+- The egress check sits in `SpiderFootModernPlugin.fetch_url`, which 188 modules use, including the spider. Active modules
+  are held to scope; every other module is only logged.
+- Replay on real data: the rc.39 IP scan's 3,536 discovered hosts, run through the policy, allow contact with 2 (the
+  address and its reverse-DNS name). The demo.testfire.net domain scan's 7,712 active-module events: zero out of scope.
+  The phone, email, name and dark-web scans: no active module produced output, so nothing changes for them.
+- Shared edge networks: Cloudflare, Fastly, CloudFront, GitHub Pages, Imperva and Bunny CDN (published lists, with offline
+  fallbacks).
+- Not built: the ASN-based block for providers with no published range list (Akamai, Sucuri and similar), which needs its
+  numbers verified against a live lookup first; and `sfp_tool_*` batch re-checks (those modules only receive events that
+  passed the dispatch gate).
+
 
 ## Why
 

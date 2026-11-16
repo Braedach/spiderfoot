@@ -378,3 +378,11 @@ class TestMoreSharedEdgeProviders:
                        cdn=lambda ip: c.isKnownCdnIP(ip))
         d = p.decide("185.199.108.153")
         assert not d.allowed and "GitHub Pages" in d.reason
+
+
+def test_a_module_that_requests_discovered_files_is_held_to_scope():
+    """sfp_intfiles now requests each file link it finds, so it is an active module."""
+    assert "sfp_intfiles" in sp.ACTIVE_MODULES
+    policy = policy_for("203.0.113.10", "IP_ADDRESS")
+    assert not policy.egress("sfp_intfiles", "https://elsewhere.example/a.pdf").allowed
+    assert policy.egress("sfp_intfiles", "https://203.0.113.10/a.pdf").allowed
