@@ -164,6 +164,8 @@ export interface ScanCreateRequest {
   /** Optional, for person searches: where the subject is based. Weighs the accounts found; never sent to any service. */
   subject_country?: string;
   subject_region?: string;
+  /** Must be true to start a profile that tests the target actively (e.g. web-app-test). */
+  authorised_to_test?: boolean;
   /** Optional: scans sharing a label are about one subject; each report also sees the others. */
   subject_label?: string;
 }
@@ -363,6 +365,8 @@ export interface ScanProfile {
   optional_inactive?: string[];
   /** Neighbour expansion (netblocks, subnets) is switched off for this profile. */
   disable_expansion?: boolean;
+  /** The profile tests the target actively: the scan starts only when the person confirms they are authorised. */
+  requires_authorisation?: boolean;
 }
 
 /** One search offered on the New Scan page, with the profile it runs and what that profile would run now. */
