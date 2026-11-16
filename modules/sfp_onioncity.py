@@ -27,9 +27,9 @@ class sfp_onioncity(SpiderFootAsyncPlugin):
 
     meta = {
         'name': "Onion.link",
-        'summary': "Search Tor 'Onion City' search engine for mentions of the target domain using Google Custom Search.",
-        'flags': ["apikey", "tor"],
-        'useCases': ["Footprint", "Investigate"],
+        'summary': "Deprecated: needs a Google Custom Search key, and onion.link no longer answers. Search Tor 'Onion City' search engine for mentions of the target domain using Google Custom Search.",
+        'flags': ["apikey", "tor", "deprecated"],
+        'useCases': [],
         'categories': ["Search Engines"],
         'dataSource': {
             'website': "https://onion.link/",

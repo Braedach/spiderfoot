@@ -1,6 +1,6 @@
 """Modules whose service is gone are marked deprecated, so no profile, "All Modules" or use case runs them.
 
-Each was checked against its real service on 2026-11-14 (see CHANGELOG, rc.38). A deprecated module can still be picked
+Each was checked against its real service on 2026-11-14 (see CHANGELOG, rc.38); sfp_onioncity on 2026-11-16. A deprecated module can still be picked
 explicitly on the By Module tab; it is just never chosen for the user.
 """
 import pytest
@@ -11,7 +11,7 @@ from spiderfoot.scan.scan_profile import get_profile_manager
 
 DEAD = ["sfp_sublist3r", "sfp_duckduckgo", "sfp_bgpview", "sfp_sorbs", "sfp_zonefiles", "sfp_onionsearchengine",
         "sfp_callername", "sfp_trumail", "sfp_searchcode", "sfp_twitter", "sfp_threatminer", "sfp_tool_wappalyzer",
-        "sfp_tool_phoneinfoga"]
+        "sfp_tool_phoneinfoga", "sfp_onioncity"]
 
 
 @pytest.fixture(scope="module")

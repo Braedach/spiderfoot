@@ -57,6 +57,7 @@ def test_no_module_is_dead_weight(catalog, profile_name):
 
 
 IDENTITY_TOOLS = {"sfp_tool_maigret", "sfp_tool_user_scanner"}
+DARKWEB_SEARCH = {"sfp_ahmia", "sfp_torch"}
 
 
 @pytest.mark.parametrize("profile_name", sorted(SEEDS))
@@ -67,6 +68,8 @@ def test_always_on_modules_are_key_free_and_safe(catalog, profile_name):
         banned = {"apikey", "invasive", "tool", "tor", "errorprone", "deprecated"}
         if m in IDENTITY_TOOLS:   # key-free tools that act only in a scan about a person (person_targets_only)
             banned -= {"tool"}
+        if m in DARKWEB_SEARCH:   # key-free dark-web search engines; they reach Tor only when Settings > Tor is on
+            banned -= {"tor"}
         assert not flags & banned, (profile_name, m, flags)
 
 
