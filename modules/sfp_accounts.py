@@ -16,6 +16,7 @@ from __future__ import annotations
 # -------------------------------------------------------------------------------
 
 import json
+import re
 import random
 import threading
 import time
@@ -108,9 +109,19 @@ class sfp_accounts(SpiderFootAsyncPlugin):
         return ["USERNAME", "ACCOUNT_EXTERNAL_OWNED",
                 "SIMILAR_ACCOUNT_EXTERNAL"]
 
+    # a check that asks a search page ("/search?query=...") rather than a profile URL
+    WEAK_CHECK = re.compile(r"(?:[?&](?:search|query|q|s)=|/search(?:/|\?|$))", re.IGNORECASE)
+
     def checkSite(self, name: str, site: dict) -> None:
         """Check Site."""
         if 'uri_check' not in site:
+            return
+
+        # A name with a dot cannot be a one-label subdomain: "leon.marcus.scott.example.com" is a different, nested
+        # name, and such sites answer for any subdomain (a wildcard), so the check would "find" an account that cannot
+        # exist. Not a loss of data: there is no such account.
+        if "." in name and "://{account}." in site['uri_check']:
+            self.debug(f"Skipping {site['name']}: a dotted name cannot be a subdomain there.")
             return
 
         url = site['uri_check'].format(account=name)
@@ -119,6 +130,10 @@ class sfp_accounts(SpiderFootAsyncPlugin):
         else:
             ret_url = url
         retname = f"{site['name']} (Category: {site['cat']})\n<SFURL>{ret_url}</SFURL>"
+        if self.WEAK_CHECK.search(site['uri_check']):
+            # The check asks the site's search page, not a profile: it still reports what it found (the model and the
+            # scoring decide what that is worth) but says how weak the evidence is.
+            retname += "\n(weak evidence: this check requests the site's search page, not a profile)"
 
         post = None
         if site.get('post_body'):
