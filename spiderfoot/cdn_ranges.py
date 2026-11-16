@@ -382,3 +382,67 @@ def isKnownCdnIP(ip: str, ranges: dict[str, list[str]] | None = None) -> str | N
                 continue
 
     return None
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Shared-edge networks by ASN (added 2026-11-16)
+#
+# Published IP lists go stale and some providers publish none. An address's origin ASN is stable, so it catches the
+# edge addresses the lists miss. Only networks that are shared edge by nature are listed: every address in them
+# serves many unrelated customers' sites. Cloud platforms (AWS, Google, Azure) and bulk hosters are NOT listed:
+# most of their addresses are one customer's own server, and a scan of that customer must be allowed to run.
+# Every number below was checked against Team Cymru's ASN database on 2026-11-16.
+CDN_ASNS: dict[int, str] = {
+    13335: "Cloudflare", 209242: "Cloudflare",
+    54113: "Fastly",
+    20940: "Akamai", 16625: "Akamai",
+    19551: "Imperva",
+    30148: "Sucuri",
+    22822: "Edgio (Limelight)", 15133: "Edgecast",
+    60068: "CDN77",
+    200325: "Bunny CDN",
+}
+
+__all__ += ["CDN_ASNS", "cymruAsnLookup", "knownCdnProvider"]
+
+
+def cymruAsnLookup(ip: str, timeout: float = 3.0) -> int | None:
+    """Origin ASN of an address through Team Cymru's DNS service (the lookup sfp_asn also uses). None on any failure."""
+    try:
+        import dns.resolver
+        addr = netaddr.IPAddress(ip)
+        if addr.version == 4:
+            name = ".".join(reversed(str(addr).split("."))) + ".origin.asn.cymru.com"
+        else:
+            nibbles = addr.format(netaddr.ipv6_verbose).replace(":", "")
+            name = ".".join(reversed(nibbles)) + ".origin6.asn.cymru.com"
+        resolver = dns.resolver.Resolver()
+        resolver.lifetime = resolver.timeout = timeout
+        for rr in resolver.resolve(name, "TXT"):
+            first = str(rr).strip('"').split("|")[0].split()[0]
+            return int(first)
+    except Exception:
+        return None
+    return None
+
+
+def knownCdnProvider(ip: str, ranges: dict[str, list[str]] | None = None, asn_lookup=None, _cache: dict | None = None) -> str | None:
+    """Provider name when the address is on a shared edge network: by published range first, then by origin ASN.
+
+    ``asn_lookup`` maps an address to its ASN (default: Team Cymru DNS). A failed lookup counts as "not known",
+    never as "shared", so a DNS failure cannot stop a scan of a legitimate target.
+    """
+    provider = isKnownCdnIP(ip, ranges)
+    if provider:
+        return provider
+    cache = _cache if _cache is not None else _ASN_CACHE
+    if ip not in cache:
+        try:
+            cache[ip] = (asn_lookup or cymruAsnLookup)(ip)
+        except Exception:
+            cache[ip] = None
+    asn = cache[ip]
+    return CDN_ASNS.get(asn) if asn is not None else None
+
+
+_ASN_CACHE: dict[str, int | None] = {}

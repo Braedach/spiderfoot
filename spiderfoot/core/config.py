@@ -95,6 +95,7 @@ class ConfigManager:
         '_scope_guard_mode': 'log',
         '_scope_asn_authorised': False,
         '_scope_asn_max_addresses': 256,
+        '_cdn_asn_check': True,
     }
 
     # Configuration descriptions
@@ -156,6 +157,7 @@ class ConfigManager:
             " explicit authorisation for that ASN."
         ),
         '_scope_asn_max_addresses': "ASN scans with active contact authorised: the most distinct addresses contacted.",
+        '_cdn_asn_check': "Also recognise shared CDN and DDoS-protection edge addresses by their network (ASN), looked up through Team Cymru's DNS service, so active modules do not scan a provider's shared servers. A failed lookup never blocks anything.",
         '_strict_scope': (
             "Block events from reaching invasive tool modules (port scanners, web/TLS"
             " probes, etc.) unless the event's data is within the scan target's own"
