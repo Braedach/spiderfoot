@@ -57,7 +57,7 @@ def test_no_module_is_dead_weight(catalog, profile_name):
 
 
 IDENTITY_TOOLS = {"sfp_tool_maigret", "sfp_tool_user_scanner"}
-DARKWEB_SEARCH = {"sfp_ahmia", "sfp_torch"}
+DARKWEB_SEARCH = {"sfp_ahmia", "sfp_torch", "sfp_onionsearch"}
 
 
 @pytest.mark.parametrize("profile_name", sorted(SEEDS))
