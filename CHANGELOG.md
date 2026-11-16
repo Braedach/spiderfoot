@@ -8,6 +8,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Fork-specific changes since 6.1.0, shipped as release candidates. The per-build record and the build and deploy
 procedure are in [`deploy/README.md`](deploy/README.md).
 
+### Fixed (rc.40)
+- **The scan Graph tab showed nothing for every scan.** The graph request without a filter passed `None` as the event type to a database call that only applies its "all events" default when the argument is left out, so it raised and the API answered HTTP 500. It now asks for all events. The scan-service fallback path had the same flaw and is fixed too. The tests' fake database accepted `None`, which hid the bug; it now follows the real contract.
+
 ### Fixed (rc.39)
 - **`dnspython` 2.9.2** in both locks (high severity, GHSA-vvf4-9x63-8xvv; the rc.38 candidate failed the scan gate on 2.9.0 and 2.9.1, so it was never published and its tag has no release or images; rc.39 carries everything listed under rc.38). A named exception to the 14-day cool-down; nothing else moved.
 
