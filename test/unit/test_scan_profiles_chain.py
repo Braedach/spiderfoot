@@ -130,3 +130,30 @@ def test_the_dark_web_profile_excludes_the_dead_search_engine(catalog):
     all_modules = {n: {"meta": catalog[n].get("meta", {})} for n in catalog}
     resolved = p.resolve_modules(all_modules)
     assert "sfp_onionsearchengine" not in resolved and "sfp_ahmia" in resolved
+
+
+# --- web search through the owner's SearXNG, and IntelX in the dark-web profile (rc.40) -----------------------------
+@pytest.mark.parametrize("profile_name", sorted(SEEDS))
+def test_the_owners_web_search_is_in_every_person_profile(profile_name):
+    assert "sfp_searxng" in get_profile_manager().get(profile_name).include_modules
+
+
+@pytest.mark.parametrize("profile_name", ["full-footprint", "ip-address", "asn", "infrastructure", "dark-web"])
+def test_the_web_search_is_not_in_non_person_profiles(profile_name):
+    p = get_profile_manager().get(profile_name)
+    assert p is None or "sfp_searxng" not in p.include_modules + p.optional_modules
+
+
+def test_intelx_joins_the_dark_web_profile_only_with_its_key(catalog):
+    p = get_profile_manager().get("dark-web")
+    assert "sfp_intelx" in p.optional_modules
+    all_modules = {n: {"meta": catalog[n].get("meta", {})} for n in catalog}
+    assert "sfp_intelx" not in p.resolve_modules(all_modules)
+    assert "sfp_intelx" in p.resolve_modules(all_modules, configured_modules={"sfp_intelx"})
+
+
+def test_the_web_search_module_does_nothing_until_configured():
+    from modules.sfp_searxng import sfp_searxng
+    m = sfp_searxng()
+    m.opts = {}
+    assert m._configured_base() is None

@@ -457,6 +457,7 @@ class ProfileManager:
                 "sfp_phone",          # phonenumbers lib: carrier/region/timezone/validity
                 "sfp_countryname",    # country from phone/IP/etc.
                 "sfp_hudsonrock",     # Hudson Rock Cavalier: free infostealer-breach intel
+                "sfp_searxng",        # web search for the number, through YOUR SearXNG (off until set up in Settings > Web Search)
                 # sfp_callername is not listed: callername.com is now a parked domain (checked 2026-11-14)
             ],
             optional_modules=[
@@ -498,6 +499,7 @@ class ProfileManager:
                 "sfp_tool_user_scanner",  # which of ~200 sites the address is registered on
                 "sfp_tool_maigret",       # the usernames found, looked up on up to 5,900 sites
                 "sfp_ahmia", "sfp_torch",  # dark-web search for the address (through Tor; needs Settings > Tor on)
+                "sfp_searxng",             # web search for the address, through YOUR SearXNG (off until set up in Settings > Web Search)
                 # not listed (checked 2026-11-14): sfp_trumail (its API now says Trumail joined Emailable),
                 # sfp_searchcode (API answers 404), sfp_twitter (profile pages need a login)
             ],
@@ -536,6 +538,7 @@ class ProfileManager:
                 "sfp_slideshare", "sfp_myspace",
                 "sfp_tool_maigret",  # the usernames found, looked up on up to 5,900 sites (person scans only)
                 "sfp_ahmia", "sfp_torch",  # dark-web search for the name (through Tor; needs Settings > Tor on)
+                "sfp_searxng",             # web search for the name, through YOUR SearXNG (off until set up in Settings > Web Search)
             ],
             optional_modules=[
                 "sfp_socialprofiles", "sfp_tiktok_osint", "sfp_whoisfreaks", "sfp_sociallinks", "sfp_c99",
@@ -555,6 +558,8 @@ class ProfileManager:
             ),
             category=ProfileCategory.DARKWEB,
             include_flags=["tor"],
+            # Intelligence X searches the dark web, paste sites and leaks; it joins once its key is saved
+            optional_modules=["sfp_intelx"],
             max_threads=2,
             tags=["darkweb", "tor", "deep-web"],
         ))
