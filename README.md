@@ -116,7 +116,7 @@ The New Scan page offers four ways to choose modules. The server, not the browse
 
 | Tab | What runs |
 |---|---|
-| By Use Case, All Modules | Every reliable module (about 285 of about 290): active tools and dark-web modules included, error-prone and retired modules left out |
+| By Use Case, All Modules | Every reliable module (277 of 284): active tools and dark-web modules included, error-prone and retired modules left out |
 | By Use Case, others | The modules in that group (Footprint, Investigate, Passive), or a fixed short list for Quick Scan |
 | By Profile | The profile's module list, with the profile's own thread limit and option overrides. A profile's keyed (optional) modules are added only if their API key is saved |
 | By Required Data | The modules that produce the selected data types, plus the modules that feed them their input. This chain grows quickly: for most data types it reaches about 190 modules |

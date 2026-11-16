@@ -500,8 +500,6 @@ class ProfileManager:
             ),
             category=ProfileCategory.DARKWEB,
             include_flags=["tor"],
-            # as.onionsearchengine.com no longer resolves (checked 2026-11-14)
-            exclude_modules=["sfp_onionsearchengine"],
             max_threads=2,
             tags=["darkweb", "tor", "deep-web"],
         ))
@@ -592,12 +590,10 @@ class ProfileManager:
                 "sfp_tool_gobuster",
                 "sfp_tool_nbtscan",
                 "sfp_tool_onesixtyone",
-                "sfp_tool_phoneinfoga",
                 "sfp_tool_snallygaster",
                 "sfp_tool_testsslsh",
                 "sfp_tool_trufflehog",
                 "sfp_tool_wafw00f",
-                "sfp_tool_wappalyzer",
                 "sfp_tool_whatweb",
                 # ── Pre-existing modules (no tool_ prefix) ──
                 "sfp_httpx",

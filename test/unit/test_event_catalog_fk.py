@@ -78,7 +78,7 @@ class TestModuleEventsFKSatisfied(unittest.TestCase):
         cls.modules = sf.opts.get("__modules__", {})
 
     def test_modules_loaded(self):
-        """Sanity: at least 290 modules should load.
+        """Sanity: at least 280 modules should load.
 
         Was 300 pre-cleanup (2026-11); lowered after removing 11 dead/
         superseded modules (7 tool wrappers the active-scanner Dockerfile's
@@ -86,7 +86,7 @@ class TestModuleEventsFKSatisfied(unittest.TestCase):
         "no longer needed" stub modules, 1 storage backend superseded by
         Vector.dev) - see that PR's description for the full list.
         """
-        self.assertGreaterEqual(len(self.modules), 290,
+        self.assertGreaterEqual(len(self.modules), 280,
                                 f"Only {len(self.modules)} modules loaded")
 
     def test_all_produced_events_in_catalog(self):
