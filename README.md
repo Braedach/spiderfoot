@@ -15,7 +15,7 @@ An internal-use fork of [poppopjmp/spiderfoot](https://github.com/poppopjmp/spid
 Expect this to keep changing. Bugs are still being found, mostly old ones that only become visible once a scan is validated live rather than just unit-tested, and the build tags reflect that.
 
 - **Builds:** `v6.1.0-bd.1-rc.36` is the current release candidate, being deployed and validated. `rc.34` was the last build validated live (a 30 minute soak with the dashboard open and six scans). `rc.35` and later are a breaking change for an existing stack: see [`UPGRADING.md`](UPGRADING.md). Do not run `rc.32` or `rc.33` (database connection leak). Every build passes the scan gate on all 5 images (Trivy and `npm audit`). No non-`rc` release has been cut yet.
-- **Scope guard:** invasive modules are gated three ways before dispatch (see [How a scan flows](#how-a-scan-flows)): the target must match, the address must not sit in a published Cloudflare or Fastly range, and it must not have been proven shared by another module. Validated live against phone, email, name, domain and IP targets. ASN is the one target type not yet explicitly exercised.
+- **Scope guard:** every *active* module (web and TLS probes, port scanners, crawlers; 36 of them, not just the ones flagged `invasive`) is checked against the target's scope before it receives an event and again when it makes a web request. Scope is defined once per search case: an IP target authorises that address plus names that resolve to it now; a netblock, its block; a domain, its name and subdomains (IPs only if not a shared edge); an ASN, nothing unless explicitly authorised per scan, with a hard address cap; a name, email, phone or username, no active contact at all. Shared edge networks (Cloudflare, Fastly, CloudFront, GitHub Pages, Imperva, Bunny CDN) and addresses proven shared are never contacted by address. It starts in `log` mode (`_scope_guard_mode`): decisions are made and written to the scan log, nothing extra is blocked until it is set to `enforce`. Passive lookups and the identity tools are never blocked. Design: [`docs/scope-guard-design.md`](docs/scope-guard-design.md).
 - **Scan execution:** scans no longer run inside API workers, and a scan whose process dies is detected and marked failed instead of staying `RUNNING` forever (see [Where a scan executes](#where-a-scan-executes)).
 - **Module catalog:** every module's `setup()` is exercised by a catalog-wide test, because modules that fail to load were previously invisible. Scan profiles exist for phone-number, email-address and person-name targets and have been run end to end on a live stack. Each runs the modules that need no key, including the follow-on lookups for the usernames and profiles it finds, and the keyed modules it can use join automatically once their API key is saved on the Modules page. Dead and superseded modules have been removed.
 - **Dependencies and base images:** every Dependabot alert has been fixed and none are currently waived (see below).
@@ -68,17 +68,18 @@ flowchart TD
     T["Target<br/>IP, domain, netblock, ASN, email, phone, name, username"] -->|seeds one root event| Q(["Central event queue<br/>waitForThreads() pulls one event at a time"])
     Q --> W{"event type in module's<br/>watchedEvents()?"}
     W -->|no| X1["module never sees it"]
-    W -->|yes| I{"module flagged<br/>invasive?"}
-    I -->|no| MQ
+    W -->|yes| I{"active module?<br/>ACTIVE_MODULES or flagged invasive"}
+    I -->|no: vendor, parser, identity| MQ
     I -->|yes| G
     subgraph G["shouldDispatchToModule() scope gate"]
         direction TB
-        G1["1. target.matches(hostname)<br/>URLs reduced to FQDN first"] --> G2["2. target.isKnownCdnIP(ip)<br/>static Cloudflare / Fastly ranges"] --> G3["3. target.isSharedIP(ip)<br/>reactive, set by other modules"]
+        G1["1. scope policy for the search case<br/>IP / netblock / domain / ASN / person"] --> G2["2. shared edge ranges<br/>Cloudflare, Fastly, CloudFront, GitHub Pages, Imperva, Bunny"] --> G3["3. isSharedIP(ip)<br/>reactive, set by other modules"] --> G4["4. original gate for invasive modules<br/>target.matches(hostname)"]
     end
-    G -->|any check fails| X2["event dropped, debug log only"]
+    G -->|"fails (log mode: recorded, event still delivered)"| X2["enforce mode: event dropped<br/>both modes: counted in the scan log summary"]
     G -->|all pass| MQ["module's own FIFO queue"]
     MQ --> MT["module's dedicated thread<br/>threadWorker(), one per module"]
     MT --> P["shared thread pool<br/>poolExecute(), _maxthreads workers, round-robin<br/>handleEvent() runs here"]
+    P -.->|"every web request: fetch_url()"| EG["egress check<br/>active modules held to scope; others only logged"]
     P --> E["new events emitted<br/>zero, one or many"]
     E -->|back onto the queue| Q
     Q -.->|"all queues empty AND every module idle<br/>(3 consecutive passes)"| F["FINISHED sentinel to every module"]
@@ -88,7 +89,7 @@ Bottlenecks this design had, and how they are handled:
 
 - **Shared pool.** Every module competes for the same `_maxthreads` workers, so a module sweeping thousands of lookups (TLD search, subdomain brute force) can starve the rest. Bulk modules size their own batches with `batch_size`, not `_maxthreads` (a module option named like a global config key is silently overwritten by the global value; `test_module_opt_global_collision.py` guards this).
 - **Waits on raw threads.** Modules that spawn their own threads must bound their wait. An unbounded wait never clears the module's `.running` flag, so `threadsFinished()` never returns true and the scan hangs without any error. The eight modules that did this now use a deadline and daemon threads.
-- **Scope gate.** Only invasive modules go through it; it is deterministic and does no I/O.
+- **Scope gate.** Every active module goes through it (see the Scope guard note at the top); the dispatch check is deterministic and does no network I/O. The only lookup is a DNS resolution, cached per scan, that verifies a hostname points at an IP target's address.
 
 ### Where a scan executes
 

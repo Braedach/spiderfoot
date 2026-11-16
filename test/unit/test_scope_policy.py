@@ -330,3 +330,51 @@ class TestScannerGate(TestScannerBase):
     def test_the_policy_is_reachable_from_the_target(self):
         scanner = self._scanner(IP, "IP_ADDRESS", "log")
         assert scanner._SpiderFootScanner__target.scopePolicy is scanner._SpiderFootScanner__scopePolicy
+
+
+# ------------------------------------------------------------------------------------------------ CDN providers added 2026-11-16
+
+
+class TestMoreSharedEdgeProviders:
+
+    def test_the_published_formats_parse(self):
+        from spiderfoot import cdn_ranges as c
+        aws = '{"prefixes": [{"ip_prefix": "198.51.100.0/24", "service": "CLOUDFRONT"}, ' \
+              '{"ip_prefix": "203.0.113.0/24", "service": "EC2"}], ' \
+              '"ipv6_prefixes": [{"ipv6_prefix": "2001:db8::/32", "service": "CLOUDFRONT"}]}'
+        assert c._parseJsonProvider("CloudFront", aws) == ["198.51.100.0/24", "2001:db8::/32"]   # EC2 is not an edge
+        assert c._parseJsonProvider("GitHub Pages", '{"pages": ["192.0.2.1/32"], "web": ["x"]}') == ["192.0.2.1/32"]
+        assert c._parseJsonProvider("Imperva", '{"ipRanges": ["192.0.2.0/24"], "ipv6Ranges": ["2001:db8::/48"]}') \
+            == ["192.0.2.0/24", "2001:db8::/48"]
+        assert c._parseJsonProvider("Bunny CDN", '["192.0.2.9"]') == ["192.0.2.9/32"]
+
+    def test_a_broken_document_gives_nothing_not_an_error(self):
+        from spiderfoot import cdn_ranges as c
+        for provider in ("CloudFront", "GitHub Pages", "Imperva", "Bunny CDN"):
+            assert c._parseJsonProvider(provider, "not json") == []
+            assert c._parseJsonProvider(provider, "[]") == [] or provider == "Bunny CDN"
+
+    def test_the_fallback_snapshot_covers_each_new_provider(self):
+        from spiderfoot import cdn_ranges as c
+        for provider in ("CloudFront", "GitHub Pages", "Imperva", "Bunny CDN"):
+            assert c.FALLBACK_RANGES[provider], provider
+            assert provider in c.CDN_RANGE_SOURCES
+
+    def test_known_addresses_are_recognised_and_ordinary_ones_are_not(self):
+        from spiderfoot import cdn_ranges as c
+        assert c.isKnownCdnIP("185.199.108.153") == "GitHub Pages"
+        assert c.isKnownCdnIP("192.230.64.5") == "Imperva"
+        assert c.isKnownCdnIP("203.0.113.10") is None
+
+    def test_google_cloud_and_global_accelerator_are_deliberately_not_listed(self):
+        from spiderfoot import cdn_ranges as c
+        text = " ".join(c.CDN_RANGE_SOURCES).lower()
+        assert "google" not in text and "accelerator" not in text
+
+    def test_the_policy_refuses_a_bare_edge_address_for_a_domain_target(self):
+        from spiderfoot import cdn_ranges as c
+        p = policy_for("example.com", "INTERNET_NAME", aliases=[("example.com", "INTERNET_NAME"),
+                                                                  ("185.199.108.153", "IP_ADDRESS")],
+                       cdn=lambda ip: c.isKnownCdnIP(ip))
+        d = p.decide("185.199.108.153")
+        assert not d.allowed and "GitHub Pages" in d.reason
