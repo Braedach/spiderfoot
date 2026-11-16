@@ -84,6 +84,48 @@ class ScanRequest(BaseModel):
         None, max_length=120,
         description="Optional: the city or state the subject is based in. Used only to weigh the accounts found.",
     )
+    authorised_to_test: bool | None = Field(
+        None,
+        description="Required (true) to start a profile that tests the target actively, such as 'web-app-test': the "
+                    "person starting the scan states that they are authorised to test the target.",
+    )
+
+
+ACTIVE_TEST_TARGET_TYPES = frozenset({"INTERNET_NAME", "IP_ADDRESS", "IPV6_ADDRESS"})
+
+
+def _require_test_authorisation(profile, scan_request: "ScanRequest") -> None:
+    """Refuse to start an active-testing profile unless the request states authorisation and the target can be tested.
+
+    Raises HTTPException(422). The statement is recorded with the scan (``_authorised_to_test``) so the record shows who
+    said what and when.
+    """
+    if not getattr(profile, "requires_authorisation", False):
+        return
+    if scan_request.authorised_to_test is not True:
+        raise HTTPException(
+            status_code=422,
+            detail=f"The '{profile.name}' profile tests the target actively. Confirm that you are authorised to test "
+                   "this target (authorised_to_test = true) to start it.",
+        )
+    from spiderfoot import SpiderFootHelpers
+    import re
+    target = (scan_request.target or "").strip()
+    ttype = "BGP_AS_OWNER" if re.fullmatch(r"(?i)AS\d+", target) else SpiderFootHelpers.targetTypeFromString(target)
+    if ttype not in ACTIVE_TEST_TARGET_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"The '{profile.name}' profile tests a web application: the target must be a domain name or an IP "
+                   f"address, not a {ttype or 'value of unknown type'}.",
+        )
+
+
+def _authorisation_record(scan_request: "ScanRequest") -> dict:
+    """What the person starting the scan stated about being authorised, kept with the scan (empty when nothing was stated)."""
+    if scan_request.authorised_to_test is True:
+        from datetime import datetime, timezone
+        return {"_authorised_to_test": True, "_authorised_to_test_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    return {}
 
 
 def _subject_context(scan_request: "ScanRequest") -> dict:
@@ -156,6 +198,7 @@ def _profile_to_dict(p, all_modules: dict, configured: set[str] | None = None) -
         "max_threads": p.max_threads,
         "timeout_minutes": p.timeout_minutes,
         "disable_expansion": getattr(p, "disable_expansion", False),
+        "requires_authorisation": getattr(p, "requires_authorisation", False),
     }
 
 
@@ -902,6 +945,7 @@ async def create_scan(
                         detail=f"Unknown scan profile: '{scan_request.profile}'",
                     )
                 all_mods = _get_all_modules_dict()
+                _require_test_authorisation(profile, scan_request)
                 modules = profile.resolve_modules(all_mods, modules_with_credentials(sf_config.get("__modules__")))
                 # A profile is more than a module list: apply its settings to this scan only. Its per-module options
                 # (and, for the IP and ASN profiles, the switching off of neighbour expansion) used to be ignored here.
@@ -937,7 +981,7 @@ async def create_scan(
 
         # Recorded with the scan's configuration so Scan Settings can show how it was launched.
         sf_config = {**sf_config, "_scan_selection": "".join(c for c in selection if c.isprintable())[:120],
-                     **_subject_context(scan_request)}
+                     **_subject_context(scan_request), **_authorisation_record(scan_request)}
 
         if not modules:
             modules = ["sfp__stor_db"]

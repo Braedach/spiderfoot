@@ -115,6 +115,9 @@ class ScanProfile:
     # a scan to the target's neighbours (the netblock and subnet around an address, or every address of an ASN).
     # An IP address scan with these on followed 947 netblock owners and harvested 82 third-party email addresses.
     disable_expansion: bool = False
+    # Profiles that probe a target actively for weaknesses (injection, fuzzing, template attacks). A scan with one of
+    # these starts only when the person starting it states, in the request, that they are authorised to test the target.
+    requires_authorisation: bool = False
 
     # Execution settings
     max_threads: int = 0       # 0 = use global default
@@ -263,6 +266,7 @@ class ScanProfile:
             "option_overrides": self.option_overrides,
             "module_options": self.module_options,
             "disable_expansion": self.disable_expansion,
+            "requires_authorisation": self.requires_authorisation,
             "max_threads": self.max_threads,
             "timeout_minutes": self.timeout_minutes,
             "max_depth": self.max_depth,
@@ -297,6 +301,7 @@ class ScanProfile:
             option_overrides=data.get("option_overrides", {}),
             module_options=data.get("module_options", {}),
             disable_expansion=bool(data.get("disable_expansion", False)),
+            requires_authorisation=bool(data.get("requires_authorisation", False)),
             max_threads=data.get("max_threads", 0),
             timeout_minutes=data.get("timeout_minutes", 0),
             max_depth=data.get("max_depth", 0),
@@ -685,6 +690,38 @@ class ProfileManager:
             max_threads=4,
             timeout_minutes=120,
             tags=["tools", "active", "recon", "external", "comprehensive"],
+        ))
+
+        # ── Web application test (added 2026-11-16) ─────────────────────────────────────────────────────────────────────
+        # Active testing of one web application: crawl it, find its parameters and hidden paths, then test them for
+        # injection, cross-site scripting and known weaknesses. Nothing here is passive, so the profile refuses to start
+        # unless the request says the person is authorised to test the target, and the scope guard is set to ENFORCE
+        # (the other profiles only log): the active modules may contact the target's own hosts and nothing else.
+        # Not included on purpose: SQL-injection tools and exploit frameworks (each needs its own review of where its
+        # code comes from before it is shipped).
+        self.register(ScanProfile(
+            name="web-app-test",
+            display_name="Web Application Test",
+            description=(
+                "ACTIVE testing of one web application: it crawls the site, finds its parameters and hidden paths, "
+                "and tests them for cross-site scripting, known vulnerabilities, misconfigurations and weak TLS. "
+                "Only for a target you are authorised to test: the scan will not start until you confirm that. "
+                "The scope guard is enforced, so the active tools contact the target's own hosts and nothing else."
+            ),
+            category=ProfileCategory.VULNERABILITY,
+            include_modules=[
+                "sfp_dnsresolve", "sfp_spider", "sfp_httpx",                                   # find and crawl the application
+                "sfp_tool_whatweb", "sfp_tool_wafw00f", "sfp_tool_gowitness",                   # fingerprint, WAF, screenshots
+                "sfp_tool_katana", "sfp_tool_ffuf", "sfp_tool_arjun",                           # crawl, hidden paths, parameters
+                "sfp_tool_dalfox", "sfp_tool_nikto", "sfp_nuclei", "sfp_tool_snallygaster",     # test for weaknesses
+                "sfp_sslcert", "sfp_tool_sslyze", "sfp_tool_testsslsh",                         # TLS
+            ],
+            option_overrides={"_scope_guard_mode": "enforce"},
+            exclude_flags=["tor", "errorprone"],
+            requires_authorisation=True,
+            max_threads=2,
+            timeout_minutes=120,
+            tags=["web", "dast", "active", "authorised-only"],
         ))
 
         # ── Search by IP address and by ASN (added 2026-11-16, docs/scope-guard-design.md) ─────────────────────────

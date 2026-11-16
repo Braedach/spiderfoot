@@ -43,6 +43,7 @@ export default function NewScanPage() {
   const [userPickedUseCase, setUserPickedUseCase] = useState(false);
   const [subjectCountry, setSubjectCountry] = useState('');
   const [subjectRegion, setSubjectRegion] = useState('');
+  const [authorisedToTest, setAuthorisedToTest] = useState(false);
   const [userEditedCountry, setUserEditedCountry] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<string | null>(null);
   const [selectedModules, setSelectedModules] = useState<Set<string>>(new Set());
@@ -178,9 +179,17 @@ export default function NewScanPage() {
     },
   });
 
+  // A profile that tests the target actively needs the person's confirmation that they are authorised to test it.
+  const profileNeedsAuthorisation = tab === 'profile'
+    && !!profiles.find((pr) => pr.name === selectedProfile)?.requires_authorisation;
+
   const handleSubmit = () => {
     if (!target.trim()) {
       setToast({ type: 'error', message: 'Please enter a target' });
+      return;
+    }
+    if (profileNeedsAuthorisation && !authorisedToTest) {
+      setToast({ type: 'error', message: 'Confirm that you are authorised to test this target' });
       return;
     }
     const payload: ScanCreateRequest = {
@@ -191,6 +200,7 @@ export default function NewScanPage() {
       payload.modules = [...selectedModules];
     } else if (tab === 'profile' && selectedProfile) {
       payload.profile = selectedProfile;
+      if (profileNeedsAuthorisation) payload.authorised_to_test = true;
     } else if (tab === 'data' && selectedTypes.size > 0) {
       payload.type_filter = [...selectedTypes];
     } else if (tab === 'usecase' && selectedSearch) {
@@ -309,7 +319,7 @@ export default function NewScanPage() {
         </div>
         <button
           className="btn-primary text-base px-8 py-3"
-          disabled={!target.trim() || createMut.isPending}
+          disabled={!target.trim() || createMut.isPending || (profileNeedsAuthorisation && !authorisedToTest)}
           onClick={handleSubmit}
         >
           {createMut.isPending ? (
@@ -357,7 +367,7 @@ export default function NewScanPage() {
                   {profiles.map((p) => (
                     <button
                       key={p.name}
-                      onClick={() => setSelectedProfile(p.name)}
+                      onClick={() => { setSelectedProfile(p.name); setAuthorisedToTest(false); }}
                       className={`p-4 rounded-xl border text-left transition-all ${
                         selectedProfile === p.name
                           ? 'border-spider-500 bg-spider-600/10 ring-1 ring-spider-500/30'
@@ -397,6 +407,19 @@ export default function NewScanPage() {
                     </button>
                   ))}
                 </div>
+              )}
+              {profileNeedsAuthorisation && (
+                <label className="flex items-start gap-3 p-3 rounded-lg border border-amber-500/40 bg-amber-500/10 text-sm cursor-pointer" data-testid="authorised-to-test">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={authorisedToTest}
+                    onChange={(e) => setAuthorisedToTest(e.target.checked)}
+                  />
+                  <span className="text-foreground">
+                    <strong>I am authorised to test this target.</strong> This profile tests the target actively (crawling, fuzzing and probing for weaknesses). Run it only against systems you own or have written permission to test.
+                  </span>
+                </label>
               )}
             </div>
           )}
