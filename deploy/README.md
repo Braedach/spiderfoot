@@ -236,7 +236,7 @@ were structural, so the fixes are rules, not one-off patches:
   was 10 days old; bs4 CSS selection re-verified against it) in the application lock and, the same
   day, in the tools lock (maigret declares `soupsieve<3.0`, which held it at 2.10 with two high
   findings; maigret does not import soupsieve, it reaches it through beautifulsoup4, and both tools were run
-  against 4.0.1), plus the `cryptography` override in the tools lock. Each is an `--exclude-newer-package`
+  against 4.0.1), plus the `cryptography` override in the tools lock, and on 2026-11-16 `dnspython` 2.9.2 in both locks (high, GHSA-vvf4-9x63-8xvv, found by the rc.38 scan gate in 2.9.0 and 2.9.1; 2.9.2 was 13 days old; the lock blocks were changed by hand, with PyPI's hashes, so no other pin moved). Each is an `--exclude-newer-package`
   date in the compile command below, and must pass the scan gate. Move them back
   under the 14-day rule at the next rebuild — **do a plain recompile without
   reapplying every exception's date first** and only re-add the ones the gate

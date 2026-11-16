@@ -8,6 +8,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Fork-specific changes since 6.1.0, shipped as release candidates. The per-build record and the build and deploy
 procedure are in [`deploy/README.md`](deploy/README.md).
 
+### Fixed (rc.39)
+- **`dnspython` 2.9.2** in both locks (high severity, GHSA-vvf4-9x63-8xvv; the rc.38 candidate failed the scan gate on 2.9.0 and 2.9.1, so it was never published and its tag has no release or images; rc.39 carries everything listed under rc.38). A named exception to the 14-day cool-down; nothing else moved.
+
 ### Fixed (rc.38)
 - **nuclei had never run in this stack.** It looked for its templates in its home directory, found none and exited at
   once, and the module reported "0 findings" and hid the error. It now gets the image's pinned templates, runs a
