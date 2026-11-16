@@ -276,6 +276,47 @@ IMPORTANT INSTRUCTIONS:
 8. Do NOT wrap the output in ```markdown``` fences — output raw Markdown directly.
 """
 
+# Added 2026-11-16 after reviewing the reports of real scans. These rules ADD to the instructions above (they do not
+# replace anything) and apply to every search type: domain, IP address or netblock, ASN, email address, phone number and
+# person name.
+EVIDENCE_RULES = """
+═══════════════════════════════════════════════════════════════════
+EVIDENCE RULES (they add to everything above and apply to every search type)
+═══════════════════════════════════════════════════════════════════
+
+A. The SCAN DIGEST section of the user message is built from EVERY event of the scan. Its counts are the scan's real
+   totals; the vector-database sample is a partial view. Where they disagree, use the digest. Use all of the data you
+   are given, and use your own judgement about what is relevant and what is noise: say so when something looks like noise.
+
+B. Write for what was searched, and use the structured records and lists fully:
+   - Domain or hostname: attack surface (subdomains, addresses, hosting, TLS, technologies, exposed services, email posture).
+   - IP address or netblock: ownership and network, reverse DNS, open ports and services, TLS and web fingerprints,
+     reputation and listings, the names seen on the address.
+   - ASN: the operator, announced netblocks, registry contacts, country. Registry facts only.
+   - Email address: services it is registered on, accounts and usernames, leak or breach evidence, how the identities link.
+   - Phone number: validity, line type, region, carrier (state that it is the original allocation and a ported number
+     shows the original), accounts and mentions.
+   - Person name: accounts and usernames, with a confidence for each. A username or name matching on a site proves
+     nothing by itself; separate what is tied to the target (same email, same phone, a matching profile detail such as
+     name or location) from what is merely a match.
+
+C. Only the digest's IN-SCOPE FINDINGS and the target's own data are findings. RELATED CONTEXT and THIRD-PARTY PERSONAL
+   DATA are provided so you can judge relevance: you may mention them as context, but never rate them as findings, never
+   present them as the target's exposure, and never recommend patching, testing or contacting the parties they concern.
+
+D. Rate severity only from verified evidence. An item marked UNVERIFIED (one heuristic scanner, nothing else) must be
+   called unverified and must not be rated High or Critical. A link or a path in a scan is not an exposed file unless the
+   evidence shows the server actually served it.
+
+E. Include a "Coverage and Limitations" section from the digest's COVERAGE AND LIMITATIONS and a "What This Scan Did Not
+   Test" section from the digest's list, in plain words. Do not describe the scan as complete when the digest lists
+   failures, and do not imply a clean result for something that was not tested.
+
+F. Do not invent. If the data for a section is missing, say so. A complete, machine-generated inventory is appended to the
+   report automatically (Appendix A): refer to it instead of reproducing long lists.
+"""
+SYSTEM_PROMPT = SYSTEM_PROMPT + EVIDENCE_RULES
+
 
 # ---------------------------------------------------------------------------
 # Qdrant backfill (EventIndexer is dead code for this fork's actual
@@ -346,6 +387,42 @@ def _backfill_scan_into_qdrant(scan_id: str, engine: "VectorCorrelationEngine") 
     except Exception as e:
         logger.warning("Qdrant backfill failed for scan %s: %s", scan_id, e)
         return 0
+
+
+def _load_digest(scan_ids: List[str], target: str) -> dict:
+    """Build the scan digest (and the appendix) from every event in the database. Never raises: on any failure the
+    report is still written from the vector context alone, as before.
+
+    Returns ``{"text": str, "appendix": str, "digests": list}``.
+    """
+    empty: dict = {"text": "", "appendix": "", "digests": []}
+    try:
+        from spiderfoot import SpiderFootHelpers
+        from spiderfoot.db import SpiderFootDb
+        from spiderfoot.agents.report_digest import build_digest, render_appendix, render_digest
+
+        dsn = os.environ.get("SF_POSTGRES_DSN")
+        if not dsn or not scan_ids:
+            return empty
+        budget = int(os.environ.get("SF_REPORT_DIGEST_MAX_CHARS", "300000"))
+        dbh = SpiderFootDb({"__database": dsn, "__dbtype": "postgresql"})
+        texts, appendices, digests = [], [], []
+        try:
+            for sid in scan_ids:
+                rows = dbh.scanResultEvent(sid) or []
+                logs = [r for r in (dbh.scanLogs(sid, limit=20000) or []) if len(r) > 2 and str(r[2]).upper() in ("ERROR", "WARNING")]
+                ttype = SpiderFootHelpers.targetTypeFromString(target) or ""
+                d = build_digest(rows, target=target, target_type=ttype, log_entries=logs)
+                label = f"[scan {sid}]\n" if len(scan_ids) > 1 else ""
+                texts.append(label + render_digest(d, max_chars=budget // max(1, len(scan_ids))))
+                appendices.append(render_appendix(d))
+                digests.append({k: d[k] for k in ("target", "target_type", "total_events", "accounting")})
+        finally:
+            dbh.close()
+        return {"text": "\n\n".join(texts), "appendix": "\n\n".join(appendices), "digests": digests}
+    except Exception as e:
+        logger.warning("Scan digest unavailable, using the vector context alone: %s", e)
+        return empty
 
 
 # ---------------------------------------------------------------------------
@@ -643,6 +720,10 @@ class ReportGeneratorAgent(BaseAgent):
         # ── Retrieve rich context from Qdrant ──
         qdrant_ctx = _get_qdrant_context(scan_ids, target)
 
+        # ── The scan digest: built from every event, added to (not replacing) the context above ──
+        digest = _load_digest(scan_ids, target)
+        digest_section = digest["text"]
+
         # ── Build the comprehensive user prompt ──
         qdrant_section = self._format_qdrant_context(qdrant_ctx)
         findings_text = self._format_findings(findings[:100])
@@ -673,6 +754,8 @@ SCAN STATISTICS
 - Unique IPs: {stats.get('ips', 'N/A')}
 - Emails found: {stats.get('emails', 'N/A')}
 - High-risk findings: {stats.get('high_risk', 'N/A')}
+
+{digest_section}
 
 {qdrant_section}
 
@@ -705,7 +788,8 @@ following the exact structure specified in your system instructions.
 
 - Analyse EVERY event type and its data — do not skip any category of findings.
 - Reference specific IPs, domains, headers, banners, and data points as evidence.
-- The Vector Database Context section is the PRIMARY source of intelligence — use it extensively.
+- The Vector Database Context section is a rich source of intelligence — use it extensively. The SCAN DIGEST (when present) is built from every event and is authoritative for counts and for what is in scope.
+- Follow the EVIDENCE RULES in your system instructions for every search type.
 - If certain sections have limited data, note the limitation but still analyse what is available.
 - Produce the full report — do not truncate or abbreviate any section.
 """
@@ -726,6 +810,8 @@ following the exact structure specified in your system instructions.
 
                 # Strip markdown fences if the model wraps output
                 report_md = self._clean_markdown(response)
+                if digest["appendix"]:
+                    report_md = report_md.rstrip() + "\n\n---\n\n" + digest["appendix"] + "\n"
 
                 return AgentResult(
                     agent_name=self.config.name,
@@ -742,6 +828,7 @@ following the exact structure specified in your system instructions.
                             "total_indexed", 0
                         ),
                         "qdrant_available": qdrant_ctx["available"],
+                        "digest": digest["digests"],
                     },
                     confidence=0.9 if qdrant_ctx["available"] else 0.6,
                 )
