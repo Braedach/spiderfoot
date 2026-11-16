@@ -8,6 +8,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Fork-specific changes since 6.1.0, shipped as release candidates. The per-build record and the build and deploy
 procedure are in [`deploy/README.md`](deploy/README.md).
 
+### Fixed (rc.40)
+- **The scan Graph tab showed nothing for every scan.** The graph request without a filter passed `None` as the event type to a database call that only applies its "all events" default when the argument is left out, so it raised and the API answered HTTP 500. It now asks for all events. The scan-service fallback path had the same flaw and is fixed too. The tests' fake database accepted `None`, which hid the bug; it now follows the real contract.
 ### Changed (rc.40)
 - **Phone numbers are described in full.** `sfp_phone` reported only the carrier and returned early when there was none. It now also reports whether the number is valid, the line type (mobile, fixed line, VoIP, toll free and so on), the region where the library knows one, time zones and the standard formats (E.164, international, national), as a structured record, with the line type and location also as their own events. The carrier is the original allocation: a ported number still shows the original, which the record says. No key is needed. Live carrier, line-type and leak data still come from the keyed modules (numverify, abstractapi and others) once their keys are saved.
 ### Fixed (rc.40)
