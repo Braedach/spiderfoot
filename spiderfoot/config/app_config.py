@@ -134,6 +134,15 @@ class NetworkConfig:
     tor_enabled: bool = True
     tor_host: str = "sf-tor"
     tor_port: int = 9050
+    # Web search through your own SearXNG server (modules/sfp_searxng.py). Off, with no address: nothing is sent anywhere
+    # until an administrator enters the address of a SearXNG instance. How fast it may be queried is that server's business
+    # (its own rate limits and engine settings); these two values only cap what SpiderFoot sends.
+    searxng_enabled: bool = False
+    searxng_url: str = ""
+    searxng_max_queries: int = 6        # most searches sent for one scan target
+    searxng_delay: float = 2.0          # seconds between searches
+    searxng_timeout: int = 20
+    searxng_results: int = 10           # results kept per search
 
 
 @dataclass
@@ -322,6 +331,12 @@ _KEY_TO_FIELD: dict[str, tuple[str, str]] = {
     "_tor_enabled": ("network", "tor_enabled"),
     "_tor_host": ("network", "tor_host"),
     "_tor_port": ("network", "tor_port"),
+    "_searxng_enabled": ("network", "searxng_enabled"),
+    "_searxng_url": ("network", "searxng_url"),
+    "_searxng_max_queries": ("network", "searxng_max_queries"),
+    "_searxng_delay": ("network", "searxng_delay"),
+    "_searxng_timeout": ("network", "searxng_timeout"),
+    "_searxng_results": ("network", "searxng_results"),
 
     # Database
     "__database": ("database", "db_path"),
@@ -456,6 +471,12 @@ _ENV_TO_KEY: dict[str, str] = {
     "SF_TOR_ENABLED": "_tor_enabled",
     "SF_TOR_HOST": "_tor_host",
     "SF_TOR_PORT": "_tor_port",
+    "SF_SEARXNG_ENABLED": "_searxng_enabled",
+    "SF_SEARXNG_URL": "_searxng_url",
+    "SF_SEARXNG_MAX_QUERIES": "_searxng_max_queries",
+    "SF_SEARXNG_DELAY": "_searxng_delay",
+    "SF_SEARXNG_TIMEOUT": "_searxng_timeout",
+    "SF_SEARXNG_RESULTS": "_searxng_results",
     "SF_DNS_SERVER": "_dnsserver",
     "SF_DNS_TIMEOUT": "_dnstimeout",
     "SF_WEB_HOST": "_webhost",
@@ -587,6 +608,20 @@ FIELD_DESCRIPTIONS: dict[str, str] = {
     ),
     "_tor_host": "Tor SOCKS host. The sf-tor service of the deploy stack by default.",
     "_tor_port": "Tor SOCKS port. 9050 by default.",
+    "_searxng_enabled": (
+        "Search the web for a person, email address or phone number through your own SearXNG server. Off by default."
+    ),
+    "_searxng_url": (
+        "Address of your SearXNG server, for example https://search.example.org. Empty by default: nothing is sent "
+        "anywhere until you enter it. The server must answer JSON (enable the json format in its settings.yml)."
+    ),
+    "_searxng_max_queries": "Most searches SpiderFoot sends to SearXNG for one scan target.",
+    "_searxng_delay": (
+        "Seconds SpiderFoot waits between searches. How fast the search engines behind SearXNG may really be queried is "
+        "governed by the SearXNG server (its rate limiter and engine settings); this only caps what SpiderFoot sends."
+    ),
+    "_searxng_timeout": "Seconds to wait for each SearXNG search.",
+    "_searxng_results": "Results kept from each search.",
     "_socks4user": "SOCKS Username. Valid only for SOCKS4 and SOCKS5 servers.",
     "_socks5pwd": "SOCKS Password. Valid only for SOCKS5 servers.",
     "_modulesenabled": "Modules enabled for the scan.",

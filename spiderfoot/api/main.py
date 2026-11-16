@@ -20,7 +20,7 @@ from .routers import (
     ai_scan_config, marketplace, webhook_delivery,
     data_retention, scan_comparison, distributed_scan,
     report_templates, tag_group, notification_rules,
-    frontend_data, sso, ai_providers,
+    frontend_data, sso, ai_providers, websearch,
 )
 from spiderfoot import __version__
 
@@ -192,6 +192,7 @@ _VERSIONED_ROUTERS = [
     (rbac_roles.router,       "/api", ["rbac-v2"]),
     (ai_scan_config.router,   "/api", ["ai-config"]),
     (ai_providers.router,     "/api", ["ai-providers"]),
+    (websearch.router,        "/api", ["websearch"]),
     (marketplace.router,      "/api", ["marketplace"]),
     (webhook_delivery.router, "/api", ["webhook-delivery"]),
     (data_retention.router,   "/api", ["data-retention"]),

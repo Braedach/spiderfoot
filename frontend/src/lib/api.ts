@@ -331,6 +331,20 @@ export const scanApi = {
     api.get<ScanProfile>(`/api/scan-profiles/${name}`, { signal }).then((r) => r.data),
 };
 
+export interface WebSearchTestResult {
+  ok: boolean;
+  message: string;
+  results?: number;
+  engines?: string[];
+  unresponsive?: string[];
+}
+
+export const webSearchApi = {
+  /** Test a SearXNG address (the saved one when none is given). The answer is a verdict, never the server's response. */
+  test: (url?: string, signal?: AbortSignal) =>
+    api.post<WebSearchTestResult>('/api/websearch/test', url ? { url } : {}, { signal }).then((r) => r.data),
+};
+
 export interface ScanProfile {
   name: string;
   display_name: string;
