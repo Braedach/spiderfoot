@@ -171,7 +171,7 @@ class DistributedScanManager:
             "sfp_cve_search",
         ],
         "social": [
-            "sfp_twitter", "sfp_linkedin", "sfp_github",
+            "sfp_linkedin", "sfp_github",
             "sfp_instagram",
         ],
         "passive": [

@@ -8,6 +8,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Fork-specific changes since 6.1.0, shipped as release candidates. The per-build record and the build and deploy
 procedure are in [`deploy/README.md`](deploy/README.md).
 
+### Removed (rc.40) - breaking for anything that names these modules
+- **13 modules whose service is gone are deleted**, with their tests and documentation, instead of being left in the catalog marked deprecated: `sfp_sublist3r`, `sfp_duckduckgo`, `sfp_bgpview`, `sfp_sorbs`, `sfp_zonefiles`, `sfp_onionsearchengine`, `sfp_callername`, `sfp_trumail`, `sfp_searchcode`, `sfp_twitter`, `sfp_threatminer`, `sfp_tool_wappalyzer` and `sfp_tool_phoneinfoga`. Each was checked against its real service on 2026-11-14 (name no longer resolves, parked domain, API answers "joined another company" or 404, profile pages need a login, or a tool that is no longer maintained). The catalog is now 284 modules (277 reliable). A guard test (`test_removed_modules.py`) keeps them out and fails if any module is ever marked deprecated: a module that does not work is removed.
+- **Upgrade note:** an API call, a saved schedule or a custom profile that names one of these modules will no longer find it. Remove the name from it; the profiles shipped with SpiderFoot already do not use them. Stored module settings for them are harmless and ignored.
+
 ### Fixed (rc.39)
 - **`dnspython` 2.9.2** in both locks (high severity, GHSA-vvf4-9x63-8xvv; the rc.38 candidate failed the scan gate on 2.9.0 and 2.9.1, so it was never published and its tag has no release or images; rc.39 carries everything listed under rc.38). A named exception to the 14-day cool-down; nothing else moved.
 
