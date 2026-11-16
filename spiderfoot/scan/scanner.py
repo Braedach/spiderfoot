@@ -26,6 +26,7 @@ import dns.resolver
 from spiderfoot.sflib import SpiderFoot
 from spiderfoot import SpiderFootEvent, SpiderFootPlugin, SpiderFootTarget, SpiderFootHelpers, SpiderFootThreadPool
 from spiderfoot import cdn_ranges
+from spiderfoot.scan import scope_policy
 from spiderfoot.observability.logger import logWorkerSetup
 from spiderfoot import SpiderFootDb
 from .scan_state_map import (
@@ -214,6 +215,18 @@ class SpiderFootScanner():
             self.__sf.status(f"Scan [{self.__scanId}] failed: {e}")
             self.__setStatus(DB_STATUS_ERROR_FAILED, None, time.time() * 1000)
             raise ValueError(f"Invalid target: {e}") from None
+
+        # Scope policy for active contact (docs/scope-guard-design.md). Reads the target live, so aliases added at
+        # scan start are seen; modules reach it through target.scopePolicy.
+        self.__scopePolicy = scope_policy.ScopePolicy(
+            self.__target,
+            mode=str(self.__config.get('_scope_guard_mode', 'log')).lower(),
+            asn_authorised=bool(self.__config.get('_scope_asn_authorised', False)),
+            asn_max_addresses=int(self.__config.get('_scope_asn_max_addresses', 256)),
+            cdn_lookup=lambda ip: self.__target.isKnownCdnIP(ip, self.__cdnRanges),
+            resolver=self._resolveForScope,
+        )
+        self.__target.scopePolicy = self.__scopePolicy
 
         # Ensure all modules have an 'opts' key to prevent KeyError in configSerialize
         if '__modules__' in self.__config:
@@ -548,6 +561,8 @@ class SpiderFootScanner():
                         newTarget = mod.enrichTarget(self.__target)
                         if newTarget is not None:
                             self.__target = newTarget
+                            self.__scopePolicy.target = self.__target
+                            self.__target.scopePolicy = self.__scopePolicy
                     except Exception as e:
                         self._log_module_error(modName, "target enrichment failed", e)
                         continue
@@ -621,6 +636,7 @@ class SpiderFootScanner():
                 raise AssertionError(DB_STATUS_ABORT_REQUESTED)
 
             self.waitForThreads()
+            self._logScopeGuardSummary()
             failed = False
 
         except (KeyboardInterrupt, AssertionError):
@@ -722,6 +738,9 @@ class SpiderFootScanner():
                 if not isinstance(sfEvent, SpiderFootEvent):
                     raise TypeError(
                         f"sfEvent is {type(sfEvent)}; expected SpiderFootEvent")
+
+                if sfEvent.eventType in scope_policy.HOST_EVENT_TYPES:
+                    self.__scopePolicy.observe(sfEvent.data)
 
                 for mod in self.__moduleInstances.values():
                     if mod._stopScanning:
@@ -829,8 +848,43 @@ class SpiderFootScanner():
         if not self.__config.get('_strict_scope', True):
             return True
 
-        if "invasive" not in getattr(mod, "meta", {}).get("flags", []):
+        invasive = "invasive" in getattr(mod, "meta", {}).get("flags", [])
+        policyActive = mod.__name__ in scope_policy.ACTIVE_MODULES
+        if not invasive and not policyActive:
             return True
+
+        legacy = self._legacyScopeAllows(mod, sfEvent) if invasive else True
+
+        # The scope policy (docs/scope-guard-design.md) covers every active module, not only the "invasive" ones.
+        mode = self.__scopePolicy.mode
+        if policyActive and mode != "off":
+            decision = self.__scopePolicy.decide_event(sfEvent.eventType, sfEvent.data)
+            if not decision.allowed:
+                self.__scopePolicy.record(mod.__name__, sfEvent.data, decision,
+                                          "blocked" if mode == "enforce" else "would block")
+                if mode == "enforce":
+                    return False
+        return legacy
+
+    def _resolveForScope(self, name: str) -> list:
+        """Addresses a hostname resolves to now (used to verify names against an IP target)."""
+        try:
+            return list(self.__sf.resolveHost(name) or []) + list(self.__sf.resolveHost6(name) or [])
+        except Exception:
+            return []
+
+    def _logScopeGuardSummary(self) -> None:
+        """Write what the scope policy blocked (or would have blocked) to the scan log."""
+        lines = self.__scopePolicy.summary()
+        if not lines:
+            return
+        verb = "blocked" if self.__scopePolicy.mode == "enforce" else "would have blocked (log-only mode)"
+        self.__sf.status(f"Scope guard {verb} {sum(self.__scopePolicy.counts.values())} event(s) for active modules:")
+        for line in lines[:25]:
+            self.__sf.status(f"  scope guard: {line}")
+
+    def _legacyScopeAllows(self, mod: SpiderFootPlugin, sfEvent: SpiderFootEvent) -> bool:
+        """The original gate for "invasive" modules (unchanged)."""
 
         # matches() expects a bare hostname/IP, not a full URL. Events like
         # LINKED_URL_INTERNAL/URL_FORM carry full URLs ("https://host/path?query"),
