@@ -286,3 +286,89 @@ class TestModuleToolGobuster(TestModuleBase):
     def tearDown(self):
         """Clean up after each test."""
         super().tearDown()
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Live scan of a test site (2026-11-16): gobuster failed against https targets with "tls: failed to verify
+# certificate" (the certificate was expired, and by-IP requests never match a name), timed out 18 times, and brute-forced
+# the same site once per origin (http and https, by name and by IP address).
+
+from unittest import mock as _mock
+
+from spiderfoot import SpiderFootEvent as _Ev
+from spiderfoot.sflib import SpiderFoot as _SF
+from modules.sfp_tool_gobuster import sfp_tool_gobuster as _Gobuster
+
+
+class TestGobusterBehaviour(TestModuleBase):
+
+    PAGE = {"code": "200", "content": "<html>Altoro   Mutual home</html>", "headers": {"content-type": "text/html"}}
+
+    def _module(self, pages=None, **opts):
+        m = _Gobuster()
+        m.__name__ = "sfp_tool_gobuster"
+        m.setup(_SF(self.default_options), {"gobuster_path": "/usr/bin/gobuster", "wordlist": "/tmp/w.txt",
+                                            "soft_404_detection": False, **opts})
+        self.commands = []
+        m.execute_command = lambda cmd: self.commands.append(cmd) or None       # None: nothing to parse
+        m.fetch_url = lambda url, **kw: (pages or {}).get(url, self.PAGE)
+        m.notifyListeners = lambda e: None
+        m.checkForStop = lambda: False
+        return m
+
+    def _run(self, m, url):
+        with _mock.patch("modules.sfp_tool_gobuster.os.path.isfile", return_value=True):
+            m.handleEvent(_Ev("LINKED_URL_INTERNAL", url, "sfp_spider", _Ev("ROOT", "root", "", None)))
+
+    def test_tls_verification_is_skipped_by_default(self):
+        m = self._module()
+        self._run(m, "https://203.0.113.10/pr/")
+        assert "-k" in self.commands[0]
+
+    def test_it_can_be_turned_back_on(self):
+        m = self._module(tls_skip_verify=False)
+        self._run(m, "https://203.0.113.10/pr/")
+        assert "-k" not in self.commands[0]
+
+    def test_the_same_directory_under_another_origin_is_brute_forced_once(self):
+        m = self._module()
+        for origin in ("http://demo.example", "https://demo.example", "https://203.0.113.10", "http://203.0.113.10:8080"):
+            self._run(m, origin + "/pr/")
+        assert len(self.commands) == 1
+
+    def test_a_different_page_at_the_same_path_is_still_brute_forced(self):
+        other = {"code": "200", "content": "<html>a different site</html>", "headers": {}}
+        m = self._module({"https://other.example/pr/": other})
+        self._run(m, "https://demo.example/pr/")
+        self._run(m, "https://other.example/pr/")
+        assert len(self.commands) == 2
+
+    def test_different_directories_are_each_brute_forced(self):
+        m = self._module()
+        self._run(m, "https://demo.example/pr/")
+        self._run(m, "https://demo.example/images/")
+        assert len(self.commands) == 2
+
+    def test_the_equivalence_check_can_be_turned_off(self):
+        m = self._module(skip_equivalent_directories=False)
+        self._run(m, "http://demo.example/pr/")
+        self._run(m, "https://demo.example/pr/")
+        assert len(self.commands) == 2
+
+    def test_a_failing_check_never_skips_a_directory(self):
+        m = self._module()
+        m.fetch_url = lambda url, **kw: (_ for _ in ()).throw(OSError("down"))
+        self._run(m, "https://demo.example/pr/")
+        assert len(self.commands) == 1
+
+    def test_the_wall_clock_limit_is_configurable(self):
+        m = self._module(max_runtime=77)
+        with _mock.patch("modules.sfp_tool_gobuster.subprocess.run") as run, \
+                _mock.patch("modules.sfp_tool_gobuster.tempfile.NamedTemporaryFile") as tmp:
+            tmp.return_value.name = "/tmp/gb.out"
+            run.return_value = _mock.MagicMock(returncode=0, stdout="", stderr="")
+            _Gobuster.execute_command(m, ["gobuster", "dir"])
+        assert run.call_args.kwargs["timeout"] == 77
+
+    def test_the_options_are_documented(self):
+        assert set(_Gobuster.opts) == set(_Gobuster.optdescs)
