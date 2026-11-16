@@ -112,7 +112,7 @@ flowchart LR
 
 ### What a scan runs
 
-The New Scan page offers four ways to choose modules. The server, not the browser, decides the final list, and the choice is stored with the scan and shown in Scan Settings as "Module selection".
+The New Scan page offers four ways to choose modules (Quick Scan, Footprint, Investigate and Passive Only, which ignored what was being searched for, are profiles now and live on the By Profile tab). The server, not the browser, decides the final list, and the choice is stored with the scan and shown in Scan Settings as "Module selection".
 
 | Tab | What runs |
 |---|---|
