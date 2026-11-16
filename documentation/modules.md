@@ -33,11 +33,9 @@ Modules are plugins that collect, enrich, or analyze data from various sources. 
 ### Search Engines
 - **sfp_google**: Google search results
 - **sfp_bing**: Bing search results
-- **sfp_duckduckgo**: DuckDuckGo search
 - **sfp_yandex**: Yandex search engine
 
 ### Social Media
-- **sfp_twitter**: Twitter account enumeration
 - **sfp_github**: GitHub repository discovery
 - **sfp_linkedin**: LinkedIn profile discovery
 - **sfp_instagram**: Instagram account lookup
@@ -67,7 +65,6 @@ SpiderFoot integrates **29 external security tool modules** for active scanning.
 - **sfp_tool_gau**: Fetch known URLs from web archives (also covers waybackurls, which queries the same source)
 - **sfp_tool_nikto**: Web server vulnerability scanner
 - **sfp_tool_whatweb**: Website technology fingerprinting
-- **sfp_tool_wappalyzer**: Technology stack detection
 - **sfp_tool_gobuster**: Directory and file brute-forcing
 - **sfp_tool_gowitness**: Webpage screenshot capture
 - **sfp_tool_ffuf**: Fast web fuzzer
@@ -103,7 +100,6 @@ image (its Node runtime was never installed).
 - **sfp_tool_arjun**: HTTP parameter discovery
 
 #### OSINT & Social
-- **sfp_tool_phoneinfoga**: Phone number OSINT (needs its own API server running; not bundled by default - see the phone-number scan profile for key-free alternatives)
 
 ### AI & Advanced Analytics
 - **sfp_advanced_correlation**: Cross-platform entity resolution and pattern analysis
@@ -163,7 +159,6 @@ Below is a complete list of all documented modules. Click a module name to view 
 | sfp_tool_nikto | Web server vulnerability scanner. |
 | sfp_nuclei | Template-based vulnerability scanner with 9000+ templates. |
 | sfp_tool_onesixtyone | SNMP community string scanner. |
-| sfp_tool_phoneinfoga | Phone number OSINT and information gathering. |
 | sfp_tool_snallygaster | Secret file and configuration leak scanner. |
 | sfp_tool_sslscan | SSL/TLS cipher suite and certificate analysis. |
 | sfp_tool_sslyze | SSL/TLS deep analysis and certificate validation. |
@@ -173,9 +168,7 @@ Below is a complete list of all documented modules. Click a module name to view 
 | sfp_tool_trufflehog | Secret and credential detection in repositories and filesystems. |
 | sfp_tool_wafw00f | Web Application Firewall detection and fingerprinting. |
 | sfp_tool_whatweb | Website technology fingerprinting and identification. |
-| sfp_tool_wappalyzer | Technology stack detection via Wappalyzer rules. |
 
-| [sfp_twitter](modules/sfp_twitter.md) | Searches Twitter for profiles, mentions, and activity. |
 | [sfp_social](modules/sfp_social.md) | Searches for usernames and profiles related to the target across social media and forums. |
 | [sfp_virustotal](modules/sfp_virustotal.md) | Integrates with VirusTotal to check domains, IPs, and files for malware and reputation. |
 | [sfp_whois](modules/sfp_whois.md) | Performs WHOIS lookups for domains and IP addresses. |

@@ -108,8 +108,11 @@ class sfp_opencorporates(SpiderFootAsyncPlugin):
             useragent=self.opts['_useragent']
         )
 
+        if not res:
+            return None
+
         if res['code'] == "401":
-            self.error("Invalid OpenCorporates API key.")
+            self._invalid_key()
             return None
 
         if res['code'] == "403":
@@ -140,8 +143,11 @@ class sfp_opencorporates(SpiderFootAsyncPlugin):
             useragent=self.opts['_useragent']
         )
 
+        if not res:
+            return None
+
         if res['code'] == "401":
-            self.error("Invalid OpenCorporates API key.")
+            self._invalid_key()
             return None
 
         if res['code'] == "403":
@@ -205,6 +211,15 @@ class sfp_opencorporates(SpiderFootAsyncPlugin):
                         "RAW_RIR_DATA", "Possible full name: " + n, self.__name__, sevt)
                     self.notifyListeners(e)
 
+    _warned_no_key = False
+
+    def _invalid_key(self) -> None:
+        """The saved key was refused: say so once and stop, instead of failing and logging on every event."""
+        if not self.errorState:
+            self.error("OpenCorporates refused the saved API key (invalid or expired); this module stops for the rest "
+                       "of the scan. Fix or clear the key on the Credentials page.")
+        self.errorState = True
+
     def handleEvent(self, event: SpiderFootEvent) -> None:
         """Handle an event received by this module."""
         if self.errorState:
@@ -221,9 +236,10 @@ class sfp_opencorporates(SpiderFootAsyncPlugin):
 
         self.debug(f"Received event, {eventName}, from {srcModuleName}")
 
-        if self.opts['api_key'] == '':
-            self.error(
-                f"Warning: You enabled {self.__class__.__name__} but did not set an API key! Queries will be limited to 50 per day and 200 per month.")
+        if self.opts['api_key'] == '' and not self._warned_no_key:
+            self._warned_no_key = True
+            self.info(
+                f"{self.__class__.__name__} has no API key, so queries are limited to 50 per day and 200 per month.")
 
         res = self.searchCompany(f"{eventData}*")
 

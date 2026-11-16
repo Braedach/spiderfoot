@@ -47,11 +47,17 @@ class sfp_crt(SpiderFootAsyncPlugin):
     opts = {
         'verify': True,
         'fetchcerts': True,
+        'retries': 2,
+        'retrywait': 3,
     }
 
     optdescs = {
         'verify': 'Verify certificate subject alternative names resolve.',
         'fetchcerts': 'Fetch each certificate found, for processing by other modules.',
+        'retries': "How many times to retry a crt.sh request that gets no answer, a rate-limit or a server error. crt.sh is "
+                   "often slow or overloaded; without retries one scan lost 40 certificates and its certificate "
+                   "history stopped a year short.",
+        'retrywait': "Seconds to wait before the first retry (it grows with each further retry).",
     }
 
     results = None
@@ -87,15 +93,29 @@ class sfp_crt(SpiderFootAsyncPlugin):
             'output': 'json'
         }
 
-        res = self.fetch_url(
-            "https://crt.sh/?" + urllib.parse.urlencode(params),
-            timeout=30,
-            useragent=self.opts['_useragent']
-        )
+        res = self._fetch_with_retry("https://crt.sh/?" + urllib.parse.urlencode(params))
 
         time.sleep(0.5)
 
         return self.parseApiResponse(res)
+
+    def _fetch_with_retry(self, url: str) -> dict | None:
+        """Fetch from crt.sh, retrying a missing answer, a rate-limit or a server error with a growing pause."""
+        attempts = 1 + max(0, int(self.opts.get('retries', 2)))
+        res = None
+        for attempt in range(attempts):
+            res = self.fetch_url(url, timeout=30, useragent=self.opts['_useragent'])
+            code = str((res or {}).get('code') or '')
+            if res and code not in ('429', '500', '502', '503', '504'):
+                return res
+            if attempt < attempts - 1:
+                wait = float(self.opts.get('retrywait', 3)) * (attempt + 1)
+                self.debug(f"crt.sh did not answer cleanly (HTTP {code or 'none'}); retrying in {wait:g}s "
+                           f"({attempt + 1}/{attempts - 1})")
+                if self.checkForStop():
+                    return res
+                time.sleep(wait)
+        return res
 
     def parseApiResponse(self, res: dict) -> dict | None:
         """Parse ApiResponse."""
@@ -200,11 +220,7 @@ class sfp_crt(SpiderFootAsyncPlugin):
                 'd': str(cert_id)
             }
 
-            res = self.fetch_url(
-                'https://crt.sh/?' + urllib.parse.urlencode(params),
-                timeout=30,
-                useragent=self.opts['_useragent']
-            )
+            res = self._fetch_with_retry('https://crt.sh/?' + urllib.parse.urlencode(params))
 
             time.sleep(0.5)
 

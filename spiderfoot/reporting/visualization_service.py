@@ -61,7 +61,9 @@ class VisualizationService:
         """Get raw scan result events."""
         if self._dbh is None:
             return []
-        return self._dbh.scanResultEvent(scan_id, event_type) or []
+        # scanResultEvent() only applies its "ALL" default when the argument is omitted; an explicit None raises
+        # TypeError, which made every unfiltered graph request return HTTP 500.
+        return self._dbh.scanResultEvent(scan_id, event_type or "ALL") or []
 
     def _get_summary(self, scan_id: str, group_by: str = "type"):
         if self._dbh is None:
