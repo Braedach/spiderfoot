@@ -39,6 +39,7 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
         },
     }
 
+    _catchall = None   # per-scan baseline of how each server answers a path that cannot exist
     _runs = 0  # runs started so far this scan (reset in setup); the cap counts these, not URLs seen
 
     opts = {
@@ -50,6 +51,7 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
         "ssl": False,
         "no_ssl": False,
         "plugins": "",
+        "catchall_filter": True,
     }
 
     optdescs = {
@@ -61,6 +63,9 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
         "ssl": "Force SSL mode.",
         "no_ssl": "Disable SSL.",
         "plugins": "Specific Nikto plugins to run (comma-separated, blank=all).",
+        "catchall_filter": "Drop a finding about a path when the server answers that path exactly as it answers a path "
+                           "that cannot exist (a catch-all or single-page app). Without this, Nikto reports files such "
+                           "as /.htpasswd as exposed on any server that answers every path with 200.",
     }
 
     results = None
@@ -70,6 +75,7 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
         self.errorState = False
         self.results = self.tempStorage()
         self._runs = 0
+        self._catchall = None
 
     def watchedEvents(self):
         return ["DOMAIN_NAME", "IP_ADDRESS", "LINKED_URL_INTERNAL"]
@@ -96,6 +102,20 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
                 if os.path.isfile(candidate):
                     return candidate
         return None
+
+    def _is_catch_all_hit(self, target: str, uri: str) -> bool:
+        """True when ``target``+``uri`` is answered like a path that cannot exist. Never raises."""
+        try:
+            if not uri.startswith("/") or not target.startswith("http"):
+                return False
+            if self._catchall is None:
+                from spiderfoot.sflib.catchall import CatchAllBaseline
+                self._catchall = CatchAllBaseline(
+                    lambda u: self.fetch_url(u, timeout=15, useragent=self.opts.get("_useragent", "SpiderFoot"),
+                                             sizeLimit=4096))
+            return self._catchall.is_catch_all(target.rstrip("/") + uri)
+        except Exception:
+            return False
 
     def handleEvent(self, event):
         data = event.data
@@ -149,6 +169,7 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
 
             # Parse CSV output
             vuln_count = 0
+            dropped = 0
             if os.path.exists(output_path):
                 with open(output_path, "r") as f:
                     for line in f:
@@ -175,6 +196,10 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
                         cve_matches = cve_re.findall(description)
 
                         finding = f"{target}{uri}: {description}"
+
+                        if self.opts["catchall_filter"] and self._is_catch_all_hit(target, uri):
+                            dropped += 1
+                            continue
 
                         if cve_matches:
                             evt = SpiderFootEvent(
@@ -203,7 +228,10 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
                     )
                     self.notifyListeners(evt)
 
-            self.info(f"nikto found {vuln_count} findings for {target}")
+            if dropped:
+                self.info(f"nikto: dropped {dropped} finding(s) for {target} because the server answers those paths "
+                          "exactly as it answers a path that cannot exist (a catch-all, not exposed files).")
+            self.info(f"nikto found {vuln_count - dropped} findings for {target}")
 
         except subprocess.TimeoutExpired:
             self.error(f"nikto timed out for {target}")

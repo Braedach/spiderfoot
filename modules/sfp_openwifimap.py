@@ -44,7 +44,7 @@ class sfp_openwifimap(SpiderFootAsyncPlugin):
         self.debug(f"[setup] Options: {self.opts}")
         # Option validation
         if not self.opts.get("search_term"):
-            self.error("[setup] search_term is required.")
+            self.info("Not configured: this module searches for a term you supply and has none set, so it is skipped.")
             self.errorState = True
 
             return
