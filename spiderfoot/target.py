@@ -243,7 +243,7 @@ class SpiderFootTarget():
             return False
         return value.lower() in self._sharedIPs
 
-    def isKnownCdnIP(self, value: str, cdnRanges: dict[str, list[str]] | None = None) -> str | None:
+    def isKnownCdnIP(self, value: str, cdnRanges: dict[str, list[str]] | None = None, asnLookup=None) -> str | None:
         """Return the CDN/anycast provider name if value falls within a
         known provider's published IP range, UNLESS value is the target's
         own directly-authorised scope (see isDirectlyAuthorisedScope()).
@@ -258,6 +258,7 @@ class SpiderFootTarget():
             cdnRanges (dict[str, list[str]] | None): provider -> CIDR list,
                 as returned by cdn_ranges.refreshCdnRanges(). Falls back to
                 the static snapshot in cdn_ranges.FALLBACK_RANGES if omitted.
+            asnLookup: optional function address -> origin ASN; when given, the shared-edge ASN list is checked too.
 
         Returns:
             str | None: the matching provider's name, or None.
@@ -270,6 +271,10 @@ class SpiderFootTarget():
         if self.isDirectlyAuthorisedScope(value):
             return None
 
+        if asnLookup is not None:
+            # also match by origin ASN (cdn_ranges.CDN_ASNS); asnLookup maps an address to its ASN
+            from spiderfoot.cdn_ranges import knownCdnProvider
+            return knownCdnProvider(value, cdnRanges, asnLookup)
         from spiderfoot.cdn_ranges import isKnownCdnIP as _isKnownCdnIP
         return _isKnownCdnIP(value, cdnRanges)
 
