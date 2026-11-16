@@ -235,7 +235,7 @@ class TestProfileManager(unittest.TestCase):
             set(p.include_modules),
             {"sfp_accounts", "sfp_arin", "sfp_wikileaks",
              "sfp_github", "sfp_keybase", "sfp_venmo", "sfp_wikipediaedits", "sfp_hudsonrock",
-             "sfp_slideshare", "sfp_myspace", "sfp_tool_maigret"},
+             "sfp_slideshare", "sfp_myspace", "sfp_tool_maigret", "sfp_ahmia", "sfp_torch"},
         )
         self.assertIn("sfp_socialprofiles", p.optional_modules)
 
@@ -248,7 +248,7 @@ class TestProfileManager(unittest.TestCase):
              "sfp_pgp", "sfp_gravatar", "sfp_hudsonrock", "sfp_grep_app",
              "sfp_accounts", "sfp_wikileaks", "sfp_myspace",
              "sfp_github", "sfp_keybase", "sfp_venmo", "sfp_wikipediaedits",
-             "sfp_slideshare", "sfp_tool_user_scanner", "sfp_tool_maigret"},
+             "sfp_slideshare", "sfp_tool_user_scanner", "sfp_tool_maigret", "sfp_ahmia", "sfp_torch"},
         )
         for dead in ("sfp_trumail", "sfp_searchcode", "sfp_twitter"):     # services gone or login-walled
             self.assertNotIn(dead, p.include_modules)
