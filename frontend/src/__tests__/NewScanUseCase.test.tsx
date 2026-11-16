@@ -160,4 +160,47 @@ describe('New Scan > By Use Case', () => {
     fireEvent.change(targetInput(), { target: { value: '+61400000000' } });
     await waitFor(() => expect(screen.getByText(/Phone number search: Phone Number Intelligence \(4 modules\)/)).toBeTruthy());
   });
+
+  it('offers the optional subject context only for person searches, pre-filled from the target, and sends it', async () => {
+    renderPage();
+    await screen.findByTestId('usecase-phone');
+    expect(screen.queryByTestId('subject-context')).toBeNull();                 // nothing selected yet
+    fireEvent.change(targetInput(), { target: { value: '+61400000000' } });
+    await waitFor(() => expect(isSelected('usecase-phone')).toBe(true));
+    const country = await screen.findByLabelText('Subject country') as HTMLInputElement;
+    expect(country.value).toBe('Australia');                                    // from the calling code only
+    fireEvent.change(screen.getByLabelText('Subject city or state'), { target: { value: 'Perth' } });
+    fireEvent.click(screen.getByText('Launch Scan'));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    const payload = create.mock.calls[0][0];
+    expect(payload.subject_country).toBe('Australia');
+    expect(payload.subject_region).toBe('Perth');
+  });
+
+  it('never guesses a country from a name, and does not offer the context for a domain or an IP address', async () => {
+    renderPage();
+    await screen.findByTestId('usecase-name');
+    fireEvent.change(targetInput(), { target: { value: 'Pat Example' } });
+    const country = await screen.findByLabelText('Subject country') as HTMLInputElement;
+    expect(country.value).toBe('');
+    fireEvent.change(targetInput(), { target: { value: 'example.com' } });
+    await waitFor(() => expect(screen.queryByTestId('subject-context')).toBeNull());
+    fireEvent.change(targetInput(), { target: { value: '203.0.113.10' } });
+    await waitFor(() => expect(screen.queryByTestId('subject-context')).toBeNull());
+  });
+
+  it('keeps what the user typed over the pre-filled country, and sends nothing when the fields are empty', async () => {
+    renderPage();
+    await screen.findByTestId('usecase-email');
+    fireEvent.change(targetInput(), { target: { value: 'pat@example.com' } });
+    const country = await screen.findByLabelText('Subject country') as HTMLInputElement;
+    fireEvent.change(country, { target: { value: 'New Zealand' } });
+    fireEvent.change(targetInput(), { target: { value: 'pat@example.com.au' } });
+    expect((screen.getByLabelText('Subject country') as HTMLInputElement).value).toBe('New Zealand');
+    fireEvent.change(screen.getByLabelText('Subject country'), { target: { value: '' } });
+    fireEvent.click(screen.getByText('Launch Scan'));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(create.mock.calls[0][0].subject_country).toBeUndefined();
+    expect(create.mock.calls[0][0].subject_region).toBeUndefined();
+  });
 });

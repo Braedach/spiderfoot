@@ -195,3 +195,28 @@ def test_every_module_in_the_new_profiles_can_fire_from_its_target(catalog, name
     dead = [m for m in names if not ({"*"} & set(catalog[m].get("consumes") or []))
             and not (set(catalog[m].get("consumes") or []) & reachable)]
     assert not dead, f"{name}: these modules can never fire from a {seed} target: {dead}"
+
+
+# ------------------------------------------------------------------------------------------------ subject context
+
+
+def test_the_subject_context_is_stored_with_the_scan_only_when_given():
+    req = scan_router.ScanRequest(name="n", target="pat@example.com", subject_country="  Australia ", subject_region="Perth")
+    assert scan_router._subject_context(req) == {"_subject_country": "Australia", "_subject_region": "Perth"}
+    assert scan_router._subject_context(scan_router.ScanRequest(name="n", target="x")) == {}
+    partial = scan_router.ScanRequest(name="n", target="x", subject_country="Australia", subject_region="   ")
+    assert scan_router._subject_context(partial) == {"_subject_country": "Australia"}
+
+
+def test_the_subject_context_is_cleaned_and_bounded():
+    req = scan_router.ScanRequest(name="n", target="x", subject_country="Aus\ntralia\t", subject_region="a" * 120)
+    ctx = scan_router._subject_context(req)
+    assert ctx["_subject_country"] == "Aus tralia" and len(ctx["_subject_region"]) == 120
+
+
+def test_an_over_long_subject_context_is_refused_by_the_request_model():
+    import pydantic
+    with pytest.raises(pydantic.ValidationError):
+        scan_router.ScanRequest(name="n", target="x", subject_country="a" * 81)
+    with pytest.raises(pydantic.ValidationError):
+        scan_router.ScanRequest(name="n", target="x", subject_region="a" * 121)

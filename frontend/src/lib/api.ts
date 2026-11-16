@@ -161,6 +161,9 @@ export interface ScanCreateRequest {
   /** How the module list was chosen; recorded with the scan and shown in Scan Settings. */
   selection?: string;
   stealth_level?: StealthLevelName;
+  /** Optional, for person searches: where the subject is based. Weighs the accounts found; never sent to any service. */
+  subject_country?: string;
+  subject_region?: string;
 }
 
 /** Stealth level names accepted by the scan-creation endpoint. */

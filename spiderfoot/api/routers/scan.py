@@ -75,6 +75,29 @@ class ScanRequest(BaseModel):
         None,
         description="Stealth level: none, low, medium, high, maximum (maps to paranoid)",
     )
+    subject_country: str | None = Field(
+        None, max_length=80,
+        description="Optional: the country the subject of a person search is based in. Used only to weigh the accounts "
+                    "found (a site for another country counts against a match); never sent to any service.",
+    )
+    subject_region: str | None = Field(
+        None, max_length=120,
+        description="Optional: the city or state the subject is based in. Used only to weigh the accounts found.",
+    )
+
+
+def _subject_context(scan_request: "ScanRequest") -> dict:
+    """Scan configuration entries for what the owner told the scan about the subject (empty when nothing was given).
+
+    Stored with the scan, so the report can weigh each account found by where the subject is. Nothing here is sent to any
+    data source.
+    """
+    out: dict[str, str] = {}
+    for field, key in (("subject_country", "_subject_country"), ("subject_region", "_subject_region")):
+        value = " ".join(str(getattr(scan_request, field, "") or "").split())
+        if value:
+            out[key] = value[:120]
+    return out
 
 
 class ScheduleCreateRequest(BaseModel):
@@ -913,7 +936,8 @@ async def create_scan(
             selection = "All modules"
 
         # Recorded with the scan's configuration so Scan Settings can show how it was launched.
-        sf_config = {**sf_config, "_scan_selection": "".join(c for c in selection if c.isprintable())[:120]}
+        sf_config = {**sf_config, "_scan_selection": "".join(c for c in selection if c.isprintable())[:120],
+                     **_subject_context(scan_request)}
 
         if not modules:
             modules = ["sfp__stor_db"]

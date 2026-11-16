@@ -50,3 +50,30 @@ export const SEARCH_LABELS: Record<SearchKey, string> = {
   name: 'Person name',
   asn: 'ASN',
 };
+
+/**
+ * A country the target itself points to, to pre-fill the optional "where is the subject based?" field. Only what the text
+ * says: a phone number's calling code or an email address's country domain. Never a guess from a name.
+ */
+const CALLING_CODES: [string, string][] = [
+  ['+61', 'Australia'], ['+64', 'New Zealand'], ['+44', 'United Kingdom'], ['+353', 'Ireland'], ['+65', 'Singapore'],
+  ['+27', 'South Africa'], ['+91', 'India'], ['+49', 'Germany'], ['+33', 'France'], ['+31', 'Netherlands'],
+  ['+34', 'Spain'], ['+39', 'Italy'], ['+48', 'Poland'], ['+420', 'Czech Republic'], ['+1', 'United States / Canada'],
+];
+const COUNTRY_DOMAINS: Record<string, string> = {
+  au: 'Australia', nz: 'New Zealand', uk: 'United Kingdom', ie: 'Ireland', sg: 'Singapore', za: 'South Africa',
+  in: 'India', de: 'Germany', fr: 'France', nl: 'Netherlands', es: 'Spain', it: 'Italy', pl: 'Poland', cz: 'Czech Republic',
+};
+
+export function countryFromTarget(raw: string): string | null {
+  const text = (raw ?? '').trim().toLowerCase();
+  if (!text) return null;
+  if (text.startsWith('+')) {
+    const compact = text.replace(/[^\d+]/g, '');
+    // longest calling code first, so +353 is not read as +3
+    const hit = [...CALLING_CODES].sort((a, b) => b[0].length - a[0].length).find(([code]) => compact.startsWith(code));
+    return hit ? hit[1] : null;
+  }
+  const email = text.match(/^[^\s@]+@[^\s@]+\.([a-z]{2})$/);
+  return email && COUNTRY_DOMAINS[email[1]] ? COUNTRY_DOMAINS[email[1]] : null;
+}

@@ -38,3 +38,16 @@ describe('detectSearchType', () => {
     expect(detectSearchType('name@example.com')).toBe('email');
   });
 });
+
+import { countryFromTarget } from '../lib/searchTypes';
+
+describe('countryFromTarget', () => {
+  it.each([
+    ['+61400000000', 'Australia'], ['+61 8 9234 5678', 'Australia'], ['+64211234567', 'New Zealand'],
+    ['+353 1 234 5678', 'Ireland'], ['+442079460958', 'United Kingdom'], ['+14155552671', 'United States / Canada'],
+    ['pat@example.com.au', 'Australia'], ['pat@example.au', 'Australia'], ['pat@example.co.uk', 'United Kingdom'], ['pat@example.de', 'Germany'],
+    ['pat@example.com', null], ['Pat Example', null], ['0400000000', null], ['', null], ['+999123', null],
+  ])('%j gives %s', (input, expected) => {
+    expect(countryFromTarget(input)).toBe(expected);
+  });
+});

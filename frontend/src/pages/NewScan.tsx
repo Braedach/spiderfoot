@@ -5,7 +5,7 @@ import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import {
   dataApi, scanApi, type Module, type ScanCreateRequest, type ScanProfile, type SearchType,
 } from '../lib/api';
-import { detectSearchType, SEARCH_LABELS, type SearchKey } from '../lib/searchTypes';
+import { detectSearchType, countryFromTarget, SEARCH_LABELS, type SearchKey } from '../lib/searchTypes';
 import type { StealthLevelName } from '../lib/api';
 import {
   Radar, Lock, Unlock, Zap, Globe, Server, Mail, Phone, User, Network, AlertTriangle,
@@ -41,6 +41,9 @@ export default function NewScanPage() {
   const [scanName, setScanName] = useState('');
   const [useCase, setUseCase] = useState('all');
   const [userPickedUseCase, setUserPickedUseCase] = useState(false);
+  const [subjectCountry, setSubjectCountry] = useState('');
+  const [subjectRegion, setSubjectRegion] = useState('');
+  const [userEditedCountry, setUserEditedCountry] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<string | null>(null);
   const [selectedModules, setSelectedModules] = useState<Set<string>>(new Set());
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
@@ -75,6 +78,14 @@ export default function NewScanPage() {
   useEffect(() => {
     if (!userPickedUseCase && detected) setUseCase(detected);
   }, [detected, userPickedUseCase]);
+
+  /* Where the subject is based (optional, person searches only). Pre-filled only from what the target says: a phone
+   * number's calling code or an email address's country domain. Never a guess from a name. */
+  const isPersonSearch = useCase === 'email' || useCase === 'phone' || useCase === 'name';
+  const targetCountry = useMemo(() => countryFromTarget(target), [target]);
+  useEffect(() => {
+    if (!userEditedCountry) setSubjectCountry(targetCountry ?? '');
+  }, [targetCountry, userEditedCountry]);
 
   /* Which modules can ever fire for this target, per its detected type —
    * computed server-side from the same watches/produces graph the scan
@@ -186,6 +197,10 @@ export default function NewScanPage() {
       // The server runs the profile built for this kind of search, with its settings (for an IP address or an ASN:
       // no expansion to neighbouring netblocks).
       payload.profile = selectedSearch.profile;
+    }
+    if (tab === 'usecase' && isPersonSearch) {
+      if (subjectCountry.trim()) payload.subject_country = subjectCountry.trim();
+      if (subjectRegion.trim()) payload.subject_region = subjectRegion.trim();
     }
     // When useCase === 'all' or no selection, send no modules/type_filter → server uses all modules
     if (stealthLevel !== 'none') {
@@ -473,6 +488,32 @@ export default function NewScanPage() {
                   </div>
                 </button>
               </div>
+
+              {isPersonSearch && (
+                <div className="mt-4 p-4 rounded-xl border border-dark-700" data-testid="subject-context">
+                  <p className="text-sm font-medium text-foreground">About the subject (optional)</p>
+                  <p className="text-xs text-dark-400 mt-0.5 mb-3">
+                    Where the subject is based. It is used only to weigh the accounts found in the report (a site for another country counts against a match) and is never sent to any service.
+                    {targetCountry && !userEditedCountry && ' The country was filled in from the target.'}
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <input
+                      className="input-field"
+                      aria-label="Subject country"
+                      placeholder="Country, e.g. Australia"
+                      value={subjectCountry}
+                      onChange={(e) => { setSubjectCountry(e.target.value); setUserEditedCountry(true); }}
+                    />
+                    <input
+                      className="input-field"
+                      aria-label="Subject city or state"
+                      placeholder="City or state, e.g. Perth"
+                      value={subjectRegion}
+                      onChange={(e) => setSubjectRegion(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
