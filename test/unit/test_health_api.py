@@ -133,7 +133,7 @@ class TestVectorCheck:
         mock_vb = MagicMock()
         mock_vb.check_health.return_value = mock_health
 
-        with patch(
+        with patch.dict(os.environ, {"VECTOR_API_URL": "http://vector:8687"}), patch(
             "spiderfoot.observability.vector_bootstrap.VectorBootstrap",
             return_value=mock_vb,
         ):
@@ -148,7 +148,7 @@ class TestVectorCheck:
         mock_vb = MagicMock()
         mock_vb.check_health.return_value = mock_health
 
-        with patch(
+        with patch.dict(os.environ, {"VECTOR_API_URL": "http://vector:8687"}), patch(
             "spiderfoot.observability.vector_bootstrap.VectorBootstrap",
             return_value=mock_vb,
         ):
@@ -157,7 +157,8 @@ class TestVectorCheck:
         assert "refused" in result.get("message", "")
 
     def test_vector_import_error(self):
-        with patch.dict("sys.modules", {"spiderfoot.observability.vector_bootstrap": None}):
+        with patch.dict(os.environ, {"VECTOR_API_URL": "http://vector:8687"}), \
+                patch.dict("sys.modules", {"spiderfoot.observability.vector_bootstrap": None}):
             result = _check_vector()
         assert result["status"] in ("down", "unknown")
 

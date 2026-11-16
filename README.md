@@ -17,7 +17,7 @@ Expect this to keep changing. Bugs are still being found, mostly old ones that o
 - **Builds:** `v6.1.0-bd.1-rc.36` is the current release candidate, being deployed and validated. `rc.34` was the last build validated live (a 30 minute soak with the dashboard open and six scans). `rc.35` and later are a breaking change for an existing stack: see [`UPGRADING.md`](UPGRADING.md). Do not run `rc.32` or `rc.33` (database connection leak). Every build passes the scan gate on all 5 images (Trivy and `npm audit`). No non-`rc` release has been cut yet.
 - **Scope guard:** invasive modules are gated three ways before dispatch (see [How a scan flows](#how-a-scan-flows)): the target must match, the address must not sit in a published Cloudflare or Fastly range, and it must not have been proven shared by another module. Validated live against phone, email, name, domain and IP targets. ASN is the one target type not yet explicitly exercised.
 - **Scan execution:** scans no longer run inside API workers, and a scan whose process dies is detected and marked failed instead of staying `RUNNING` forever (see [Where a scan executes](#where-a-scan-executes)).
-- **Module catalog:** every module's `setup()` is exercised by a catalog-wide test, because modules that fail to load were previously invisible. Key-free scan profiles exist for phone-number, email-address and person-name targets, and each has been run end to end on a live stack. Dead and superseded modules have been removed.
+- **Module catalog:** every module's `setup()` is exercised by a catalog-wide test, because modules that fail to load were previously invisible. Scan profiles exist for phone-number, email-address and person-name targets and have been run end to end on a live stack. Each runs the modules that need no key, including the follow-on lookups for the usernames and profiles it finds, and the keyed modules it can use join automatically once their API key is saved on the Modules page. Dead and superseded modules have been removed.
 - **Dependencies and base images:** every Dependabot alert has been fixed and none are currently waived (see below).
 - **Tag scheme:** `v<upstream base>-bd.<N>` for a release, `-rc.<M>` for a test build. An `-rc` tag never moves `:latest`.
 - **Never push straight to `main`.** Work happens on a branch, goes through a pull request, and is tested as a release candidate before release.
@@ -117,7 +117,7 @@ The New Scan page offers four ways to choose modules. The server, not the browse
 |---|---|
 | By Use Case, All Modules | Every reliable module (about 285 of about 290): active tools and dark-web modules included, error-prone and retired modules left out |
 | By Use Case, others | The modules in that group (Footprint, Investigate, Passive), or a fixed short list for Quick Scan |
-| By Profile | The profile's module list, with the profile's own thread limit and option overrides |
+| By Profile | The profile's module list, with the profile's own thread limit and option overrides. A profile's keyed (optional) modules are added only if their API key is saved |
 | By Required Data | The modules that produce the selected data types, plus the modules that feed them their input. This chain grows quickly: for most data types it reaches about 190 modules |
 | By Module | Exactly the modules ticked |
 

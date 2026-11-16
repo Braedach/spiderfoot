@@ -81,3 +81,100 @@ def test_tor_and_unconfigured_minio_are_in_the_dashboard(monkeypatch):
     monkeypatch.delenv("SF_MINIO_ENDPOINT", raising=False)
     assert "tor" in health._SUBSYSTEM_CHECKS
     assert health._check_minio() == {"status": "unknown", "message": "Not configured"}
+
+
+class _FakeRedis:
+    """Just the calls the shared Tor check makes."""
+
+    def __init__(self):
+        self.store, self.ttls = {}, {}
+
+    def get(self, k):
+        return self.store.get(k)
+
+    def set(self, k, v, nx=False, ex=None):
+        if nx and k in self.store:
+            return None
+        self.store[k] = v
+        return True
+
+    def setex(self, k, ttl, v):
+        self.store[k] = v
+        self.ttls[k] = ttl
+
+    def delete(self, k):
+        self.store.pop(k, None)
+
+
+def test_tor_result_is_shared_between_processes_through_redis():
+    """Two API processes must give the same answer: one probes, the other reads what it stored."""
+    cfg = mock.Mock()
+    cfg.get_config.return_value = {"_tor_enabled": True, "_tor_host": "tor.test", "_tor_port": 9050}
+    r = _FakeRedis()
+    probes = []
+    done, release = threading.Event(), threading.Event()
+
+    def probe(host, port):
+        probes.append((host, port))
+        done.set()
+        release.wait(5)                                   # hold the probe open while the second process asks
+        return {"status": "up", "message": "Working"}
+
+    with mock.patch("spiderfoot.api.dependencies.get_app_config", return_value=cfg), \
+         mock.patch.object(health, "_tor_redis", return_value=r), \
+         mock.patch.object(health, "_probe_tor", side_effect=probe):
+        first = health._check_tor()                       # process A: nothing stored yet
+        second = health._check_tor()                      # process B, at the same moment
+        assert first["message"] == "Checking..." and second["message"] == "Checking..."
+        assert done.wait(5)
+        release.set()
+        for _ in range(100):
+            if "sf:health:tor:result:tor.test:9050" in r.store:
+                break
+            threading.Event().wait(0.05)
+        a, b = health._check_tor(), health._check_tor()   # any process now reads the one stored answer
+    assert a["status"] == b["status"] == "up"
+    assert len(probes) == 1                               # the lock kept the second process from probing
+    assert r.ttls["sf:health:tor:result:tor.test:9050"] == 300
+
+
+def test_a_failed_tor_probe_is_stored_for_a_short_time():
+    cfg = mock.Mock()
+    cfg.get_config.return_value = {"_tor_enabled": True, "_tor_host": "tor.test", "_tor_port": 9050}
+    r = _FakeRedis()
+    with mock.patch("spiderfoot.api.dependencies.get_app_config", return_value=cfg), \
+         mock.patch.object(health, "_tor_redis", return_value=r), \
+         mock.patch.object(health, "_probe_tor", return_value={"status": "down", "message": "x"}):
+        health._check_tor()
+        for _ in range(100):
+            if "sf:health:tor:result:tor.test:9050" in r.store:
+                break
+            threading.Event().wait(0.05)
+    assert r.ttls["sf:health:tor:result:tor.test:9050"] == 60
+
+
+def test_broken_redis_falls_back_to_the_per_process_state():
+    cfg = mock.Mock()
+    cfg.get_config.return_value = {"_tor_enabled": True, "_tor_host": "tor.test", "_tor_port": 9050}
+    broken = mock.Mock()
+    broken.get.side_effect = OSError("redis down")
+    health._tor_state.update(result={"status": "up", "message": "Working"}, at=__import__("time").monotonic(),
+                             key="tor.test:9050", running=False)
+    with mock.patch("spiderfoot.api.dependencies.get_app_config", return_value=cfg), \
+         mock.patch.object(health, "_tor_redis", return_value=broken):
+        assert health._check_tor()["status"] == "up"
+    health._tor_state.update(result=None, at=0.0, key="", running=False)
+
+
+def test_vector_and_qdrant_rows(monkeypatch):
+    monkeypatch.delenv("VECTOR_API_URL", raising=False)
+    assert health._check_vector()["status"] == "unknown"          # not deployed: not "down"
+    assert "qdrant" in health._SUBSYSTEM_CHECKS
+    monkeypatch.setenv("SF_QDRANT_URL", "http://qdrant.test:6333")
+    ok = mock.MagicMock()
+    ok.__enter__.return_value.status = 200
+    with mock.patch("urllib.request.urlopen", return_value=ok) as op:
+        assert health._check_qdrant() == {"status": "up"}
+    assert op.call_args[0][0] == "http://qdrant.test:6333/healthz"
+    with mock.patch("urllib.request.urlopen", side_effect=OSError("refused")):
+        assert health._check_qdrant()["status"] == "down"

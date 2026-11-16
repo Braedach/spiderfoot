@@ -824,6 +824,10 @@ now read from `/etc/davros/ghcr-token` works (GHCR login succeeded).
   working outbound proxy, New Scan selections that run what the screen says, and the selection shown in Scan Settings.
   Stack files 2.16.0 (Podman) / 2.6.0 (Docker). **Breaking:** needs the new stack file; Tor is on by default; the
   proxy setting now takes effect; "All Modules" and "By Required Data" select different modules (see `UPGRADING.md`).
+- rc.37: the phone, email and person-name profiles follow the usernames and profiles they find and pick up keyed modules
+  once their key is saved; the spider no longer fetches a page twice under `:80` and bare spellings; Shodan's
+  "no information" answer is not an error; the dashboard Tor status is consistent across API processes and the
+  "vector: down" row is replaced by a real Qdrant check. No stack file change.
 - rc.36: httpx probes each site once instead of once per link; the file metadata module reads files (it never had);
   ffuf ignores Windows device names; `sfp_webserver` reports each banner once per host.
 

@@ -36,9 +36,9 @@ Built-in profiles:
     - infrastructure: DNS, ports, hosting analysis
     - api-powered: All modules requiring API keys
     - minimal: Bare minimum modules
-    - phone-number: Phone-number intelligence, key-free only
-    - email-address: Email-address intelligence, key-free only
-    - person-name: Person-name intelligence, key-free only
+    - phone-number: Phone-number intelligence (keyed modules join once their key is saved)
+    - email-address: Email-address intelligence (keyed modules join once their key is saved)
+    - person-name: Person-name intelligence (keyed modules join once their key is saved)
     - custom: User-defined template
 """
 
@@ -46,12 +46,34 @@ import copy
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
 log = logging.getLogger("spiderfoot.scan_profile")
+
+
+# An option that holds a third-party secret. Same rule as the Modules page (frontend/src/lib/settingsMeta.ts), so a
+# module the page shows as "configured" is one a profile counts as configured.
+_CREDENTIAL_OPT = re.compile(r"(api[_-]?key|apikey|_token$|^token$|_secret|secret$|password|pwd$|_key$)", re.I)
+_NOT_CREDENTIALS = {"remote_password", "remote_ssh_key", "remote_ssh_key_data"}
+
+
+def modules_with_credentials(modules: dict[str, dict] | None) -> set[str]:
+    """Names of the modules whose credential options are all filled in.
+
+    ``modules`` is the ``__modules__`` section of the live configuration (each entry has an ``opts`` dict holding the
+    saved values). A module with no credential option, or with one left blank, is not included.
+    """
+    configured: set[str] = set()
+    for name, info in (modules or {}).items():
+        opts = (info or {}).get("opts") or {}
+        keys = [k for k in opts if _CREDENTIAL_OPT.search(str(k)) and k not in _NOT_CREDENTIALS]
+        if keys and all(str(opts[k] if opts[k] is not None else "").strip() for k in keys):
+            configured.add(name)
+    return configured
 
 
 class ProfileCategory(str, Enum):
@@ -78,6 +100,10 @@ class ScanProfile:
     include_flags: list[str] = field(default_factory=list)
     exclude_flags: list[str] = field(default_factory=list)
     include_modules: list[str] = field(default_factory=list)
+    # Modules that join the scan only when their API key (or other credential) has been saved. They need no
+    # attention when a key is missing: the scan runs without them, with no error logged, and they start
+    # contributing as soon as a key is entered on the Modules page.
+    optional_modules: list[str] = field(default_factory=list)
     exclude_modules: list[str] = field(default_factory=list)
     include_categories: list[str] = field(default_factory=list)
     required_event_types: list[str] = field(default_factory=list)
@@ -96,12 +122,16 @@ class ScanProfile:
     tags: list[str] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
 
-    def resolve_modules(self, all_modules: dict[str, dict]) -> list[str]:
+    def resolve_modules(self, all_modules: dict[str, dict],
+                        configured_modules: set[str] | None = None) -> list[str]:
         """Resolve the set of modules to enable based on criteria.
 
         Args:
             all_modules: Dict of module_name -> module_info where
                 module_info has keys: meta, watchedEvents, producedEvents.
+            configured_modules: Names of the modules whose credentials are saved (see
+                :func:`modules_with_credentials`). ``optional_modules`` join only if named here;
+                None means none are configured.
 
         Returns:
             Sorted list of module names to enable.
@@ -156,6 +186,10 @@ class ScanProfile:
         # Include specific modules (always added)
         selected.update(self.include_modules)
 
+        # Optional modules: only those whose credentials are saved, and only if they exist in this build
+        selected.update(m for m in self.optional_modules
+                        if m in (configured_modules or set()) and m in all_modules)
+
         # Always include core storage module (sfp__stor_db only, skip deprecated stores)
         for mod_name in all_modules:
             if mod_name == "sfp__stor_db":
@@ -199,6 +233,7 @@ class ScanProfile:
             "include_flags": self.include_flags,
             "exclude_flags": self.exclude_flags,
             "include_modules": self.include_modules,
+            "optional_modules": self.optional_modules,
             "exclude_modules": self.exclude_modules,
             "include_categories": self.include_categories,
             "required_event_types": self.required_event_types,
@@ -231,6 +266,7 @@ class ScanProfile:
             include_flags=data.get("include_flags", []),
             exclude_flags=data.get("exclude_flags", []),
             include_modules=data.get("include_modules", []),
+            optional_modules=data.get("optional_modules", []),
             exclude_modules=data.get("exclude_modules", []),
             include_categories=data.get("include_categories", []),
             required_event_types=data.get("required_event_types", []),
@@ -346,85 +382,107 @@ class ProfileManager:
             tags=["social", "osint", "profiles"],
         ))
 
+        # The three target-specific profiles below share one design. "include_modules" are the modules that need
+        # no key and no external tool, and they include the follow-on modules for what the first ones discover
+        # (a name or email yields usernames, which github, keybase and others then look up): a profile that lists
+        # only the modules watching the target itself stops one step short. "optional_modules" are the keyed
+        # modules; each joins the scan once its key is saved on the Modules page and is skipped, silently,
+        # until then. tests/unit/test_scan_profiles_chain.py checks that every module named here can actually fire.
         self.register(ScanProfile(
             name="phone-number",
             display_name="Phone Number Intelligence",
             description=(
-                "Carrier, region, country, and infostealer-breach lookups "
-                "for a phone-number target. Key-free only - none of these "
-                "modules need an API key configured. sfp_callername's "
-                "caller-ID lookup is US numbers only; other modules work "
-                "for any country. For keyed phone lookups (numverify, "
-                "abstractapi, neutrinoapi, Twilio) use api-powered instead, "
-                "once those keys are configured."
+                "Carrier, region, country and infostealer-breach lookups for a phone-number target. The modules that "
+                "need no key run always. Carrier, line-type "
+                "and leak lookups (numverify, abstractapi, neutrinoapi, Twilio, IntelX and others) join automatically "
+                "once their API key is saved on the Modules page."
             ),
             category=ProfileCategory.RECONNAISSANCE,
             include_modules=[
                 "sfp_phone",          # phonenumbers lib: carrier/region/timezone/validity
                 "sfp_countryname",    # country from phone/IP/etc.
-                "sfp_callername",     # caller-ID lookup - US numbers only
                 "sfp_hudsonrock",     # Hudson Rock Cavalier: free infostealer-breach intel
-                "sfp_gravatar",       # Gravatar presence check
+                # sfp_callername is not listed: callername.com is now a parked domain (checked 2026-11-14)
+            ],
+            optional_modules=[
+                "sfp_numverify", "sfp_abstractapi", "sfp_neutrinoapi", "sfp_twilio", "sfp_textmagic",   # carrier / line type
+                "sfp_criminalip", "sfp_ipqualityscore", "sfp_seon",                                     # reputation / fraud
+                "sfp_intelx", "sfp_haveibeenpwned", "sfp_leakcheck",                                    # leaks
+                "sfp_sociallinks", "sfp_tiktok_osint", "sfp_c99",                                       # accounts
             ],
             exclude_flags=["errorprone"],
             max_threads=3,
             timeout_minutes=15,
-            tags=["phone", "osint", "key-free"],
+            tags=["phone", "osint"],
         ))
 
         self.register(ScanProfile(
             name="email-address",
             display_name="Email Address Intelligence",
             description=(
-                "Validity, pattern, breach, and leaked-credential lookups "
-                "for an email-address target. Key-free only - none of "
-                "these modules need an API key configured. For richer "
-                "results (haveibeenpwned, emailrep) sign up for their "
-                "free tiers and use api-powered instead."
+                "Validity, pattern, breach, leaked-credential and account lookups for an email-address target, "
+                "including the follow-on lookups for the usernames and social profiles it yields. The modules that "
+                "need no key run always. Breach, reputation and reverse-lookup modules (emailrep, Citadel, IntelX, "
+                "Have I Been Pwned and others) join automatically once their API key is saved on the Modules page."
             ),
             category=ProfileCategory.RECONNAISSANCE,
             include_modules=[
                 "sfp_email",        # core extractor - finds more addresses in gathered data
                 "sfp_emailformat",  # guesses a company's email naming pattern from its domain
                 "sfp_debounce",     # disposable-email check (debounce.io)
-                "sfp_trumail",      # disposable-email check (trumail.io) - independent 2nd source
                 "sfp_pgp",          # PGP keyserver lookup
                 "sfp_gravatar",     # Gravatar presence check
                 "sfp_hudsonrock",   # Hudson Rock Cavalier: free infostealer-breach intel
                 "sfp_grep_app",     # search grep.app for leaked email mentions in public code
-                "sfp_searchcode",   # search searchcode.com for the same
                 "sfp_accounts",     # check the local-part as a username across 500+ sites
                 "sfp_wikileaks",    # search Wikileaks for mentions
+                "sfp_myspace",      # Myspace profile for the address
+                # follow-on: the usernames and profile URLs found above
+                "sfp_github", "sfp_keybase", "sfp_venmo", "sfp_wikipediaedits", "sfp_slideshare",
+                # not listed (checked 2026-11-14): sfp_trumail (its API now says Trumail joined Emailable),
+                # sfp_searchcode (API answers 404), sfp_twitter (profile pages need a login)
+            ],
+            optional_modules=[
+                "sfp_emailrep", "sfp_citadel", "sfp_ipqualityscore", "sfp_nameapi", "sfp_botscout",   # reputation
+                "sfp_intelx", "sfp_haveibeenpwned", "sfp_leakcheck", "sfp_dehashed", "sfp_apileak",   # leaks
+                "sfp_pastebin", "sfp_binaryedge", "sfp_seon",
+                "sfp_fullcontact", "sfp_rocketreach", "sfp_sociallinks", "sfp_c99",                   # who owns it
+                "sfp_socialprofiles", "sfp_tiktok_osint",
+                "sfp_whoisfreaks", "sfp_viewdns", "sfp_zetalytics", "sfp_securitytrails",             # domains it registered
+                "sfp_whoisology", "sfp_whoxy",
             ],
             exclude_flags=["errorprone"],
             max_threads=3,
             timeout_minutes=20,
-            tags=["email", "osint", "key-free"],
+            tags=["email", "osint"],
         ))
 
         self.register(ScanProfile(
             name="person-name",
             display_name="Person Name Intelligence",
             description=(
-                "Account, registry, and leak-mention lookups for a "
-                "person-name target. Key-free only. Coverage here is "
-                "genuinely thin compared to phone-number/email-address - "
-                "only 3 modules in the whole catalog watch HUMAN_NAME "
-                "without needing a key. For real people-search depth "
-                "(sociallinks, rocketreach, fullcontact, seon) those all "
-                "need paid/keyed accounts - use api-powered once "
-                "configured."
+                "Account, registry and leak-mention lookups for a person-name target. Only a handful of modules in the "
+                "whole catalog read a name directly and need no key, so the name's real yield comes from what they "
+                "find: the usernames checked across 500+ sites are looked up on GitHub, Keybase, Venmo and "
+                "Wikipedia, and the profiles found are followed. People-search modules (socialprofiles, "
+                "whoisfreaks, sociallinks and others) join automatically once their API key is saved on the Modules page."
             ),
             category=ProfileCategory.RECONNAISSANCE,
             include_modules=[
                 "sfp_accounts",   # checks the name as a username across 500+ sites
                 "sfp_arin",       # ARIN registry contact-information lookup
                 "sfp_wikileaks",  # search Wikileaks for mentions
+                # follow-on: the usernames and profile URLs found above
+                "sfp_github", "sfp_keybase", "sfp_venmo", "sfp_wikipediaedits", "sfp_hudsonrock",
+                "sfp_slideshare", "sfp_myspace",
+            ],
+            optional_modules=[
+                "sfp_socialprofiles", "sfp_tiktok_osint", "sfp_whoisfreaks", "sfp_sociallinks", "sfp_c99",
             ],
             exclude_flags=["errorprone"],
             max_threads=3,
             timeout_minutes=15,
-            tags=["name", "osint", "key-free"],
+            tags=["name", "osint"],
         ))
 
         self.register(ScanProfile(
@@ -436,6 +494,8 @@ class ProfileManager:
             ),
             category=ProfileCategory.DARKWEB,
             include_flags=["tor"],
+            # as.onionsearchengine.com no longer resolves (checked 2026-11-14)
+            exclude_modules=["sfp_onionsearchengine"],
             max_threads=2,
             tags=["darkweb", "tor", "deep-web"],
         ))
