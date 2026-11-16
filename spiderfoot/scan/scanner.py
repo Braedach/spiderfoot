@@ -223,7 +223,7 @@ class SpiderFootScanner():
             mode=str(self.__config.get('_scope_guard_mode', 'log')).lower(),
             asn_authorised=bool(self.__config.get('_scope_asn_authorised', False)),
             asn_max_addresses=int(self.__config.get('_scope_asn_max_addresses', 256)),
-            cdn_lookup=lambda ip: self.__target.isKnownCdnIP(ip, self.__cdnRanges),
+            cdn_lookup=lambda ip: self.__target.isKnownCdnIP(ip, self.__cdnRanges, self._cdnAsnLookup()),
             resolver=self._resolveForScope,
         )
         self.__target.scopePolicy = self.__scopePolicy
@@ -873,6 +873,13 @@ class SpiderFootScanner():
                     return False
         return legacy
 
+    def _cdnAsnLookup(self):
+        """Address -> origin ASN for the shared-edge ASN check, or None when switched off (_cdn_asn_check = False)."""
+        if not self.__config.get('_cdn_asn_check', True):
+            return None
+        from spiderfoot.cdn_ranges import cymruAsnLookup
+        return cymruAsnLookup
+
     def _resolveForScope(self, name: str) -> list:
         """Addresses a hostname resolves to now (used to verify names against an IP target)."""
         try:
@@ -930,7 +937,7 @@ class SpiderFootScanner():
 
         sharedIP = self._extractIPForSharedCheck(sfEvent.data)
         if sharedIP:
-            cdnProvider = self.__target.isKnownCdnIP(sharedIP, self.__cdnRanges)
+            cdnProvider = self.__target.isKnownCdnIP(sharedIP, self.__cdnRanges, self._cdnAsnLookup())
             if cdnProvider:
                 self.__sf.debug(
                     f"strict_scope: dropping {sfEvent.eventType} ({sfEvent.data}) for"

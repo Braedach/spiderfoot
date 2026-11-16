@@ -17,9 +17,12 @@ validation scans.
   The phone, email, name and dark-web scans: no active module produced output, so nothing changes for them.
 - Shared edge networks: Cloudflare, Fastly, CloudFront, GitHub Pages, Imperva and Bunny CDN (published lists, with offline
   fallbacks).
-- Not built: the ASN-based block for providers with no published range list (Akamai, Sucuri and similar), which needs its
-  numbers verified against a live lookup first; and `sfp_tool_*` batch re-checks (those modules only receive events that
-  passed the dispatch gate).
+- Built (rc.40): the ASN-based block for providers with no published range list (Akamai, Sucuri, Edgio/Limelight,
+  Edgecast, CDN77, and the Cloudflare, Fastly, Imperva and Bunny networks again by ASN). The origin ASN of a target's
+  resolved address comes from Team Cymru's DNS service; each number in `cdn_ranges.CDN_ASNS` was checked against it live
+  on 2026-11-16. Cloud platforms and bulk hosters are deliberately not listed. A failed lookup never marks an address
+  shared; `_cdn_asn_check = False` switches it off.
+- Not built: `sfp_tool_*` batch re-checks (those modules only receive events that passed the dispatch gate).
 
 
 ## Why

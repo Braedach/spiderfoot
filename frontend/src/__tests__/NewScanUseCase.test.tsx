@@ -203,4 +203,24 @@ describe('New Scan > By Use Case', () => {
     expect(create.mock.calls[0][0].subject_country).toBeUndefined();
     expect(create.mock.calls[0][0].subject_region).toBeUndefined();
   });
+
+  it('sends the subject label when one is typed, and nothing otherwise', async () => {
+    renderPage();
+    await screen.findByTestId('usecase-name');
+    fireEvent.change(targetInput(), { target: { value: 'Pat Example' } });
+    fireEvent.change(await screen.findByLabelText('Subject label'), { target: { value: '  pat  ' } });
+    fireEvent.click(screen.getByText('Launch Scan'));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(create.mock.calls[0][0].subject_label).toBe('pat');
+  });
+
+  it('does not send a subject label when the box is empty', async () => {
+    renderPage();
+    await screen.findByTestId('usecase-name');
+    fireEvent.change(targetInput(), { target: { value: 'Pat Example' } });
+    await screen.findByLabelText('Subject label');
+    fireEvent.click(screen.getByText('Launch Scan'));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(create.mock.calls[0][0].subject_label).toBeUndefined();
+  });
 });
