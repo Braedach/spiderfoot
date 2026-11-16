@@ -334,7 +334,7 @@ export default function NewScanPage() {
           {tab === 'profile' && (
             <div className="space-y-3 animate-fade-in">
               <p className="text-sm text-dark-400 mb-3">
-                Select a pre-configured scan profile. Each profile includes a curated set of modules for a specific purpose.
+                Select a pre-configured scan profile. Each profile includes a curated set of modules for a specific purpose. Keyed modules a profile can use join the scan automatically once their API key is saved on the Modules page.
               </p>
               {profiles.length === 0 ? (
                 <p className="text-sm text-dark-500 italic">No scan profiles available</p>
@@ -361,6 +361,16 @@ export default function NewScanPage() {
                           <p className="text-xs text-dark-400 mt-0.5">{p.description}</p>
                           <div className="flex items-center gap-2 mt-1.5">
                             <span className="badge bg-dark-700 text-dark-300 text-[10px] px-1.5 py-0">{p.module_count} modules</span>
+                            {(p.optional_total ?? 0) > 0 && (
+                              <span
+                                className="badge bg-dark-700/50 text-dark-400 text-[10px] px-1.5 py-0"
+                                title={p.optional_inactive?.length
+                                  ? `Join automatically when their API key is saved on the Modules page: ${p.optional_inactive.join(', ')}`
+                                  : 'All keyed modules for this profile are configured'}
+                              >
+                                {(p.optional_active?.length ?? 0)} of {p.optional_total} keyed modules active
+                              </span>
+                            )}
                             {p.category && (
                               <span className="badge bg-spider-900/30 text-spider-400 text-[10px] px-1.5 py-0">{p.category}</span>
                             )}
