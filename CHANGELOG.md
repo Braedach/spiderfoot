@@ -26,6 +26,7 @@ procedure are in [`deploy/README.md`](deploy/README.md).
   `sfp_tool_wappalyzer`, `sfp_tool_phoneinfoga`), so nothing selects them; each was checked against its real service.
 
 ### Added (rc.38)
+- **The email-address profile now includes `sfp_tool_user_scanner` and `sfp_tool_maigret`; the person-name profile includes `sfp_tool_maigret`.** Both are key-free and act only in a scan about a person.
 - **`sfp_tool_maigret`**: looks a username up on up to 5,900 sites and reports the profiles that exist and the details they publish.
 - **`sfp_tool_user_scanner`**: checks which of about 200 sites an email address is registered on, and the username a site
   attaches to it. Sites whose check could send the owner a notification are skipped unless asked for.

@@ -56,12 +56,18 @@ def test_no_module_is_dead_weight(catalog, profile_name):
     assert not dead, f"{profile_name}: these modules can never fire from a {SEEDS[profile_name]} target: {dead}"
 
 
+IDENTITY_TOOLS = {"sfp_tool_maigret", "sfp_tool_user_scanner"}
+
+
 @pytest.mark.parametrize("profile_name", sorted(SEEDS))
 def test_always_on_modules_are_key_free_and_safe(catalog, profile_name):
     p = get_profile_manager().get(profile_name)
     for m in p.include_modules:
         flags = _flags(catalog, m)
-        assert not flags & {"apikey", "invasive", "tool", "tor", "errorprone", "deprecated"}, (profile_name, m, flags)
+        banned = {"apikey", "invasive", "tool", "tor", "errorprone", "deprecated"}
+        if m in IDENTITY_TOOLS:   # key-free tools that act only in a scan about a person (person_targets_only)
+            banned -= {"tool"}
+        assert not flags & banned, (profile_name, m, flags)
 
 
 @pytest.mark.parametrize("profile_name", sorted(SEEDS))
