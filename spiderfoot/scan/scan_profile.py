@@ -457,6 +457,7 @@ class ProfileManager:
                 "sfp_phone",          # phonenumbers lib: carrier/region/timezone/validity
                 "sfp_countryname",    # country from phone/IP/etc.
                 "sfp_hudsonrock",     # Hudson Rock Cavalier: free infostealer-breach intel
+                "sfp_onionsearch",    # dark-web search engines for the number (through Tor; needs Settings > Tor on)
                 "sfp_searxng",        # web search for the number, through YOUR SearXNG (off until set up in Settings > Web Search)
                 # sfp_callername is not listed: callername.com is now a parked domain (checked 2026-11-14)
             ],
@@ -498,7 +499,7 @@ class ProfileManager:
                 # identity tools (in the active-scanner image; act only in a scan about a person)
                 "sfp_tool_user_scanner",  # which of ~200 sites the address is registered on
                 "sfp_tool_maigret",       # the usernames found, looked up on up to 5,900 sites
-                "sfp_ahmia", "sfp_torch",  # dark-web search for the address (through Tor; needs Settings > Tor on)
+                "sfp_ahmia", "sfp_torch", "sfp_onionsearch",  # dark-web search for the address (through Tor; needs Settings > Tor on)
                 "sfp_searxng",             # web search for the address, through YOUR SearXNG (off until set up in Settings > Web Search)
                 # not listed (checked 2026-11-14): sfp_trumail (its API now says Trumail joined Emailable),
                 # sfp_searchcode (API answers 404), sfp_twitter (profile pages need a login)
@@ -537,7 +538,7 @@ class ProfileManager:
                 "sfp_github", "sfp_keybase", "sfp_venmo", "sfp_wikipediaedits", "sfp_hudsonrock",
                 "sfp_slideshare", "sfp_myspace",
                 "sfp_tool_maigret",  # the usernames found, looked up on up to 5,900 sites (person scans only)
-                "sfp_ahmia", "sfp_torch",  # dark-web search for the name (through Tor; needs Settings > Tor on)
+                "sfp_ahmia", "sfp_torch", "sfp_onionsearch",  # dark-web search for the name (through Tor; needs Settings > Tor on)
                 "sfp_searxng",             # web search for the name, through YOUR SearXNG (off until set up in Settings > Web Search)
             ],
             optional_modules=[
