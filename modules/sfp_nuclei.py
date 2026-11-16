@@ -5,8 +5,10 @@ from __future__ import annotations
 Runs ProjectDiscovery's Nuclei scanner against discovered web endpoints
 and IP addresses, parsing template-based findings into SpiderFoot events.
 
-Nuclei must be installed on the system or available in the Docker image.
-Templates are auto-updated via `nuclei -ut` on first run.
+Nuclei must be installed on the system or available in the Docker image. In the SpiderFoot image the templates are a
+pinned copy in /tools/nuclei-templates, which the module passes to nuclei (nuclei looks in its home directory by
+default, found nothing there and exited with "no templates provided" on every run, which the module reported as
+"0 findings"). A host is scanned once, not once per discovered URL.
 
 Event flow:
   IN:  INTERNET_NAME, DOMAIN_NAME, IP_ADDRESS, LINKED_URL_INTERNAL
@@ -20,6 +22,7 @@ import os
 import re
 import subprocess
 import tempfile
+import urllib.parse
 from pathlib import Path
 
 from spiderfoot import SpiderFootEvent
@@ -58,16 +61,21 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
 
     opts = {
         'nuclei_path': 'nuclei',
-        'severity_filter': 'info,low,medium,high,critical',
+        'severity_filter': 'low,medium,high,critical',
         'template_tags': '',
-        'template_exclude_tags': 'dos,fuzz',
+        'baseline_tags': 'ssl',
+        'template_exclude_tags': 'dos,fuzz,intrusive',
+        'templates_dir': '',
         'custom_templates_dir': '',
+        'automatic_scan': True,
+        'use_interactsh': False,
         'rate_limit': 50,
         'bulk_size': 25,
         'concurrency': 10,
         'timeout': 10,
         'max_scan_duration': 600,
-        'auto_update_templates': True,
+        'max_targets': 20,
+        'auto_update_templates': False,
         'scan_urls': True,
         'scan_ips': True,
         'include_info_findings': False,
@@ -75,17 +83,22 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
 
     optdescs = {
         'nuclei_path': "Path to the nuclei binary (default: 'nuclei' assumes it's in PATH).",
-        'severity_filter': "Comma-separated severity levels to include (info,low,medium,high,critical).",
-        'template_tags': "Only run templates with these tags (comma-separated, empty = all).",
+        'severity_filter': "Comma-separated severity levels to include (info,low,medium,high,critical). Informational templates are mostly technology detection, which httpx already does.",
+        'template_tags': "Run ONLY templates with these tags (comma-separated). Empty = the baseline pass plus the automatic pass.",
+        'baseline_tags': "Tags of a cheap first pass run on every target (default 'ssl': expired certificates, weak ciphers, deprecated TLS, a few seconds). Empty = no baseline pass.",
         'template_exclude_tags': "Exclude templates with these tags (comma-separated).",
-        'custom_templates_dir': "Path to a custom templates directory to scan (in addition to defaults).",
+        'templates_dir': "Directory holding the nuclei templates. Empty uses the copy pinned in the image (/tools/nuclei-templates) when it exists.",
+        'custom_templates_dir': "Path to a custom templates directory to run INSTEAD of the standard templates.",
+        'automatic_scan': "A second pass that picks templates from the technologies nuclei detects on each target (fast and relevant). If both passes are off, every template that matches the severity settings runs (about 7,600, several minutes per host).",
+        'use_interactsh': "Allow templates that need an out-of-band callback server. Off by default: it contacts third-party servers.",
         'rate_limit': "Max requests per second sent by Nuclei.",
         'bulk_size': "Max hosts to scan per Nuclei invocation.",
         'concurrency': "Number of templates to run concurrently.",
         'timeout': "HTTP timeout per request in seconds.",
-        'max_scan_duration': "Max total time in seconds for a single Nuclei invocation.",
-        'auto_update_templates': "Automatically update Nuclei templates on first use.",
-        'scan_urls': "Scan discovered URLs in addition to hostnames.",
+        'max_scan_duration': "Max total time in seconds for a single Nuclei invocation. Findings found before the limit are kept.",
+        'max_targets': "Maximum number of separate nuclei runs (hosts, addresses and web origins) per scan.",
+        'auto_update_templates': "Download newer templates when the scan starts. Off by default: the image carries a pinned, reviewed copy.",
+        'scan_urls': "Scan the web origins (scheme, host, port) of discovered URLs that are not already covered. Each origin once, not each URL.",
         'scan_ips': "Scan discovered IP addresses.",
         'include_info_findings': "Include informational-severity findings (can be noisy).",
     }
@@ -102,6 +115,8 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
         self.results = self.tempStorage()
         self._nuclei_checked = False
         self._nuclei_available = False
+        self._runs = 0
+        self._cap_reported = False
 
     def watchedEvents(self):
         """Events consumed by this module."""
@@ -173,6 +188,97 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
         except Exception as e:
             self.debug(f"Template update failed (non-fatal): {e}")
 
+    PINNED_TEMPLATES = "/tools/nuclei-templates"
+    _ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+    def _templates_dir(self) -> str:
+        """The templates directory to hand to nuclei ('' when none is known: nuclei then looks in its home)."""
+        configured = str(self.opts.get('templates_dir') or '').strip()
+        if configured:
+            return configured
+        return self.PINNED_TEMPLATES if os.path.isdir(self.PINNED_TEMPLATES) else ''
+
+    def _build_cmd(self, targets_file: str, selection: list[str] | None = None) -> list[str]:
+        """The nuclei command line for a file of targets and one template selection (see _selections)."""
+        cmd = [
+            self.opts.get('nuclei_path', 'nuclei'),
+            '-l', targets_file,
+            '-jsonl',                   # JSON Lines output
+            '-silent',                  # Suppress banner
+            '-nc',                      # No color
+            '-duc',                     # No update check: the templates are pinned, and a scan must not fetch code
+            '-rl', str(self.opts.get('rate_limit', 50)),
+            '-bs', str(self.opts.get('bulk_size', 25)),
+            '-c', str(self.opts.get('concurrency', 10)),
+            '-timeout', str(self.opts.get('timeout', 10)),
+        ]
+
+        # Where the templates are (-t alone does not tell the automatic mode, which also reads them)
+        templates_dir = self._templates_dir()
+        if templates_dir:
+            cmd.extend(['-ud', templates_dir])
+
+        # Out-of-band templates call a third-party server; off unless asked for
+        if not self.opts.get('use_interactsh', False):
+            cmd.append('-ni')
+
+        severity = self.opts.get('severity_filter', 'low,medium,high,critical')
+        if severity:
+            cmd.extend(['-severity', severity])
+
+        exclude_tags = self.opts.get('template_exclude_tags', 'dos,fuzz,intrusive')
+        if exclude_tags:
+            cmd.extend(['-etags', exclude_tags])
+
+        custom_dir = self.opts.get('custom_templates_dir', '')
+        if custom_dir and os.path.isdir(custom_dir):
+            cmd.extend(['-t', custom_dir])
+
+        return cmd + list(selection or [])
+
+    def _selections(self) -> list[list[str]]:
+        """The template selections to run on every target, one nuclei run each.
+
+        nuclei's automatic mode (-as) cannot be combined with a tag list in one run (tried: it finds nothing), and a
+        full run is about 7,600 templates. So: a cheap baseline pass on a few tags (ssl by default, 4 s on the test
+        host, found an expired certificate and weak ciphers), then the automatic pass, which picks templates from
+        the technologies found. A tag list set by the user replaces both.
+        """
+        custom_dir = self.opts.get('custom_templates_dir', '')
+        if custom_dir and os.path.isdir(custom_dir):
+            return [[]]                                   # -t is already in the command: run those templates
+        tags = str(self.opts.get('template_tags', '') or '').strip()
+        if tags:
+            return [['-tags', tags]]
+        passes = []
+        baseline = str(self.opts.get('baseline_tags', '') or '').strip()
+        if baseline:
+            passes.append(['-tags', baseline])
+        if self.opts.get('automatic_scan', True):
+            passes.append(['-as'])
+        return passes or [[]]
+
+    def _parse_jsonl(self, text: str) -> list[dict]:
+        """Findings from nuclei's JSON Lines output."""
+        findings = []
+        for line in (text or "").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                findings.append(json.loads(line))
+            except json.JSONDecodeError:
+                self.debug(f"Skipping non-JSON line: {line[:100]}")
+        return findings
+
+    def _fatal_message(self, stderr: str) -> str | None:
+        """nuclei's own [FTL] line, if it stopped because it could not run at all."""
+        for line in (stderr or "").splitlines():
+            line = self._ANSI.sub("", line).strip()
+            if "[FTL]" in line:
+                return line[:300]
+        return None
+
     def _run_nuclei(self, targets: list[str]) -> list[dict]:
         """Run Nuclei against a list of targets.
 
@@ -182,8 +288,6 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
         Returns:
             List of parsed finding dicts from Nuclei JSON output.
         """
-        nuclei_path = self.opts.get('nuclei_path', 'nuclei')
-
         # Write targets to temp file
         with tempfile.NamedTemporaryFile(
             mode='w', suffix='.txt', delete=False, prefix='sf_nuclei_'
@@ -192,67 +296,41 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
                 tf.write(t + '\n')
             targets_file = tf.name
 
-        # Build command
-        cmd = [
-            nuclei_path,
-            '-l', targets_file,
-            '-jsonl',                   # JSON Lines output
-            '-silent',                  # Suppress banner
-            '-nc',                      # No color
-            '-rl', str(self.opts.get('rate_limit', 50)),
-            '-bs', str(self.opts.get('bulk_size', 25)),
-            '-c', str(self.opts.get('concurrency', 10)),
-            '-timeout', str(self.opts.get('timeout', 10)),
-        ]
-
-        # Severity filter
-        severity = self.opts.get('severity_filter', 'info,low,medium,high,critical')
-        if severity:
-            cmd.extend(['-severity', severity])
-
-        # Tag filters
-        tags = self.opts.get('template_tags', '')
-        if tags:
-            cmd.extend(['-tags', tags])
-
-        exclude_tags = self.opts.get('template_exclude_tags', 'dos,fuzz')
-        if exclude_tags:
-            cmd.extend(['-etags', exclude_tags])
-
-        # Custom templates
-        custom_dir = self.opts.get('custom_templates_dir', '')
-        if custom_dir and os.path.isdir(custom_dir):
-            cmd.extend(['-t', custom_dir])
-
-        findings = []
+        findings: list[dict] = []
+        seen: set[tuple] = set()
         max_duration = self.opts.get('max_scan_duration', 600)
 
         try:
-            self.info(f"Running Nuclei against {len(targets)} target(s)...")
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=max_duration,
-            )
-
-            # Parse JSON Lines output
-            for line in proc.stdout.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
+            for selection in self._selections():
+                if self.errorState or self.checkForStop():
+                    break
+                cmd = self._build_cmd(targets_file, selection)
+                label = " ".join(selection) or "all templates"
+                self.info(f"Running Nuclei ({label}) against {len(targets)} target(s)...")
                 try:
-                    finding = json.loads(line)
-                    findings.append(finding)
-                except json.JSONDecodeError:
-                    self.debug(f"Skipping non-JSON line: {line[:100]}")
+                    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=max_duration)
+                    found = self._parse_jsonl(proc.stdout)
 
-            if proc.returncode != 0 and not findings:
-                stderr_snippet = (proc.stderr or "")[:500]
-                self.debug(f"Nuclei stderr: {stderr_snippet}")
+                    if proc.returncode != 0 and not found:
+                        fatal = self._fatal_message(proc.stderr)
+                        if fatal:
+                            # Every later run would fail the same way, and reporting "0 findings" hid it for a
+                            # whole stack
+                            self.error(f"Nuclei could not run: {fatal}")
+                            self.errorState = True
+                        else:
+                            self.debug(f"Nuclei stderr: {(proc.stderr or '')[:500]}")
+                except subprocess.TimeoutExpired as e:
+                    partial = e.stdout.decode("utf-8", "replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
+                    found = self._parse_jsonl(partial)
+                    self.error(f"Nuclei scan ({label}) timed out after {max_duration}s; keeping the {len(found)} "
+                               "finding(s) found before the limit")
 
-        except subprocess.TimeoutExpired:
-            self.error(f"Nuclei scan timed out after {max_duration}s")
+                for f in found:
+                    key = (f.get("template-id", f.get("templateID")), f.get("matched-at", f.get("host")), f.get("matcher-name"))
+                    if key not in seen:
+                        seen.add(key)
+                        findings.append(f)
         except Exception as e:
             self.error(f"Nuclei execution failed: {e}")
         finally:
@@ -263,6 +341,39 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
 
         self.info(f"Nuclei returned {len(findings)} finding(s)")
         return findings
+
+    @staticmethod
+    def _origin(url: str) -> str | None:
+        """scheme://host[:port] of an http(s) URL, the default port left out; None for anything else."""
+        try:
+            parts = urllib.parse.urlsplit(url)
+            port = parts.port
+        except ValueError:
+            return None
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            return None
+        host = parts.hostname.lower()
+        if ":" in host:
+            host = f"[{host}]"
+        default = 443 if parts.scheme == "https" else 80
+        return f"{parts.scheme}://{host}" if port in (None, default) else f"{parts.scheme}://{host}:{port}"
+
+    def _target_for(self, event_name: str, data: str) -> tuple[str | None, str]:
+        """(what to give nuclei, the key that stands for "already scanned") for an event.
+
+        A host name or address is scanned as it is and also covers its http and https origins; a discovered URL is
+        reduced to its origin and skipped when that origin is already covered.
+        """
+        if event_name == "LINKED_URL_INTERNAL":
+            origin = self._origin(data)
+            return (origin, origin) if origin else (None, "")
+        host = data.strip().lower()
+        if not host:
+            return None, ""
+        # The host run reaches both schemes on the default ports: record them so URLs on them are not scanned again
+        self.results[f"http://{host}"] = True
+        self.results[f"https://{host}"] = True
+        return host, f"host:{host}"
 
     def _severity_to_event_type(self, severity: str) -> str:
         """Map Nuclei severity to SpiderFoot event type."""
@@ -354,33 +465,32 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
             self.errorState = True
             return
 
-        # Dedup
-        if eventData in self.results:
-            self.debug(f"Skipping {eventData}, already scanned.")
+        # One run per host or web origin. Running the full template set for every discovered URL turned a scan of a
+        # small site into thousands of multi-minute runs; a host is probed on both schemes by a single run.
+        target, key = self._target_for(eventName, eventData)
+        if not target:
             return
-        self.results[eventData] = True
+        if key in self.results:
+            self.debug(f"Skipping {eventData}, already covered by an earlier run.")
+            return
+        self.results[key] = True
 
-        # Skip info-only if not wanted
-        if not self.opts.get('include_info_findings', False):
-            pass  # Filtering happens in severity_filter
+        max_targets = int(self.opts.get('max_targets', 20) or 0)
+        if max_targets and self._runs >= max_targets:
+            if not self._cap_reported:
+                self._cap_reported = True
+                self.info(f"Reached the limit of {max_targets} nuclei runs for this scan; not scanning more targets.")
+            return
 
-        # Determine target format
-        target = eventData
-        if eventName in ("INTERNET_NAME", "DOMAIN_NAME"):
-            # Scan as hostname — Nuclei will probe HTTP/HTTPS
-            target = eventData
-        elif eventName == "IP_ADDRESS":
-            if not self.opts.get('scan_ips', True):
-                return
-            target = eventData
-        elif eventName == "LINKED_URL_INTERNAL":
-            if not self.opts.get('scan_urls', True):
-                return
-            target = eventData
+        if eventName == "IP_ADDRESS" and not self.opts.get('scan_ips', True):
+            return
+        if eventName == "LINKED_URL_INTERNAL" and not self.opts.get('scan_urls', True):
+            return
 
         if self.checkForStop():
             return
 
+        self._runs += 1
         # Run Nuclei
         findings = self._run_nuclei([target])
 

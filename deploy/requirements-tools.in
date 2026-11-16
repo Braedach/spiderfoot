@@ -11,3 +11,11 @@ snallygaster
 wafw00f
 arjun
 sslyze
+#
+# Identity tools, added 2026-11-14 (modules sfp_tool_maigret and sfp_tool_user_scanner). Pinned exactly: both are fast-moving
+# projects (user-scanner released every one to two weeks), so a newer version is taken deliberately, not by a rebuild.
+#   maigret      - username search on ~5,900 sites (MIT; run with --no-autoupdate --no-recursion, never --ai).
+#   user-scanner - which sites an email address is registered on (MIT; its update check and prompts are switched off by the module).
+# The newest version at least 14 days old: user-scanner 1.5.2.5 was released 2026-11-03.
+maigret==0.6.6
+user-scanner==1.5.2.3

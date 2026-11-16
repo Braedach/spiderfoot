@@ -27,9 +27,9 @@ class sfp_trumail(SpiderFootAsyncPlugin):
 
     meta = {
         'name': "Trumail",
-        'summary': "Check whether an email is disposable",
-        'flags': [],
-        'useCases': ["Footprint", "Investigate", "Passive"],
+        'summary': "Deprecated: Trumail joined Emailable and its API answers with a notice. Check whether an email is disposable",
+        'flags': ["deprecated"],
+        'useCases': [],
         'categories': ["Reputation Systems"],
         'dataSource': {
             'website': "https://trumail.io/",

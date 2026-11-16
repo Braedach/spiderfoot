@@ -180,11 +180,12 @@ class sfp_subfinder(SpiderFootAsyncPlugin):
 
         # Only process domains, not other event types
         if event.eventType == "ROOT":
-            # Extract domain from scan target
-            target = self.sf.targetValue
-            if not target:
+            # The scan target, when it is a host name. (This used self.sf.targetValue, which does not exist, so the
+            # module crashed on the first event of every scan; and it would have run on any target type.)
+            target = self.getTarget()
+            if target.targetType not in ("INTERNET_NAME", "DOMAIN_NAME") or not target.targetValue:
                 return
-            data = target
+            data = target.targetValue
 
         if data in self.results:
             self.debug(f"Skipping already-enumerated domain: {data}")

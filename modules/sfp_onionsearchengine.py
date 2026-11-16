@@ -28,9 +28,9 @@ class sfp_onionsearchengine(SpiderFootAsyncPlugin):
 
     meta = {
         'name': "Onionsearchengine.com",
-        'summary': "Search Tor onionsearchengine.com for mentions of the target domain.",
-        'flags': ["tor"],
-        'useCases': ["Footprint", "Investigate"],
+        'summary': "Deprecated: onionsearchengine.com no longer resolves. Search Tor onionsearchengine.com for mentions of the target domain.",
+        'flags': ["tor", "deprecated"],
+        'useCases': [],
         'categories': ["Search Engines"],
         'dataSource': {
             'website': "https://as.onionsearchengine.com",

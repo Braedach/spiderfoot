@@ -30,9 +30,9 @@ class sfp_threatminer(SpiderFootAsyncPlugin):
 
     meta = {
         'name': "ThreatMiner",
-        'summary': "Obtain information from ThreatMiner's database for passive DNS and threat intelligence.",
-        'flags': [],
-        'useCases': ["Footprint", "Investigate", "Passive"],
+        'summary': "Deprecated: its server has been unreachable (Cloudflare 522) on every try. Obtain information from ThreatMiner's database for passive DNS and threat intelligence.",
+        'flags': ["deprecated"],
+        'useCases': [],
         'categories': ["Search Engines"],
         'dataSource': {
             'website': "https://www.threatminer.org/",

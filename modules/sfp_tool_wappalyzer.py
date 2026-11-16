@@ -25,9 +25,9 @@ class sfp_tool_wappalyzer(SpiderFootAsyncPlugin):
 
     meta = {
         "name": "Tool - Wappalyzer (API)",
-        "summary": "Wappalyzer identifies technologies on websites using the official API.",
-        "flags": ["tool", "apikey"],
-        "useCases": ["Footprint", "Investigate"],
+        "summary": "Deprecated: the project was discontinued and the tool is not in the image (httpx detects technologies). Wappalyzer identifies technologies on websites using the official API.",
+        "flags": ["tool", "apikey", "deprecated"],
+        "useCases": [],
         "categories": ["Content Analysis"],
         "labels": ["tool", "apikey"],
         "toolDetails": {

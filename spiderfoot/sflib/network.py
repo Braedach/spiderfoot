@@ -167,6 +167,9 @@ def parseCert(rawcert: str, fqdn: str | None = None, expiringdays: int = 30) -> 
         certhosts.extend(ret['altnames'])
     except Exception as e:
         log.debug("Failed to extract CommonName from cert: %s", e)
+    # The names the certificate is valid for. sfp_sslcert reports these with a mismatch, and read a key that was
+    # never set, so it crashed on every certificate that did not match the host it was served for.
+    ret['hosts'] = certhosts
     # Check for mismatch
     if fqdn and ret['issued']:
         if fqdn not in certhosts:

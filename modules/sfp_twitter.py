@@ -25,9 +25,9 @@ class sfp_twitter(SpiderFootAsyncPlugin):
 
     meta = {
         'name': "Twitter",
-        'summary': "Gather name and location from Twitter profiles.",
-        'flags': [],
-        'useCases': ["Footprint", "Investigate", "Passive"],
+        'summary': "Deprecated: profile pages need a login, so there is nothing to read. Gather name and location from Twitter profiles.",
+        'flags': ["deprecated"],
+        'useCases': [],
         'categories': ["Social Media"],
         'dataSource': {
             'website': "https://twitter.com/",

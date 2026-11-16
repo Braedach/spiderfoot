@@ -111,14 +111,15 @@ class sfp_cloudfront(SpiderFootAsyncPlugin):
             self.debug(f"No HTTP headers received from {domain}")
             return False
 
-        headers = res["headers"]
+        # HTTP header names are case-insensitive: look them up that way. headers.get(header) with a differently
+        # cased name returned None and crashed the module (and, until the worker was changed, switched it off).
+        headers = {str(k).lower(): v for k, v in res["headers"].items()}
 
         # Check for CloudFront specific headers
         for header in self.CLOUDFRONT_HEADERS:
-            if header.lower() in [h.lower() for h in headers.keys()]:
-                value = headers.get(header)
-                if "cloudfront" in value.lower():
-                    return True
+            value = headers.get(header.lower())
+            if value and "cloudfront" in str(value).lower():
+                return True
 
         return False
 
