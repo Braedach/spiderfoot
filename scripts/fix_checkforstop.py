@@ -29,7 +29,6 @@ TARGETS = [
     ("sfp_hybrid_analysis.py", "for file_hash in hashes:", 8, "break"),
     ("sfp_arin.py", "for p in ref:", 24, "break"),  # first loop at deeper indent
     ("sfp_github.py", "for item in ret['items']:", 12, "break"),  # both loops
-    ("sfp_onioncity.py", "for link in darknet_links:", 8, "return"),
 ]
 
 

@@ -44,7 +44,7 @@ class sfp_wificafespots(SpiderFootAsyncPlugin):
         self.debug(f"[setup] Options: {self.opts}")
         # Option validation
         if not self.opts.get("search_term") or not str(self.opts.get("search_term")).strip():
-            self.error("[setup] search_term is required.")
+            self.info("Not configured: this module searches for a term you supply and has none set, so it is skipped.")
             self.errorState = True
 
             return
