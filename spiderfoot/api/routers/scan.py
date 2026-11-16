@@ -132,7 +132,22 @@ def _profile_to_dict(p, all_modules: dict, configured: set[str] | None = None) -
         "tags": p.tags,
         "max_threads": p.max_threads,
         "timeout_minutes": p.timeout_minutes,
+        "disable_expansion": getattr(p, "disable_expansion", False),
     }
+
+
+def _with_module_option_overrides(sf_config: dict, overrides: dict) -> dict:
+    """A copy of the scan configuration with per-module option values applied (the profile's settings).
+
+    Only options the module actually has are set; unknown modules are ignored.
+    """
+    import copy
+    modules_cfg = copy.deepcopy(sf_config.get("__modules__") or {})
+    for mod_name, values in overrides.items():
+        cfg = modules_cfg.get(mod_name)
+        if isinstance(cfg, dict):
+            cfg.setdefault("opts", {}).update(values)
+    return {**sf_config, "__modules__": modules_cfg}
 
 
 # Modules never picked automatically: they are known to give unreliable results or are retired.
@@ -183,6 +198,28 @@ def list_scan_profiles(api_key: str = api_key_dep):
     except Exception as e:
         log.warning("Failed to load scan profiles: %s", e)
         return {"profiles": [], "total": 0}
+
+
+@router.get("/search-types", summary="The searches offered on the New Scan page, each with its profile")
+def list_search_types(api_key: str = api_key_dep):
+    """Domain, IP address, email address, phone number, person name and ASN, each mapped to the profile it runs.
+
+    ``target_types`` are the SpiderFoot target types a search accepts; ``profile_info`` is what a scan started now
+    would run (including the keyed modules whose credentials are saved).
+    """
+    try:
+        from spiderfoot.scan.scan_profile import SEARCH_TYPES, get_profile_manager
+        pm = get_profile_manager()
+        all_modules = _get_all_modules_dict()
+        configured = _configured_modules()
+        out = []
+        for st in SEARCH_TYPES:
+            p = pm.get(st["profile"])
+            out.append({**st, "profile_info": _profile_to_dict(p, all_modules, configured) if p else None})
+        return {"search_types": out, "total": len(out)}
+    except Exception as e:
+        log.warning("Failed to load search types: %s", e)
+        return {"search_types": [], "total": 0}
 
 
 @router.get("/scan-profiles/{profile_name}", summary="Get a specific scan profile")
@@ -843,8 +880,12 @@ async def create_scan(
                     )
                 all_mods = _get_all_modules_dict()
                 modules = profile.resolve_modules(all_mods, modules_with_credentials(sf_config.get("__modules__")))
-                # A profile is more than a module list: apply its settings to this scan only.
+                # A profile is more than a module list: apply its settings to this scan only. Its per-module options
+                # (and, for the IP and ASN profiles, the switching off of neighbour expansion) used to be ignored here.
                 sf_config = {**sf_config, **(profile.option_overrides or {})}
+                module_overrides = profile.module_option_overrides(all_mods, modules)
+                if module_overrides:
+                    sf_config = _with_module_option_overrides(sf_config, module_overrides)
                 if profile.max_threads:
                     sf_config["_maxthreads"] = int(profile.max_threads)
                 selection = f"Profile: {profile.display_name}"

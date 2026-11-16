@@ -321,6 +321,8 @@ export const scanApi = {
 
   profiles: (signal?: AbortSignal) =>
     api.get<{ profiles: ScanProfile[]; total: number }>('/api/scan-profiles', { signal }).then((r) => r.data),
+  searchTypes: (signal?: AbortSignal) =>
+    api.get<{ search_types: SearchType[]; total: number }>('/api/search-types', { signal }).then((r) => r.data),
 
   profile: (name: string, signal?: AbortSignal) =>
     api.get<ScanProfile>(`/api/scan-profiles/${name}`, { signal }).then((r) => r.data),
@@ -340,6 +342,18 @@ export interface ScanProfile {
   optional_total?: number;
   optional_active?: string[];
   optional_inactive?: string[];
+  /** Neighbour expansion (netblocks, subnets) is switched off for this profile. */
+  disable_expansion?: boolean;
+}
+
+/** One search offered on the New Scan page, with the profile it runs and what that profile would run now. */
+export interface SearchType {
+  key: 'domain' | 'ip' | 'email' | 'phone' | 'name' | 'asn';
+  label: string;
+  profile: string;
+  example: string;
+  target_types: string[];
+  profile_info: ScanProfile | null;
 }
 
 // ── Module / Data API ─────────────────────────────────────────

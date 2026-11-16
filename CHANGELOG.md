@@ -8,6 +8,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Fork-specific changes since 6.1.0, shipped as release candidates. The per-build record and the build and deploy
 procedure are in [`deploy/README.md`](deploy/README.md).
 
+### Changed (rc.40)
+- **New Scan > By Use Case is by what you are searching for.** It offers Domain, IP address, Email address, Phone number, Person name and ASN (plus All Modules), each running the profile built for that kind of target. The page recognises the typed target and selects the matching search, warns when the chosen search does not fit ("The target looks like an Email address, but Domain is selected"), and shows each search's module count, the keyed modules still needing a key, and an example. The old Quick Scan, Footprint, Investigate and Passive Only use cases ignored the target type (Quick Scan hard-coded active modules, including port scanning and the crawler, for any target); the same scans are the `quick-recon`, `full-footprint`, `investigate` and `passive-only` profiles on the By Profile tab. New endpoint `GET /api/search-types`.
+- **New profiles `ip-address` (IP Address Intelligence) and `asn` (ASN Intelligence).** The IP profile covers ownership, reputation, passive DNS, open ports and services, TLS and web fingerprints and known weaknesses for one address, with the active tools held to the address by the scope guard; keyed modules (Shodan, GreyNoise, AbuseIPDB, VirusTotal and others) join once a key is saved. Both set `disable_expansion`: the options that expand a scan to neighbouring netblocks and subnets (`netblocklookup`, `subnetlookup`, `netblockscan`, `scan_netblocks`) are switched off in every selected module. An IP scan under Full Footprint had followed 947 netblock owners and harvested the contact details of 82 unrelated people. The ASN profile is registry lookups only (`sfp_ripe`, `sfp_whois`, ...): nothing active, and no ASN has been tested live.
+
+### Fixed (rc.40)
+- **A scan profile's per-module options were ignored.** The scan router applied a profile's global overrides and thread limit but never its `module_options`. They are applied now, together with `disable_expansion`.
+
 ### Fixed (rc.39)
 - **`dnspython` 2.9.2** in both locks (high severity, GHSA-vvf4-9x63-8xvv; the rc.38 candidate failed the scan gate on 2.9.0 and 2.9.1, so it was never published and its tag has no release or images; rc.39 carries everything listed under rc.38). A named exception to the 14-day cool-down; nothing else moved.
 

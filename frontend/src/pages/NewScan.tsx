@@ -1,13 +1,14 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import {
-  dataApi, scanApi, type Module, type ScanCreateRequest, type ScanProfile,
+  dataApi, scanApi, type Module, type ScanCreateRequest, type ScanProfile, type SearchType,
 } from '../lib/api';
+import { detectSearchType, SEARCH_LABELS, type SearchKey } from '../lib/searchTypes';
 import type { StealthLevelName } from '../lib/api';
 import {
-  Radar, Lock, Unlock, Zap,
+  Radar, Lock, Unlock, Zap, Globe, Server, Mail, Phone, User, Network, AlertTriangle,
   ShieldCheck, FileText, Loader2, Layers, Shield, Info,
 } from 'lucide-react';
 import { PageHeader, Tabs, SearchInput, Toast, InfoNote, useDebounce, type ToastType } from '../components/ui';
@@ -15,30 +16,22 @@ import { moduleCredentialStatus } from '../lib/settingsMeta';
 
 type TabKey = 'usecase' | 'profile' | 'data' | 'module';
 
-const USE_CASES = [
-  { key: 'all', label: 'All Modules', desc: 'Every reliable module, including active tools and dark-web searches (error-prone and retired modules are left out)' },
-  { key: 'quick', label: 'Quick Scan', desc: 'Fast scan with essential passive modules (~20 modules)' },
-  { key: 'footprint', label: 'Footprint', desc: 'Discover the target\'s full digital footprint' },
-  { key: 'investigate', label: 'Investigate', desc: 'Deep dive into a specific target' },
-  { key: 'passive', label: 'Passive Only', desc: 'Only passive/non-intrusive modules' },
-];
+/* By Use Case: what you are searching for. Each search runs the profile built for that kind of target (the server
+ * decides which, see GET /api/search-types); "All Modules" is every reliable module. The old Quick Scan, Footprint,
+ * Investigate and Passive use cases are profiles now (quick-recon, full-footprint, investigate, passive-only) and live
+ * on the By Profile tab: they ignored what was being searched for. */
+const ALL_MODULES_DESC =
+  'Every reliable module, including active tools and dark-web searches (error-prone and retired modules are left out)';
 
-/* Curated set of fast, reliable passive modules for quick scans.
- * sfp_dnstxt, sfp_httpheaders and sfp_geoinfo were removed/renamed
- * upstream at some point and silently dropped out of every "Quick Scan"
- * run without anyone noticing (2026-10-25) — dnstxt -> sfp_dnsraw (DNS
- * Raw Records, which covers TXT among other record types), httpheaders
- * -> sfp_webserver (Web Server Identifier, reads headers other modules
- * already fetched), geoinfo -> dropped, sfp_ipinfo below already covers
- * geo data. */
-const QUICK_SCAN_MODULES = [
-  'sfp_dnsresolve', 'sfp_dnsbrute', 'sfp_dnscommonsrv', 'sfp_dnsraw',
-  'sfp_hackertarget', 'sfp_ipinfo', 'sfp_whois',
-  'sfp_sslcert', 'sfp_webframework', 'sfp_webserver', 'sfp_spider',
-  'sfp_crossref', 'sfp_pageinfo', 'sfp_similar', 'sfp_names',
-  'sfp_email', 'sfp_portscan_tcp', 'sfp_socialprofiles',
-  'sfp__stor_db',
-];
+const SEARCH_ICONS: Record<SearchKey, typeof Globe> = {
+  domain: Globe, ip: Server, email: Mail, phone: Phone, name: User, asn: Network,
+};
+
+/** First sentence of a profile description, for the card. */
+function firstSentence(text: string): string {
+  const m = text.match(/^.*?[.!?](\s|$)/);
+  return (m ? m[0] : text).trim();
+}
 
 export default function NewScanPage() {
   useDocumentTitle('New Scan');
@@ -47,6 +40,7 @@ export default function NewScanPage() {
   const [target, setTarget] = useState('');
   const [scanName, setScanName] = useState('');
   const [useCase, setUseCase] = useState('all');
+  const [userPickedUseCase, setUserPickedUseCase] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<string | null>(null);
   const [selectedModules, setSelectedModules] = useState<Set<string>>(new Set());
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
@@ -69,6 +63,18 @@ export default function NewScanPage() {
   });
 
   const profiles: ScanProfile[] = profilesData?.profiles ?? [];
+  const { data: searchTypesData } = useQuery({
+    queryKey: ['search-types'],
+    queryFn: ({ signal }) => scanApi.searchTypes(signal),
+  });
+  const searchTypes: SearchType[] = searchTypesData?.search_types ?? [];
+  const selectedSearch = searchTypes.find((st) => st.key === useCase) ?? null;
+
+  /* What the typed target looks like. Until the user picks a search themselves, follow it. */
+  const detected = useMemo(() => detectSearchType(target), [target]);
+  useEffect(() => {
+    if (!userPickedUseCase && detected) setUseCase(detected);
+  }, [detected, userPickedUseCase]);
 
   /* Which modules can ever fire for this target, per its detected type —
    * computed server-side from the same watches/produces graph the scan
@@ -144,17 +150,10 @@ export default function NewScanPage() {
     }
     if (tab === 'usecase') {
       if (useCase === 'all') return [];
-      if (useCase === 'quick') return QUICK_SCAN_MODULES;
-      const ucLower = useCase.toLowerCase();
-      return modules
-        .filter((m) => {
-          const groups = Array.isArray(m.group) ? m.group : [];
-          return groups.some((g) => g.toLowerCase() === ucLower);
-        })
-        .map((m) => m.name);
+      return selectedSearch?.profile_info?.modules ?? [];
     }
     return [];
-  }, [tab, selectedModules, selectedProfile, profiles, selectedTypes, useCase, modules]);
+  }, [tab, selectedModules, selectedProfile, profiles, selectedTypes, useCase, modules, selectedSearch]);
 
   /* Create scan */
   const createMut = useMutation({
@@ -183,12 +182,10 @@ export default function NewScanPage() {
       payload.profile = selectedProfile;
     } else if (tab === 'data' && selectedTypes.size > 0) {
       payload.type_filter = [...selectedTypes];
-    } else if (tab === 'usecase' && useCase === 'quick') {
-      payload.modules = QUICK_SCAN_MODULES;
-      payload.selection = 'Use case: Quick Scan';
-    } else if (tab === 'usecase' && useCase !== 'all') {
-      payload.modules = effectiveModules;
-      payload.selection = `Use case: ${USE_CASES.find((u) => u.key === useCase)?.label ?? useCase}`;
+    } else if (tab === 'usecase' && selectedSearch) {
+      // The server runs the profile built for this kind of search, with its settings (for an IP address or an ASN:
+      // no expansion to neighbouring netblocks).
+      payload.profile = selectedSearch.profile;
     }
     // When useCase === 'all' or no selection, send no modules/type_filter → server uses all modules
     if (stealthLevel !== 'none') {
@@ -287,6 +284,8 @@ export default function NewScanPage() {
         <div className="text-sm text-dark-400">
           {tab === 'usecase' && useCase === 'all' ? (
             <span>All available modules will be used</span>
+          ) : tab === 'usecase' && selectedSearch ? (
+            <span>{selectedSearch.label} search: {selectedSearch.profile_info?.display_name ?? selectedSearch.profile} ({effectiveModules.length} modules)</span>
           ) : tab === 'profile' && selectedProfile ? (
             <span>Profile: {profiles.find((p) => p.name === selectedProfile)?.display_name ?? selectedProfile} ({effectiveModules.length} modules)</span>
           ) : (
@@ -387,32 +386,93 @@ export default function NewScanPage() {
             </div>
           )}
 
-          {/* By Use Case */}
+          {/* By Use Case: what you are searching for */}
           {tab === 'usecase' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 animate-fade-in">
-              {USE_CASES.map((uc) => (
+            <div className="animate-fade-in">
+              <p className="text-sm text-dark-400 mb-3">
+                Choose what you are searching for. Each search runs the modules built for that kind of target, and the page picks the matching one as you type.
+              </p>
+              {selectedSearch && detected && detected !== selectedSearch.key && (
+                <div className="flex items-start gap-2 p-3 mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 text-sm" role="alert" data-testid="usecase-mismatch">
+                  <AlertTriangle className="h-4 w-4 mt-0.5 text-amber-400 shrink-0" />
+                  <div className="flex-1">
+                    <p className="text-foreground">
+                      The target looks like {/^[aeiou]/i.test(SEARCH_LABELS[detected]) ? 'an' : 'a'} <strong>{SEARCH_LABELS[detected]}</strong>, but <strong>{selectedSearch.label}</strong> is selected. The modules for {selectedSearch.label.toLowerCase()} will not fit this target.
+                    </p>
+                    <button
+                      type="button"
+                      className="mt-1 text-spider-400 hover:underline"
+                      onClick={() => { setUseCase(detected); setUserPickedUseCase(false); }}
+                    >
+                      Use {SEARCH_LABELS[detected]} instead
+                    </button>
+                  </div>
+                </div>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {searchTypes.map((st) => {
+                  const Icon = SEARCH_ICONS[st.key] ?? Zap;
+                  const info = st.profile_info;
+                  const inactive = info?.optional_inactive?.length ?? 0;
+                  return (
+                    <button
+                      key={st.key}
+                      data-testid={`usecase-${st.key}`}
+                      onClick={() => { setUseCase(st.key); setUserPickedUseCase(true); }}
+                      className={`p-4 rounded-xl border text-left transition-all ${
+                        useCase === st.key
+                          ? 'border-spider-500 bg-spider-600/10 ring-1 ring-spider-500/30'
+                          : 'border-dark-700 hover:border-dark-600 hover:bg-dark-700/30'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`w-3 h-3 shrink-0 rounded-full border-2 flex items-center justify-center ${
+                          useCase === st.key ? 'border-spider-500' : 'border-dark-500'
+                        }`}>
+                          {useCase === st.key && <div className="w-1.5 h-1.5 rounded-full bg-spider-500" />}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-foreground flex items-center gap-2">
+                            <Icon className="h-4 w-4 text-dark-400" /> {st.label}
+                            {detected === st.key && target.trim() && (
+                              <span className="text-xs font-normal text-spider-400">matches your target</span>
+                            )}
+                          </p>
+                          {info && <p className="text-xs text-dark-400 mt-0.5">{firstSentence(info.description)}</p>}
+                          <p className="text-xs text-dark-500 mt-1">
+                            {info ? `${info.module_count} modules` : 'Profile unavailable'}
+                            {inactive > 0 && ` · ${inactive} more need an API key`}
+                            {' · e.g. '}<span className="font-mono">{st.example}</span>
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
                 <button
-                  key={uc.key}
-                  onClick={() => setUseCase(uc.key)}
+                  data-testid="usecase-all"
+                  onClick={() => { setUseCase('all'); setUserPickedUseCase(true); }}
                   className={`p-4 rounded-xl border text-left transition-all ${
-                    useCase === uc.key
+                    useCase === 'all'
                       ? 'border-spider-500 bg-spider-600/10 ring-1 ring-spider-500/30'
                       : 'border-dark-700 hover:border-dark-600 hover:bg-dark-700/30'
                   }`}
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-3 h-3 rounded-full border-2 flex items-center justify-center ${
-                      useCase === uc.key ? 'border-spider-500' : 'border-dark-500'
+                    <div className={`w-3 h-3 shrink-0 rounded-full border-2 flex items-center justify-center ${
+                      useCase === 'all' ? 'border-spider-500' : 'border-dark-500'
                     }`}>
-                      {useCase === uc.key && <div className="w-1.5 h-1.5 rounded-full bg-spider-500" />}
+                      {useCase === 'all' && <div className="w-1.5 h-1.5 rounded-full bg-spider-500" />}
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-foreground">{uc.label}</p>
-                      <p className="text-xs text-dark-400 mt-0.5">{uc.desc}</p>
+                      <p className="text-sm font-medium text-foreground flex items-center gap-2">
+                        <Zap className="h-4 w-4 text-dark-400" /> All Modules
+                      </p>
+                      <p className="text-xs text-dark-400 mt-0.5">{ALL_MODULES_DESC}</p>
                     </div>
                   </div>
                 </button>
-              ))}
+              </div>
             </div>
           )}
 

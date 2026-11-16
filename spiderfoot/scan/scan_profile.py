@@ -111,6 +111,10 @@ class ScanProfile:
     # Option overrides
     option_overrides: dict[str, Any] = field(default_factory=dict)
     module_options: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Keep the scan to the target itself: switch off, in every selected module that has them, the options that expand
+    # a scan to the target's neighbours (the netblock and subnet around an address, or every address of an ASN).
+    # An IP address scan with these on followed 947 netblock owners and harvested 82 third-party email addresses.
+    disable_expansion: bool = False
 
     # Execution settings
     max_threads: int = 0       # 0 = use global default
@@ -197,6 +201,25 @@ class ScanProfile:
                 break
         return sorted(selected)
 
+    def module_option_overrides(self, all_modules: dict[str, dict], selected: list[str]) -> dict[str, dict[str, Any]]:
+        """Per-module option values this profile sets for a scan of ``selected`` modules.
+
+        The profile's own ``module_options`` (for modules that are selected), plus, when ``disable_expansion`` is set,
+        every neighbour-expansion option of the selected modules switched off.
+        """
+        chosen = set(selected)
+        out: dict[str, dict[str, Any]] = {}
+        if self.disable_expansion:
+            for name in chosen:
+                opts = (all_modules.get(name) or {}).get("opts") or {}
+                off = {k: False for k in EXPANSION_OPTION_KEYS if k in opts}
+                if off:
+                    out[name] = off
+        for name, mod_opts in self.module_options.items():
+            if name in chosen:
+                out.setdefault(name, {}).update(mod_opts)
+        return out
+
     def apply_overrides(self, global_opts: dict) -> dict:
         """Apply profile option overrides to global config.
 
@@ -239,6 +262,7 @@ class ScanProfile:
             "required_event_types": self.required_event_types,
             "option_overrides": self.option_overrides,
             "module_options": self.module_options,
+            "disable_expansion": self.disable_expansion,
             "max_threads": self.max_threads,
             "timeout_minutes": self.timeout_minutes,
             "max_depth": self.max_depth,
@@ -272,6 +296,7 @@ class ScanProfile:
             required_event_types=data.get("required_event_types", []),
             option_overrides=data.get("option_overrides", {}),
             module_options=data.get("module_options", {}),
+            disable_expansion=bool(data.get("disable_expansion", False)),
             max_threads=data.get("max_threads", 0),
             timeout_minutes=data.get("timeout_minutes", 0),
             max_depth=data.get("max_depth", 0),
@@ -283,6 +308,36 @@ class ScanProfile:
 # ---------------------------------------------------------------------------
 # Profile Manager
 # ---------------------------------------------------------------------------
+
+
+# Module options that expand a scan beyond the target: they look up the netblock, subnet or neighbours of an address.
+EXPANSION_OPTION_KEYS = ("netblocklookup", "subnetlookup", "netblockscan", "scan_netblocks")
+
+
+# The searches the New Scan page offers, and the profile each one runs. "target_types" are the SpiderFoot target types
+# a search accepts (the first is what the page reports when it recognises the typed target).
+SEARCH_TYPES: list[dict[str, Any]] = [
+    {"key": "domain", "label": "Domain", "profile": "full-footprint", "example": "example.com",
+     "target_types": ["INTERNET_NAME"]},
+    {"key": "ip", "label": "IP address", "profile": "ip-address", "example": "203.0.113.10",
+     "target_types": ["IP_ADDRESS", "IPV6_ADDRESS", "NETBLOCK_OWNER", "NETBLOCKV6_OWNER"]},
+    {"key": "email", "label": "Email address", "profile": "email-address", "example": "name@example.com",
+     "target_types": ["EMAILADDR"]},
+    {"key": "phone", "label": "Phone number", "profile": "phone-number", "example": "+61400000000",
+     "target_types": ["PHONE_NUMBER"]},
+    {"key": "name", "label": "Person name", "profile": "person-name", "example": "Pat Example",
+     "target_types": ["HUMAN_NAME", "USERNAME"]},
+    {"key": "asn", "label": "ASN", "profile": "asn", "example": "AS64496",
+     "target_types": ["BGP_AS_OWNER"]},
+]
+
+
+def search_type_for_target_type(target_type: str) -> dict[str, Any] | None:
+    """The search that accepts a SpiderFoot target type (INTERNET_NAME, IP_ADDRESS, ...), or None."""
+    for st in SEARCH_TYPES:
+        if target_type in st["target_types"]:
+            return st
+    return None
 
 
 class ProfileManager:
@@ -632,6 +687,74 @@ class ProfileManager:
             max_threads=4,
             timeout_minutes=120,
             tags=["tools", "active", "recon", "external", "comprehensive"],
+        ))
+
+        # ── Search by IP address and by ASN (added 2026-11-16, docs/scope-guard-design.md) ─────────────────────────
+        # The scope guard keeps the active modules on the address itself and on names that resolve to it. These two
+        # profiles also stop the scan from expanding to neighbours, which is what an IP scan under "Full Footprint"
+        # did: it followed 947 netblock owners and harvested the contact details of 82 unrelated people.
+        self.register(ScanProfile(
+            name="ip-address",
+            display_name="IP Address Intelligence",
+            description=(
+                "Ownership, network, reputation, open ports and services, TLS and web fingerprints and known "
+                "weaknesses for ONE address (an IPv4 or IPv6 address, or a netblock you own). Active tools stay on the "
+                "address and on names that resolve to it; neighbouring netblocks and subnets are not followed. "
+                "Reputation, ownership and passive-DNS lookups that need no key run always; the keyed ones "
+                "(Shodan, GreyNoise, AbuseIPDB, VirusTotal and others) join once their API key is saved on the "
+                "Modules page."
+            ),
+            category=ProfileCategory.RECONNAISSANCE,
+            include_modules=[
+                # ownership and network
+                "sfp_dnsresolve", "sfp_countryname", "sfp_ipapico_modern", "sfp_hosting", "sfp_ripe", "sfp_whois",
+                "sfp_internetdb",          # ports, hostnames and known CVEs from Shodan's free InternetDB
+                # reputation: blocklists, threat feeds, Tor exit nodes
+                "sfp_abusech", "sfp_alienvaultiprep", "sfp_blocklistde", "sfp_cinsscore", "sfp_cleantalk",
+                "sfp_dronebl", "sfp_emergingthreats", "sfp_fortinet", "sfp_greensnow", "sfp_isc", "sfp_maltiverse",
+                "sfp_multiproxy", "sfp_spamcop", "sfp_spamhaus", "sfp_talosintel", "sfp_threatfox", "sfp_torexits",
+                "sfp_uceprotect", "sfp_voipbl", "sfp_vxvault", "sfp_zoneh",
+                # names seen on the address (data only: never contacted unless they resolve to it)
+                "sfp_rapiddns", "sfp_hackertarget", "sfp_mnemonic",
+                # active, held to the address by the scope guard
+                "sfp_nmap", "sfp_tool_naabu", "sfp_httpx", "sfp_spider", "sfp_tool_whatweb", "sfp_tool_wafw00f",
+                "sfp_sslcert", "sfp_tool_tlsx", "sfp_tool_sslscan", "sfp_tool_testsslsh", "sfp_nuclei",
+                "sfp_tool_nikto", "sfp_tool_snallygaster", "sfp_intfiles", "sfp_filemeta",
+                # reading what the address's own web server says
+                "sfp_webserver", "sfp_webframework", "sfp_pageinfo", "sfp_email", "sfp_company",
+            ],
+            optional_modules=[
+                "sfp_shodan", "sfp_censys", "sfp_greynoise", "sfp_abuseipdb", "sfp_virustotal", "sfp_alienvault",
+                "sfp_ipinfo_modern", "sfp_onyphe", "sfp_binaryedge", "sfp_criminalip", "sfp_netlas", "sfp_zoomeye",
+                "sfp_fofa", "sfp_ipqualityscore", "sfp_pulsedive", "sfp_securitytrails", "sfp_spur", "sfp_xforce",
+                "sfp_hybrid_analysis", "sfp_leakix",
+            ],
+            exclude_flags=["errorprone", "tor"],
+            disable_expansion=True,
+            max_threads=4,
+            timeout_minutes=60,
+            tags=["ip", "network", "recon"],
+        ))
+
+        self.register(ScanProfile(
+            name="asn",
+            display_name="ASN Intelligence",
+            description=(
+                "Who operates an autonomous system and what it announces: registry ownership, contacts and country, "
+                "from public registries only. No active contact with any address: scanning an ASN's address space "
+                "needs the explicit \"active contact authorised for this ASN\" setting, a per-scan decision, and "
+                "even then stays within a hard address cap. No ASN has been tested live; see "
+                "docs/scope-guard-design.md."
+            ),
+            category=ProfileCategory.RECONNAISSANCE,
+            include_modules=[
+                "sfp_ripe", "sfp_whois", "sfp_company", "sfp_countryname", "sfp_email",
+            ],
+            exclude_flags=["errorprone", "tor", "invasive", "tool"],
+            disable_expansion=True,
+            max_threads=2,
+            timeout_minutes=30,
+            tags=["asn", "registry", "passive"],
         ))
 
     # ------------------------------------------------------------------

@@ -111,13 +111,13 @@ flowchart LR
 
 ### What a scan runs
 
-The New Scan page offers four ways to choose modules. The server, not the browser, decides the final list, and the choice is stored with the scan and shown in Scan Settings as "Module selection".
+The New Scan page offers four ways to choose modules (Quick Scan, Footprint, Investigate and Passive Only, which ignored what was being searched for, are profiles now and live on the By Profile tab). The server, not the browser, decides the final list, and the choice is stored with the scan and shown in Scan Settings as "Module selection".
 
 | Tab | What runs |
 |---|---|
 | By Use Case, All Modules | Every reliable module (about 285 of about 290): active tools and dark-web modules included, error-prone and retired modules left out |
-| By Use Case, others | The modules in that group (Footprint, Investigate, Passive), or a fixed short list for Quick Scan |
-| By Profile | The profile's module list, with the profile's own thread limit and option overrides. A profile's keyed (optional) modules are added only if their API key is saved |
+| By Use Case, a search | What you are searching for: **Domain**, **IP address**, **Email address**, **Phone number**, **Person name** or **ASN**. Each runs the profile built for that kind of target (`full-footprint`, `ip-address`, `email-address`, `phone-number`, `person-name`, `asn`). The page recognises what you type and selects the matching search, and warns if the one you picked does not fit the target. The IP and ASN profiles keep the scan to the target: they switch off the options that expand to neighbouring netblocks and subnets (`disable_expansion`), and the scope guard holds active modules to the address and the names that resolve to it. An ASN search is registry lookups only; active contact needs the explicit per-scan setting `_scope_asn_authorised`. |
+| By Profile | The profile's module list, with the profile's own thread limit, option overrides and per-module options (these last were ignored until rc.40). A profile's keyed (optional) modules are added only if their API key is saved |
 | By Required Data | The modules that produce the selected data types, plus the modules that feed them their input. This chain grows quickly: for most data types it reaches about 190 modules |
 | By Module | Exactly the modules ticked |
 
