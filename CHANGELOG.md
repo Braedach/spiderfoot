@@ -8,6 +8,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Fork-specific changes since 6.1.0, shipped as release candidates. The per-build record and the build and deploy
 procedure are in [`deploy/README.md`](deploy/README.md).
 
+### Fixed (rc.40)
+- **Name-scan false positives.** `sfp_accounts` no longer checks a dotted name (`leon.marcus.scott`) as a subdomain (`leon.marcus.scott.example.com` is a different, nested name, and sites that answer for any subdomain made the check "find" accounts that cannot exist). A check that asks a site's search page instead of a profile (for example a document site's `/search?query=...`) still reports what it found, but the event now says "weak evidence: this check requests the site's search page, not a profile", so the scoring and the report can weigh it. `sfp_tool_maigret` leaves dating sites out by default (`exclude_tags` now `porn,erotic,webcam,dating`: a name search there is noisy and sensitive) and keeps each site's country tags in the event (`(site countries: PL)`), which the report uses to weigh a hit.
+
 ### Fixed (rc.39)
 - **`dnspython` 2.9.2** in both locks (high severity, GHSA-vvf4-9x63-8xvv; the rc.38 candidate failed the scan gate on 2.9.0 and 2.9.1, so it was never published and its tag has no release or images; rc.39 carries everything listed under rc.38). A named exception to the 14-day cool-down; nothing else moved.
 
