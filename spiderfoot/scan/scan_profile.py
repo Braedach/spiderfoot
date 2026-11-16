@@ -501,8 +501,7 @@ class ProfileManager:
             category=ProfileCategory.DARKWEB,
             include_flags=["tor"],
             # as.onionsearchengine.com no longer resolves (checked 2026-11-14)
-            # sfp_onioncity needs a Google key and onion.link no longer answers (checked 2026-11-16)
-            exclude_modules=["sfp_onionsearchengine", "sfp_onioncity"],
+            exclude_modules=["sfp_onionsearchengine"],
             max_threads=2,
             tags=["darkweb", "tor", "deep-web"],
         ))

@@ -10,7 +10,7 @@ procedure are in [`deploy/README.md`](deploy/README.md).
 
 ### Fixed (rc.40)
 - **`sfp_torch` (TORCH) works again.** It dialled a hard-coded onion address that no longer answers and a search path TORCH no longer has, so every dark-web scan logged "Couldn't connect to TORCH". The address is now a setting (`torch_url`, current address by default), it uses TORCH's current search, and results are parsed from its current page layout. Emails are searched as the local part and the domain as separate words, because TORCH cannot match an `@` (verified live: even generic addresses returned nothing). The `errorprone` flag is removed, so it now also joins the Investigate profile and "All Modules".
-- **`sfp_onioncity` is deprecated**: it needs a Google Custom Search key and onion.link no longer answers. It is excluded from the Dark Web profile and no longer offered in use cases.
+- **`sfp_onioncity` is removed**: it needed a Google Custom Search key, onion.link no longer answers, and a module that does not work is removed rather than left in the catalog.
 - **The Email Address and Person Name profiles now include the dark-web search modules `sfp_ahmia` and `sfp_torch`**, so a mention of the address or name on the dark web is looked for. They use Tor (Settings > Tor, on by default).
 
 ### Fixed (rc.39)
