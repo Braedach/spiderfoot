@@ -379,3 +379,45 @@ def test_a_record_found_on_another_host_is_context_and_a_name_scans_dozens_of_re
     assert d["context_counts"]["RAW_RIR_DATA"] == 1
     many = [row("ROOT", "Pat Example")] + [row("RAW_RIR_DATA", f'{{"site": "Site{i}"}}', "sfp_tool_maigret") for i in range(39)]
     assert len(digest(many, "Pat Example", "HUMAN_NAME")["records"]) == 39
+
+
+# ------------------------------------------------------------------------------------------------ account confidence in the digest
+
+
+def person_scan_with_accounts():
+    url = "https://social.example/leon.scott"
+    return [row("ROOT", "Leon Scott"),
+            row("ACCOUNT_EXTERNAL_OWNED", f"ExampleSocial (Category: social)\n<SFURL>{url}</SFURL>", "sfp_tool_maigret"),
+            row("RAW_RIR_DATA", f'{{"tool": "maigret", "url": "{url}", "details": {{"fullname": "Leon Scott"}}}}', "sfp_tool_maigret"),
+            row("ACCOUNT_EXTERNAL_OWNED", "ExampleFilm (Category: movies)\n<SFURL>https://film.example/leonscott</SFURL>\n(site countries: PL)", "sfp_tool_maigret"),
+            row("ACCOUNT_EXTERNAL_OWNED", "ExampleDocs (Category: hobby)\n<SFURL>https://docs.example/search?q=x</SFURL>\n(weak evidence: this check requests the site's search page, not a profile)", "sfp_accounts")]
+
+
+def test_the_digest_scores_every_account_and_keeps_all_of_them_in_the_report_text():
+    d = build_digest(person_scan_with_accounts(), target="Leon Scott", target_type="HUMAN_NAME",
+                     context={"country": "Australia", "region": ""})
+    assert d["account_score_summary"] == {"Confirmed": 0, "Likely": 0, "Unconfirmed": 1, "Unlikely": 2}
+    text = render_digest(d)
+    assert "ACCOUNT CONFIDENCE" in text and "none is hidden" in text
+    for site in ("ExampleSocial", "ExampleFilm", "ExampleDocs"):
+        assert site in text                                                       # nothing is dropped
+    assert "[Unconfirmed] ExampleSocial" in text and "[Unlikely] ExampleFilm" in text
+    assert "country=Australia" in text
+    appendix = render_appendix(d)
+    assert "Accounts by confidence (3)" in appendix and "[Unlikely] ExampleDocs" in appendix
+
+
+def test_without_a_context_the_digest_says_no_account_was_judged_by_where_it_is():
+    d = build_digest(person_scan_with_accounts(), target="Leon Scott", target_type="HUMAN_NAME")
+    assert "no country or place was given" in render_digest(d)
+    assert d["account_score_summary"]["Unlikely"] == 1                            # only the weak search-page check
+
+
+def test_a_scan_with_no_accounts_has_no_confidence_section():
+    d = digest(domain_scan(), "example.com", "INTERNET_NAME")
+    assert d["account_scores"] == [] and "ACCOUNT CONFIDENCE" not in render_digest(d)
+
+
+def test_the_accounting_still_reconciles_with_scoring_added():
+    d = build_digest(person_scan_with_accounts(), target="Leon Scott", target_type="HUMAN_NAME")
+    assert sum(d["accounting"].values()) == d["total_events"]

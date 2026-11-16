@@ -412,7 +412,13 @@ def _load_digest(scan_ids: List[str], target: str) -> dict:
                 rows = dbh.scanResultEvent(sid) or []
                 logs = [r for r in (dbh.scanLogs(sid, limit=20000) or []) if len(r) > 2 and str(r[2]).upper() in ("ERROR", "WARNING")]
                 ttype = SpiderFootHelpers.targetTypeFromString(target) or ""
-                d = build_digest(rows, target=target, target_type=ttype, log_entries=logs)
+                context = {}
+                try:                                # what the owner told the scan about the subject (optional)
+                    cfg = dbh.scanConfigGet(sid) or {}
+                    context = {k: str(cfg.get(f"_subject_{k}") or "").strip() for k in ("country", "region")}
+                except Exception:
+                    context = {}
+                d = build_digest(rows, target=target, target_type=ttype, log_entries=logs, context=context)
                 label = f"[scan {sid}]\n" if len(scan_ids) > 1 else ""
                 texts.append(label + render_digest(d, max_chars=budget // max(1, len(scan_ids))))
                 appendices.append(render_appendix(d))

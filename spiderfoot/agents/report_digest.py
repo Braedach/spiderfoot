@@ -34,6 +34,8 @@ import re
 from collections import Counter, OrderedDict
 from typing import Callable, Iterable
 
+from spiderfoot.agents.hit_scoring import score_accounts, summarise as summarise_scores
+
 # Row layout of SpiderFootDb.scanResultEvent(): generated, data, module, hash, type, source_event_hash, confidence,
 # visibility, risk
 _DATA, _MODULE, _HASH, _TYPE, _SRC = 1, 2, 3, 4, 5
@@ -264,8 +266,13 @@ def not_tested(modules_run: set[str], target_type: str) -> list[str]:
 
 
 def build_digest(rows: list, *, target: str, target_type: str, log_entries: Iterable[tuple] = (),
-                 modules_run: Iterable[str] | None = None) -> dict:
-    """Build the digest of one scan from all of its event rows."""
+                 modules_run: Iterable[str] | None = None, context: dict | None = None) -> dict:
+    """Build the digest of one scan from all of its event rows.
+
+    ``context`` is what the owner told the scan about the subject (``country``, ``region``); it is kept under another name
+    here because a local counter of related-host events is also called ``context`` below.
+    """
+    subject_context = dict(context or {})
     all_rows = [r for r in rows if isinstance(r, (list, tuple)) and len(r) >= 9]
     rows = [r for r in all_rows if r[_TYPE] != "ROOT"]
     in_scope = make_scope_check(target, target_type, all_rows)     # the root event is a parent: keep it for lookups
@@ -394,7 +401,12 @@ def build_digest(rows: list, *, target: str, target_type: str, log_entries: Iter
             shown.append({"data": it["data"], "modules": mods, "verified": not heuristic_only})
         finding_list.append({"type": etype, "total": len(items), "shown": shown})
 
+    account_scores = (score_accounts(all_rows, target=target, target_type=target_type, context=subject_context)
+                      if by_type.get("ACCOUNT_EXTERNAL_OWNED") else [])
     return {
+        "context": subject_context,
+        "account_scores": account_scores,
+        "account_score_summary": summarise_scores(account_scores),
         "target": target, "target_type": target_type,
         "total_events": len(rows),
         "by_type": by_type.most_common(25),
@@ -442,6 +454,8 @@ def render_digest(d: dict, max_chars: int | None = None) -> str:
             "SCAN DIGEST (authoritative: built from every event of the scan)",
             "══════════════════════════════════════════════════", "",
             f"Target: {d['target']} ({d['target_type']})",
+            "Subject context given by the owner: " + (", ".join(f"{k}={v}" for k, v in d.get("context", {}).items() if v)
+                                                      or "none (no country or place was given, so no account was judged by where it is)"),
             f"Total events in the scan: {d['total_events']}", "",
             "Event counts by type (exact, whole scan): " + ", ".join(f"{t} {n}" for t, n in d["by_type"]), "",
             "Events by module (exact): " + ", ".join(f"{m} {n}" for m, n in d["by_module"]), ""]
@@ -490,6 +504,19 @@ def render_digest(d: dict, max_chars: int | None = None) -> str:
     else:
         ctx.append("(none)")
 
+    accounts: list[str] = []
+    if d.get("account_scores"):
+        summ = d["account_score_summary"]
+        accounts = ["", "── ACCOUNT CONFIDENCE (every account found, scored from the evidence in the scan; none is hidden) ──",
+                    "Labels: Confirmed = the site confirmed the exact email, or the profile publishes the target's email or "
+                    "phone; Likely = the profile's name or place matches the target; Unconfirmed = a username match and "
+                    "nothing else; Unlikely = something points away from the target. A username match alone proves "
+                    "nothing: present only Confirmed and Likely accounts as the target's, and list the rest as unconfirmed "
+                    "matches. Totals: " + ", ".join(f"{k} {v}" for k, v in summ.items())]
+        for a in d["account_scores"]:
+            accounts.append(f"  [{a['label']}] {a['site']} {a['url']} (found by {', '.join(a['modules'])}) because: "
+                            + "; ".join(a["reasons"]))
+
     others: list[str] = []
     if d.get("http_codes"):
         others += ["", "── HTTP RESPONSES (exact, whole scan) ──",
@@ -521,7 +548,8 @@ def render_digest(d: dict, max_chars: int | None = None) -> str:
     room = max(0, budget - used)
     body: list[str] = []
     omitted_notes: list[str] = []
-    for name, block in (("in-scope findings", findings), ("the target's own data", own), ("structured records", records),
+    for name, block in (("in-scope findings", findings), ("the target's own data", own), ("account confidence", accounts),
+                        ("structured records", records),
                         ("related context", ctx), ("other event types", others),
                         ("third-party personal data", third)):
         taken, room, left = _take(block, room)
@@ -546,6 +574,10 @@ def render_appendix(d: dict, max_lines: int = 3000) -> str:
         for it in items:
             times = f" x{it['count']}" if it["count"] > 1 else ""
             lines.append(f"- {it['data']}{times} [{', '.join(it['modules'])}]")
+    if d.get("account_scores"):
+        lines.append(f"### Accounts by confidence ({len(d['account_scores'])})")
+        for a in d["account_scores"]:
+            lines.append(f"- [{a['label']}] {a['site']} {a['url']} [{', '.join(a['modules'])}]: " + "; ".join(a["reasons"]))
     in_scope_lines = len(lines)
     ctx: list[str] = []
     for etype, items in sorted(d.get("context_inventory", {}).items()):
