@@ -35,6 +35,7 @@ def build_request(
     model: str,
     max_tokens: int,
     response_format: dict[str, Any] | None = None,
+    cache_prompt: bool = False,
 ) -> dict[str, Any]:
     """Return keyword arguments for ``client.messages.create``.
 
@@ -45,6 +46,9 @@ def build_request(
         max_tokens: requested output cap (raised to ``MIN_MAX_TOKENS``).
         response_format: OpenAI-style ``{"type": "json_schema", ...}`` or
             ``{"type": "json_object"}``.
+        cache_prompt: mark the system prompt and the last user message as cacheable (an ephemeral cache breakpoint on
+            each), so a repeat of the same prompt reads from Claude's prompt cache. Off by default: the first request
+            pays a small premium to write the cache, which only pays off when the prompt is sent again.
     """
     system_parts: list[str] = []
     chat: list[dict[str, Any]] = []
@@ -63,6 +67,14 @@ def build_request(
     }
     if system_parts:
         request["system"] = "\n\n".join(system_parts)
+    if cache_prompt:
+        if system_parts:
+            request["system"] = [{"type": "text", "text": request["system"], "cache_control": {"type": "ephemeral"}}]
+        for message in reversed(chat):
+            if message["role"] == "user" and isinstance(message["content"], str):
+                message["content"] = [{"type": "text", "text": message["content"],
+                                       "cache_control": {"type": "ephemeral"}}]
+                break
 
     output_config: dict[str, Any] = {}
     effort = os.environ.get("SF_LLM_EFFORT", DEFAULT_EFFORT).strip().lower()

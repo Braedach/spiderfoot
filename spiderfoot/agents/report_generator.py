@@ -725,7 +725,7 @@ class ReportGeneratorAgent(BaseAgent):
         digest_section = digest["text"]
 
         # ── Build the comprehensive user prompt ──
-        qdrant_section = self._format_qdrant_context(qdrant_ctx)
+        qdrant_section = self._format_qdrant_context(qdrant_ctx, compact=bool(digest_section))
         findings_text = self._format_findings(findings[:100])
         correlations_text = self._format_correlations(correlations[:30])
         geo_section = self._format_geo_data(geo_data)
@@ -794,10 +794,16 @@ following the exact structure specified in your system instructions.
 - Produce the full report — do not truncate or abbreviate any section.
 """
 
+        prompt_chars = len(SYSTEM_PROMPT) + len(user_prompt)
+        logger.info("Report prompt for %s: %d characters (about %d tokens): digest %d, vector context %d",
+                    scan_id or ",".join(scan_ids), prompt_chars, prompt_chars // 4, len(digest_section), len(qdrant_section))
+
         # ── Call LLM with retries ──
         last_error = None
         for attempt in range(3):
             try:
+                # cache_prompt: the three attempts below send the same (large) prompt, so the retries read it from the
+                # prompt cache instead of paying for it again
                 response = await self.call_llm(
                     messages=[
                         {"role": "system", "content": SYSTEM_PROMPT},
@@ -806,6 +812,7 @@ following the exact structure specified in your system instructions.
                     model=self.config.llm_model,
                     temperature=0.3,
                     max_tokens=65536,
+                    cache_prompt=True,
                 )
 
                 # Strip markdown fences if the model wraps output
@@ -829,6 +836,8 @@ following the exact structure specified in your system instructions.
                         ),
                         "qdrant_available": qdrant_ctx["available"],
                         "digest": digest["digests"],
+                        "prompt_chars": prompt_chars,
+                        "prompt_tokens_estimate": prompt_chars // 4,
                     },
                     confidence=0.9 if qdrant_ctx["available"] else 0.6,
                 )
@@ -854,8 +863,13 @@ following the exact structure specified in your system instructions.
 
     # ── Formatting helpers ──
 
-    def _format_qdrant_context(self, ctx: dict) -> str:
-        """Format Qdrant vector DB context into a rich prompt section."""
+    def _format_qdrant_context(self, ctx: dict, compact: bool = False) -> str:
+        """Format Qdrant vector DB context into a rich prompt section.
+
+        ``compact`` is used when the scan digest is present: the digest already carries exact counts and every event, so
+        the sampled counts and the sampled event listing (which repeated the same events with different numbers) are
+        left out, and what only the vector store adds stays: the semantically ranked and infrastructure matches.
+        """
         if not ctx.get("available"):
             return (
                 "══════════════════════════════════════════════════\n"
@@ -869,6 +883,11 @@ following the exact structure specified in your system instructions.
             "VECTOR DATABASE CONTEXT (Qdrant — Full Scan Intelligence)",
             "══════════════════════════════════════════════════",
         ]
+
+        if compact:
+            lines.append("\n(Totals, risk counts, attack-surface counts and the full event listing are in the SCAN DIGEST "
+                         "above and are authoritative; this section adds the vector store's ranked matches.)")
+            return "\n".join(lines + self._format_ranked_hits(ctx))
 
         # Event statistics
         stats = ctx.get("event_stats", {})
@@ -928,6 +947,12 @@ following the exact structure specified in your system instructions.
                         f"(source: {e['source']})"
                     )
 
+        return "\n".join(lines + self._format_ranked_hits(ctx))
+
+    @staticmethod
+    def _format_ranked_hits(ctx: dict) -> List[str]:
+        """The semantic-similarity and infrastructure matches from the vector store."""
+        lines: List[str] = []
         # Semantic hits
         semantic = ctx.get("semantic_hits", [])
         if semantic:
@@ -952,7 +977,7 @@ following the exact structure specified in your system instructions.
                     f"  [{h['type']}] score={h['score']} | {h['data'][:400]}"
                 )
 
-        return "\n".join(lines)
+        return lines
 
     def _format_findings(self, findings: List[Dict]) -> str:
         if not findings:

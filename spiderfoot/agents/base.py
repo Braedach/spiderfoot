@@ -303,6 +303,7 @@ class BaseAgent(ABC):
         temperature: float = 0.3,
         max_tokens: int = 2048,
         response_format: Optional[Dict[str, Any]] = None,
+        cache_prompt: bool = False,
     ) -> str:
         """
         Call the LLM: Claude directly (``llm_provider == "anthropic"``) or any
@@ -313,6 +314,8 @@ class BaseAgent(ABC):
             model: Override model name (defaults to config)
             temperature: Sampling temperature
             max_tokens: Maximum response tokens
+            cache_prompt: Mark the (large, repeated) prompt for Claude's prompt cache. Only worth it when the same
+                prompt is sent more than once (retries); ignored by OpenAI-compatible endpoints.
             response_format: Optional structured output format spec
                              (e.g. {"type": "json_schema", "json_schema": {...}})
 
@@ -328,7 +331,7 @@ class BaseAgent(ABC):
         if self.config.llm_provider == "mock":
             return "[mock response] No real model is selected in AI Connections."
         if self.config.llm_provider == "anthropic":
-            return await self._call_anthropic(messages, model, max_tokens, response_format)
+            return await self._call_anthropic(messages, model, max_tokens, response_format, cache_prompt)
 
         import aiohttp
 
@@ -406,6 +409,7 @@ class BaseAgent(ABC):
         model: str,
         max_tokens: int,
         response_format: Optional[Dict[str, Any]],
+        cache_prompt: bool = False,
     ) -> str:
         """Call Claude through the official SDK; ``temperature`` is not sent (rejected by current models)."""
         import anthropic
@@ -424,7 +428,7 @@ class BaseAgent(ABC):
                 max_retries=self.config.llm_max_retries,  # SDK backs off on 429/5xx/connection errors
             )
 
-        request = anthropic_chat.build_request(messages, model, max_tokens, response_format)
+        request = anthropic_chat.build_request(messages, model, max_tokens, response_format, cache_prompt=cache_prompt)
         try:
             try:
                 message = await anthropic_chat.messages_api(self._anthropic_client).create(

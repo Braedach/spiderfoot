@@ -315,3 +315,67 @@ def test_the_appendix_never_lists_third_party_personal_data_and_says_it_was_with
     appendix = render_appendix(digest(domain_scan(), "example.com", "INTERNET_NAME"))
     assert "person@other.net" not in appendix and "Pat Example" not in appendix
     assert "Withheld on purpose" in appendix and "remain in the scan results" in appendix
+
+
+# ------------------------------------------------------------------------------------------------ nothing hidden: every other type
+
+
+def web_scan():
+    rows = [row("ROOT", "example.com"), row("INTERNET_NAME", "www.example.com", "sfp_dnsresolve")]
+    rows += [row("HTTP_CODE", c, "sfp_spider") for c in ["200"] * 7 + ["404"] * 3 + ["302"]]
+    rows += [row("WEBSERVER_HTTPHEADERS", '{"Server": "nginx", "Strict-Transport-Security": "max-age=1"}', "sfp_spider"),
+             row("WEBSERVER_HTTPHEADERS", '{"Server": "nginx", "X-Frame-Options": "DENY"}', "sfp_spider"),
+             row("WEBSERVER_HTTPHEADERS", "not json", "sfp_spider")]
+    rows += [row("LINKED_URL_INTERNAL", f"https://www.example.com/p{i}", "sfp_spider") for i in range(40)]
+    rows += [row("HASH", f"{i:032x}", "sfp_hashes") for i in range(5)]
+    rows += [row("DNS_TEXT", "v=spf1 include:_spf.example.net ~all", "sfp_dnsraw"),
+             row("URL_FORM", "https://www.example.com/login.jsp", "sfp_spider")]
+    return rows
+
+
+def test_every_other_event_type_gets_examples_and_exact_counts_so_nothing_is_only_a_number():
+    d = digest(web_scan(), "example.com", "INTERNET_NAME")
+    other = d["other_types"]
+    assert [i["data"] for i in other["DNS_TEXT"]] == ["v=spf1 include:_spf.example.net ~all"]
+    assert [i["data"] for i in other["URL_FORM"]] == ["https://www.example.com/login.jsp"]
+    assert len(other["LINKED_URL_INTERNAL"]) == 15 and dict(d["by_type"])["LINKED_URL_INTERNAL"] == 40
+    assert "HASH" not in other and dict(d["by_type"])["HASH"] == 5            # a hash says nothing: the count stands
+    text = render_digest(d)
+    assert "[DNS_TEXT] 1 events: v=spf1" in text and "[LINKED_URL_INTERNAL] 40 events:" in text
+
+
+def test_status_codes_and_response_headers_are_aggregated_exactly():
+    d = digest(web_scan(), "example.com", "INTERNET_NAME")
+    assert dict(d["http_codes"]) == {"200": 7, "404": 3, "302": 1}
+    present = dict(d["header_stats"]["present"])
+    assert d["header_stats"]["responses"] == 2                                # the unparseable one is not counted as a response
+    assert present["server"] == 2 and present["strict-transport-security"] == 1 and present["x-frame-options"] == 1
+    text = render_digest(d)
+    assert "200 x7" in text and "strict-transport-security 1" in text
+
+
+def test_the_accounting_still_reconciles_with_the_other_types_included():
+    for rows, target, ttype in ((web_scan(), "example.com", "INTERNET_NAME"), (domain_scan(), "example.com", "INTERNET_NAME")):
+        d = digest(rows, target, ttype)
+        assert sum(d["accounting"].values()) == d["total_events"], d["accounting"]
+        assert "counted by type only" not in d["accounting"]
+
+
+def test_other_types_found_on_another_host_are_context_not_the_targets():
+    rows = [row("ROOT", "203.0.113.10"), row("IP_ADDRESS", "203.0.113.77", "sfp_rapiddns")]
+    rows.append(child(rows[1], "URL_FORM", "https://other.example/login", "sfp_spider"))
+    d = digest(rows, "203.0.113.10", "IP_ADDRESS")
+    assert d["other_types"]["URL_FORM"][0]["data"] == "https://other.example/login"    # the example is kept either way
+    assert d["context_counts"].get("URL_FORM") == 1
+
+
+def test_a_record_found_on_another_host_is_context_and_a_name_scans_dozens_of_records_are_all_shown():
+    root = row("ROOT", "203.0.113.10")
+    neighbour = row("IP_ADDRESS", "203.0.113.77", "sfp_rapiddns")
+    rows = [root, neighbour, child(neighbour, "RAW_RIR_DATA", '{"tool": "hudsonrock", "stealers": 3}', "sfp_hudsonrock"),
+            child(root, "RAW_RIR_DATA", '{"tool": "hudsonrock", "stealers": 0}', "sfp_hudsonrock")]
+    d = digest(rows, "203.0.113.10", "IP_ADDRESS")
+    assert [r["data"] for r in d["records"]] == ['{"tool": "hudsonrock", "stealers": 0}']
+    assert d["context_counts"]["RAW_RIR_DATA"] == 1
+    many = [row("ROOT", "Pat Example")] + [row("RAW_RIR_DATA", f'{{"site": "Site{i}"}}', "sfp_tool_maigret") for i in range(39)]
+    assert len(digest(many, "Pat Example", "HUMAN_NAME")["records"]) == 39

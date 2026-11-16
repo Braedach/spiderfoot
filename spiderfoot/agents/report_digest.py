@@ -29,6 +29,7 @@ Pure functions over event rows: no database, no network, no model.
 from __future__ import annotations
 
 import ipaddress
+import json
 import re
 from collections import Counter, OrderedDict
 from typing import Callable, Iterable
@@ -77,7 +78,7 @@ HOSTLIKE = frozenset({
 })
 # A netblock's registry data (its WHOIS, its owner's address, company and contacts) is about whoever holds the block
 NETBLOCK_TYPES = frozenset({"NETBLOCK_OWNER", "NETBLOCK_MEMBER", "NETBLOCKV6_OWNER", "NETBLOCKV6_MEMBER", "NETBLOCK_WHOIS"})
-MAX_RECORDS = 15
+MAX_RECORDS = 80                # structured records shown (a name scan alone produces dozens of profile records)
 MAX_RECORD_CHARS = 700
 PERSONAL_TYPES = frozenset({
     "EMAILADDR", "EMAILADDR_GENERIC", "AFFILIATE_EMAILADDR", "PHONE_NUMBER", "AFFILIATE_PHONE_NUMBER", "HUMAN_NAME",
@@ -91,6 +92,8 @@ HEURISTIC_MODULES = frozenset({"sfp_tool_nikto", "sfp_junkfiles", "sfp_intfiles"
 MAX_EXAMPLES_PER_TYPE = 200      # in-scope items listed per type (the appendix lists them all)
 MAX_CONTEXT_EXAMPLES = 100      # related hosts listed per type, as context the report may mention but must not assess
 MAX_THIRD_PARTY = 150           # third-party personal details listed per type, labelled, for the model to judge
+MAX_OTHER_EXAMPLES = 15         # examples shown for each remaining event type (exact counts are always given)
+NO_EXAMPLE_TYPES = frozenset({"HASH"})          # a hash tells the reader nothing; the count is enough
 DEFAULT_BUDGET_CHARS = 300000   # size of the digest text; what does not fit is counted, never silently dropped
 MAX_DATA_CHARS = 280
 
@@ -278,6 +281,10 @@ def build_digest(rows: list, *, target: str, target_type: str, log_entries: Iter
     context_full: "OrderedDict[str, OrderedDict[str, None]]" = OrderedDict()
     personal_omitted: Counter[str] = Counter()
     third_party: "OrderedDict[str, OrderedDict[str, set]]" = OrderedDict()
+    other: "OrderedDict[str, OrderedDict[str, set]]" = OrderedDict()     # every remaining type: examples
+    http_codes: Counter[str] = Counter()
+    header_counts: Counter[str] = Counter()
+    header_responses = 0
     own_addresses: "OrderedDict[str, dict]" = OrderedDict()
 
     records: list[dict] = []
@@ -313,11 +320,14 @@ def build_digest(rows: list, *, target: str, target_type: str, log_entries: Iter
     for r in rows:
         etype, data, module = str(r[_TYPE]), str(r[_DATA]), str(r[_MODULE])
         if etype == "RAW_RIR_DATA":
-            if module in RECORD_MODULES and len(records) < MAX_RECORDS:
+            if not subject_in_scope(r):                      # a record about another host or party is context
+                context[etype] += 1
+                disposition["related context"] += 1
+            elif module in RECORD_MODULES and len(records) < MAX_RECORDS:
                 records.append({"module": module, "data": " ".join(data.split())[:MAX_RECORD_CHARS]})
                 disposition["record shown"] += 1
             else:
-                disposition["counted by type only"] += 1
+                disposition["record beyond the cap (counted; all are in the scan results)"] += 1
             continue
         if etype in CONTEXT_ONLY_TYPES:
             context[etype] += 1
@@ -337,7 +347,27 @@ def build_digest(rows: list, *, target: str, target_type: str, log_entries: Iter
                 disposition["third-party personal data (labelled)"] += 1
             continue
         if not _is_finding_type(etype):
-            disposition["counted by type only"] += 1
+            # Not a "finding" type, but still data the model may want: keep exact counts (by_type), lossless
+            # aggregates for the bulky ones, and examples of the rest.
+            if etype == "HTTP_CODE":
+                http_codes[data.strip()[:20]] += 1
+            elif etype == "WEBSERVER_HTTPHEADERS":
+                try:
+                    headers = json.loads(data)
+                    if isinstance(headers, dict):
+                        header_responses += 1
+                        header_counts.update(str(k).lower() for k in headers)
+                except (ValueError, TypeError):
+                    pass
+            if etype not in NO_EXAMPLE_TYPES and etype not in ("HTTP_CODE",):
+                per = other.setdefault(etype, OrderedDict())
+                if len(per) < MAX_OTHER_EXAMPLES or _clip(data) in per:
+                    per.setdefault(_clip(data), set()).add(module)
+            if not subject_in_scope(r):
+                context[etype] += 1
+                disposition["related context"] += 1
+            else:
+                disposition["other event types (exact counts, examples shown)"] += 1
             continue
         if not subject_in_scope(r):
             context[etype] += 1
@@ -376,6 +406,9 @@ def build_digest(rows: list, *, target: str, target_type: str, log_entries: Iter
                           for v in list(own_addresses.values())[:40]],
         "records": records,
         "accounting": dict(disposition),
+        "other_types": {t: [{"data": k, "modules": sorted(m)} for k, m in v.items()] for t, v in other.items()},
+        "http_codes": http_codes.most_common(),
+        "header_stats": {"responses": header_responses, "present": header_counts.most_common(60)},
         "third_party": {t: [{"data": k, "modules": sorted(m)} for k, m in v.items()] for t, v in third_party.items()},
         "inventory": inventory,
         "context_inventory": {t: list(v) for t, v in context_full.items()},
@@ -457,6 +490,21 @@ def render_digest(d: dict, max_chars: int | None = None) -> str:
     else:
         ctx.append("(none)")
 
+    others: list[str] = []
+    if d.get("http_codes"):
+        others += ["", "── HTTP RESPONSES (exact, whole scan) ──",
+                   "  status codes: " + ", ".join(f"{c} x{n}" for c, n in d["http_codes"])]
+    hs = d.get("header_stats") or {}
+    if hs.get("responses"):
+        others += ["  response headers seen across " + str(hs["responses"]) + " responses (header: how many responses carried it): "
+                   + ", ".join(f"{h} {n}" for h, n in hs["present"])]
+    if d.get("other_types"):
+        others += ["", "── OTHER EVENT TYPES (exact counts are in the type counts above; examples shown) ──"]
+        for etype, items in sorted(d["other_types"].items(), key=lambda kv: -dict(d["by_type"]).get(kv[0], 0)):
+            n = next((c for t, c in d["by_type"] if t == etype), None)
+            total = f"{n} events" if n is not None else "events"
+            others.append(f"  [{etype}] {total}: " + "; ".join(i["data"] for i in items))
+
     third: list[str] = []
     if d.get("third_party"):
         third = ["", "── THIRD-PARTY PERSONAL DATA found in public records about OTHER parties ──",
@@ -474,7 +522,8 @@ def render_digest(d: dict, max_chars: int | None = None) -> str:
     body: list[str] = []
     omitted_notes: list[str] = []
     for name, block in (("in-scope findings", findings), ("the target's own data", own), ("structured records", records),
-                        ("related context", ctx), ("third-party personal data", third)):
+                        ("related context", ctx), ("other event types", others),
+                        ("third-party personal data", third)):
         taken, room, left = _take(block, room)
         body += taken
         if left:
