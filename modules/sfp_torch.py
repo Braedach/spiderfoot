@@ -29,7 +29,7 @@ class sfp_torch(SpiderFootAsyncPlugin):
     meta = {
         'name': "TORCH",
         'summary': "Search Tor 'TORCH' search engine for mentions of the target domain.",
-        'flags': ["errorprone", "tor"],
+        'flags': ["tor"],
         'useCases': ["Footprint", "Investigate"],
         'categories': ["Search Engines"],
         'dataSource': {
@@ -45,16 +45,23 @@ class sfp_torch(SpiderFootAsyncPlugin):
     }
 
     opts = {
+        'torch_url': "http://xmh57jrknzkhv6y3ls3ubitzfqnkrwxhopf5aygthi7d6rplyvk3noyd.onion",
         'fetchlinks': True,
         'pages': 20,
         'fullnames': True
     }
 
     optdescs = {
+        'torch_url': "Address of the TORCH search engine's onion service. TORCH has moved before; set the current address here if this stops working.",
         'fetchlinks': "Fetch the darknet pages (via TOR, if enabled) to verify they mention your target.",
-        'pages': "Number of results pages to iterate through.",
+        'pages': "Number of results pages to iterate through (10 results per page).",
         'fullnames': "Search for human names?"
     }
+
+    HITS_PER_PAGE = 10
+    _ONION_BASE = re.compile(r"^https?://[a-z2-7]{16,56}\.onion/?$", re.IGNORECASE)
+    # Each result is a bold link at the start of a table cell: <td><b><a href="URL">Title</a></b>
+    _RESULT_LINK = re.compile(r'<td><b><a href="(https?://[^"]+)"', re.IGNORECASE)
 
     results = None
 
@@ -77,6 +84,21 @@ class sfp_torch(SpiderFootAsyncPlugin):
             "DARKNET_MENTION_CONTENT"
         ]
 
+    @staticmethod
+    def _query(event_type: str, data: str) -> str:
+        """The TORCH (Omega) query for an event.
+
+        Names and domains are searched as an exact phrase, so a name does not match every page that merely contains
+        its words. TORCH cannot match a term containing "@" (checked live 2026-11-16: even generic addresses
+        returned nothing), so an email address is searched as its local part AND its domain; the page is then fetched
+        and checked for the exact address (the fetchlinks option).
+        """
+        data = data.replace('"', "").strip()
+        if event_type == "EMAILADDR" and "@" in data:
+            local, _, domain = data.partition("@")
+            return f"{local} {domain}"
+        return f'"{data}"'
+
     def handleEvent(self, event: SpiderFootEvent) -> None:
         """Handle an event received by this module."""
         if self.errorState:
@@ -93,18 +115,14 @@ class sfp_torch(SpiderFootAsyncPlugin):
 
         self.results[eventData] = True
 
-        formpage = self.fetch_url(
-            "http://torchdeedp3i2jigzjdmfpn5ttjhthh5wbmda2rr3jvqjg5p77c54dqd.onion/",
-            useragent=self.opts['_useragent'],
-            timeout=60)
-
-        if not formpage['content']:
-            self.info("Couldn't connect to TORCH, it might be down.")
+        base = str(self.opts.get('torch_url') or "").strip()
+        if not self._ONION_BASE.match(base):
+            self.error(f"The TORCH address '{base}' is not an onion address; set torch_url to the current TORCH onion address.")
+            self.errorState = True
             return
+        base = base.rstrip("/")
 
-        if "<b>0</b> results" in formpage['content']:
-            self.info(f"No results found on TORCH for {eventData}")
-            return
+        phrase = self._query(eventName, eventData)
 
         pagecount = 0
         while pagecount < self.opts['pages']:
@@ -112,24 +130,26 @@ class sfp_torch(SpiderFootAsyncPlugin):
             if self.checkForStop():
                 return
 
-            # Sites hosted on the domain
-            params = {"action": "search", "query": eventData}
-            if pagecount > 0:
-                params['page'] = pagecount
+            params = {"P": phrase, "DEFAULTOP": "and", "HITSPERPAGE": self.HITS_PER_PAGE,
+                      "TOPDOC": pagecount * self.HITS_PER_PAGE}
             pagecount += 1
 
             qry = urlencode(params)
             data = self.fetch_url(
-                f"http://torchdeedp3i2jigzjdmfpn5ttjhthh5wbmda2rr3jvqjg5p77c54dqd.onion/search?{qry}",
+                f"{base}/cgi-bin/omega/omega?{qry}",
                 useragent=self.opts['_useragent'],
                 timeout=60)
 
             if data is None or not data.get('content'):
-                self.info("No results returned from TORCH.")
+                self.info("Couldn't get results from TORCH (it may be down, or its address in the torch_url option is out of date).")
                 return
 
-            links = re.findall(r'<h5><a href="(.*?)"\s+target="_blank">',
-                               data['content'], re.IGNORECASE)
+            if "No documents match your query" in data['content']:
+                if pagecount == 1:
+                    self.info(f"No results found on TORCH for {eventData}")
+                return
+
+            links = self._RESULT_LINK.findall(data['content'])
 
             linkcount = 0
             for link in links:
