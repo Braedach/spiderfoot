@@ -26,7 +26,7 @@ import dns.resolver
 from spiderfoot.sflib import SpiderFoot
 from spiderfoot import SpiderFootEvent, SpiderFootPlugin, SpiderFootTarget, SpiderFootHelpers, SpiderFootThreadPool
 from spiderfoot import cdn_ranges
-from spiderfoot.scan import scope_policy
+from spiderfoot.scan import egress_health, scope_policy
 from spiderfoot.observability.logger import logWorkerSetup
 from spiderfoot import SpiderFootDb
 from .scan_state_map import (
@@ -223,10 +223,14 @@ class SpiderFootScanner():
             mode=str(self.__config.get('_scope_guard_mode', 'log')).lower(),
             asn_authorised=bool(self.__config.get('_scope_asn_authorised', False)),
             asn_max_addresses=int(self.__config.get('_scope_asn_max_addresses', 256)),
-            cdn_lookup=lambda ip: self.__target.isKnownCdnIP(ip, self.__cdnRanges),
+            cdn_lookup=lambda ip: self.__target.isKnownCdnIP(ip, self.__cdnRanges, self._cdnAsnLookup()),
             resolver=self._resolveForScope,
         )
         self.__target.scopePolicy = self.__scopePolicy
+
+        # Egress health: warns when web requests stop getting any answer (docs: spiderfoot/scan/egress_health.py)
+        self.__egressHealth = egress_health.EgressHealth(notify=lambda msg: self.__sf.status(msg))
+        self.__target.egressHealth = self.__egressHealth
 
         # Ensure all modules have an 'opts' key to prevent KeyError in configSerialize
         if '__modules__' in self.__config:
@@ -614,6 +618,8 @@ class SpiderFootScanner():
             psMod.outgoingEventQueue = self.eventQueue
             psMod.incomingEventQueue = queue.Queue()
 
+            self._runEgressCanaries()
+
             rootEvent = SpiderFootEvent("ROOT", self.__targetValue, "", None)
             psMod.notifyListeners(rootEvent)
             firstEvent = SpiderFootEvent(self.__targetType, self.__targetValue,
@@ -637,6 +643,7 @@ class SpiderFootScanner():
 
             self.waitForThreads()
             self._logScopeGuardSummary()
+            self._logEgressSummary()
             failed = False
 
         except (KeyboardInterrupt, AssertionError):
@@ -866,12 +873,34 @@ class SpiderFootScanner():
                     return False
         return legacy
 
+    def _cdnAsnLookup(self):
+        """Address -> origin ASN for the shared-edge ASN check, or None when switched off (_cdn_asn_check = False)."""
+        if not self.__config.get('_cdn_asn_check', True):
+            return None
+        from spiderfoot.cdn_ranges import cymruAsnLookup
+        return cymruAsnLookup
+
     def _resolveForScope(self, name: str) -> list:
         """Addresses a hostname resolves to now (used to verify names against an IP target)."""
         try:
             return list(self.__sf.resolveHost(name) or []) + list(self.__sf.resolveHost6(name) or [])
         except Exception:
             return []
+
+    def _runEgressCanaries(self) -> None:
+        """Checks at scan start (DNS, and the configured proxy); a failure is logged and the scan carries on."""
+        try:
+            self.__egressHealth.canaries = egress_health.run_canaries(self.__config)
+            for name, ok, detail in self.__egressHealth.canaries:
+                if not ok:
+                    self.__sf.status(f"Egress health: start-of-scan check failed: {name}: {detail}. Results may be incomplete.")
+        except Exception as e:
+            self.__sf.debug(f"Egress canaries could not run: {e}")
+
+    def _logEgressSummary(self) -> None:
+        """Write egress problems to the scan log at the end of the scan (nothing when all was well)."""
+        for line in self.__egressHealth.summary():
+            self.__sf.status(f"Egress health: {line}")
 
     def _logScopeGuardSummary(self) -> None:
         """Write what the scope policy blocked (or would have blocked) to the scan log."""
@@ -908,7 +937,7 @@ class SpiderFootScanner():
 
         sharedIP = self._extractIPForSharedCheck(sfEvent.data)
         if sharedIP:
-            cdnProvider = self.__target.isKnownCdnIP(sharedIP, self.__cdnRanges)
+            cdnProvider = self.__target.isKnownCdnIP(sharedIP, self.__cdnRanges, self._cdnAsnLookup())
             if cdnProvider:
                 self.__sf.debug(
                     f"strict_scope: dropping {sfEvent.eventType} ({sfEvent.data}) for"

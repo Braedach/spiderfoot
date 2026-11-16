@@ -44,6 +44,7 @@ export default function NewScanPage() {
   const [subjectCountry, setSubjectCountry] = useState('');
   const [subjectRegion, setSubjectRegion] = useState('');
   const [authorisedToTest, setAuthorisedToTest] = useState(false);
+  const [subjectLabel, setSubjectLabel] = useState('');
   const [userEditedCountry, setUserEditedCountry] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<string | null>(null);
   const [selectedModules, setSelectedModules] = useState<Set<string>>(new Set());
@@ -211,6 +212,7 @@ export default function NewScanPage() {
     if (tab === 'usecase' && isPersonSearch) {
       if (subjectCountry.trim()) payload.subject_country = subjectCountry.trim();
       if (subjectRegion.trim()) payload.subject_region = subjectRegion.trim();
+      if (subjectLabel.trim()) payload.subject_label = subjectLabel.trim();
     }
     // When useCase === 'all' or no selection, send no modules/type_filter → server uses all modules
     if (stealthLevel !== 'none') {
@@ -535,6 +537,17 @@ export default function NewScanPage() {
                       onChange={(e) => setSubjectRegion(e.target.value)}
                     />
                   </div>
+                  <p className="text-xs text-dark-400 mt-3 mb-2">
+                    Searching the same person by name, email address and phone number? Give those scans the same subject label and each report also sees the others, and says what they confirm about each other. The label stays in this installation.
+                  </p>
+                  <input
+                    className="input-field"
+                    aria-label="Subject label"
+                    placeholder="Subject label, e.g. leon"
+                    maxLength={80}
+                    value={subjectLabel}
+                    onChange={(e) => setSubjectLabel(e.target.value)}
+                  />
                 </div>
               )}
             </div>

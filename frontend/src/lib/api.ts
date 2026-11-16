@@ -166,6 +166,8 @@ export interface ScanCreateRequest {
   subject_region?: string;
   /** Must be true to start a profile that tests the target actively (e.g. web-app-test). */
   authorised_to_test?: boolean;
+  /** Optional: scans sharing a label are about one subject; each report also sees the others. */
+  subject_label?: string;
 }
 
 /** Stealth level names accepted by the scan-creation endpoint. */

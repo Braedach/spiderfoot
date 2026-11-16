@@ -84,6 +84,12 @@ class ScanRequest(BaseModel):
         None, max_length=120,
         description="Optional: the city or state the subject is based in. Used only to weigh the accounts found.",
     )
+    subject_label: str | None = Field(
+        None, max_length=80,
+        description="Optional: a short label shared by the scans that are about the same subject (a name search, an "
+                    "email search and a phone search of one person). The report of each then also sees the others and "
+                    "says what they confirm about each other. Stays in this installation.",
+    )
     authorised_to_test: bool | None = Field(
         None,
         description="Required (true) to start a profile that tests the target actively, such as 'web-app-test': the "
@@ -135,7 +141,8 @@ def _subject_context(scan_request: "ScanRequest") -> dict:
     data source.
     """
     out: dict[str, str] = {}
-    for field, key in (("subject_country", "_subject_country"), ("subject_region", "_subject_region")):
+    for field, key in (("subject_country", "_subject_country"), ("subject_region", "_subject_region"),
+                       ("subject_label", "_subject_label")):
         value = " ".join(str(getattr(scan_request, field, "") or "").split())
         if value:
             out[key] = value[:120]

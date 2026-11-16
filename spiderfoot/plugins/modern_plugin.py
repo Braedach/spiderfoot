@@ -247,6 +247,20 @@ class SpiderFootModernPlugin(SpiderFootPlugin):
         blocked = self._scope_egress_blocked(url)
         if blocked:
             return blocked
+        result = self._fetch_url_unrecorded(url, method, headers, data, timeout, t0, **kwargs)
+        self._record_egress(url, result)
+        return result
+
+    def _record_egress(self, url: str, result: dict | None) -> None:
+        """Tell the scan's egress health monitor whether this request got an answer. Never raises."""
+        try:
+            monitor = getattr(self.getTarget(), "egressHealth", None)
+            if monitor is not None:
+                monitor.record(url, result)
+        except Exception:
+            return
+
+    def _fetch_url_unrecorded(self, url: str, method: str, headers, data, timeout, t0, **kwargs) -> dict | None:
         try:
             if self.http is not None:
                 # Translate modern kwargs to HttpService.fetch_url() params
