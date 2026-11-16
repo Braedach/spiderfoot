@@ -1,3 +1,4 @@
+import { WebSearchTest } from '../components/WebSearchTest';
 import { useState, useMemo, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -264,6 +265,11 @@ export default function SettingsPage() {
               <h3 className="text-sm font-semibold text-foreground">{GLOBAL_GROUPS[activeGroup]?.label}</h3>
               <p className="text-xs text-dark-400 mt-1">{GLOBAL_GROUPS[activeGroup]?.description}</p>
             </div>
+          )}
+
+          {/* Web Search: try the address before relying on it */}
+          {activeGroup === 'websearch' && (
+            <WebSearchTest url={editedValues['_searxng_url'] ?? String(currentOptions.find((o) => o.key === '_searxng_url')?.value ?? '')} />
           )}
 
           {/* Options */}
