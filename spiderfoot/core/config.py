@@ -85,6 +85,12 @@ class ConfigManager:
         '_tor_enabled': True,
         '_tor_host': 'sf-tor',
         '_tor_port': 9050,
+        '_searxng_enabled': False,
+        '_searxng_url': '',
+        '_searxng_max_queries': 6,
+        '_searxng_delay': 2.0,
+        '_searxng_timeout': 20,
+        '_searxng_results': 10,
         '_strict_scope': True,
     }
 
@@ -130,6 +136,12 @@ class ConfigManager:
         ),
         '_tor_host': "Tor SOCKS host. The sf-tor service of the deploy stack by default.",
         '_tor_port': "Tor SOCKS port. 9050 by default.",
+        '_searxng_enabled': "Search the web for a person, email address or phone number through your own SearXNG server. Off by default.",
+        '_searxng_url': "Address of your SearXNG server, for example https://search.example.org. Empty by default: nothing is sent anywhere until you enter it. The server must answer JSON (enable the json format in its settings.yml).",
+        '_searxng_max_queries': "Most searches SpiderFoot sends to SearXNG for one scan target.",
+        '_searxng_delay': "Seconds SpiderFoot waits between searches. How fast the search engines behind SearXNG may really be queried is governed by the SearXNG server (its rate limiter and engine settings); this only caps what SpiderFoot sends.",
+        '_searxng_timeout': "Seconds to wait for each SearXNG search.",
+        '_searxng_results': "Results kept from each search.",
         '_modulesenabled': "Modules enabled for the scan.",
         '_strict_scope': (
             "Block events from reaching invasive tool modules (port scanners, web/TLS"

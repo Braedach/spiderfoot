@@ -79,6 +79,7 @@ export const GLOBAL_GROUPS: Record<string, GroupMeta> = {
   vector: { tab: 'ai', label: 'Vector Search', description: 'Qdrant vector database and the vector-based correlation engine.', order: 3 },
   network: { tab: 'system', label: 'Network & Proxy', description: 'DNS (used for scan targets and public names only; stack services use the container network DNS), SOCKS proxy, and outbound HTTP request behaviour.', order: 4 },
   tor: { tab: 'system', label: 'Tor', description: 'Used only to reach .onion addresses, which the dark-web modules fetch. Ordinary sites never go through Tor, whatever the proxy above is set to. The defaults point at the sf-tor service that ships with the deploy stack; the dashboard (System health) shows whether it is working.', order: 4.5 },
+  websearch: { tab: 'system', label: 'Web Search', description: 'Lets the person, email and phone searches look for mentions on the web through YOUR OWN SearXNG server. Off, with no address, by default: nothing is sent until you enter one. How fast the search engines behind SearXNG may be queried is decided by the SearXNG server (its own rate limiter and engine settings); the two limits here only cap what SpiderFoot sends. The server must answer JSON (enable the json format in its settings.yml).', order: 4.6 },
   database: { tab: 'data', label: 'Database', description: 'PostgreSQL connection used for scan data storage.', order: 5 },
   cache_queue: { tab: 'data', label: 'Cache & Queue', description: 'Redis-backed caching, the event bus, and background worker concurrency.', order: 6 },
   storage: { tab: 'data', label: 'Object Storage', description: 'MinIO/S3 buckets for reports, logs, and backups.', order: 7 },
@@ -153,6 +154,14 @@ export const GLOBAL_KEY_META: Record<string, GlobalKeyMeta> = {
   _tor_enabled: { group: 'tor', label: 'Use Tor', description: 'Fetch .onion addresses through Tor. Turn off to stop all Tor use; dark-web modules then skip .onion pages.' },
   _tor_host: { group: 'tor', label: 'Tor SOCKS Host', description: "Host of the Tor SOCKS proxy. 'sf-tor' is the service in the deploy stack." },
   _tor_port: { group: 'tor', label: 'Tor SOCKS Port', description: 'Port of the Tor SOCKS proxy (9050).' },
+
+  // Web search through the owner's own SearXNG server (modules/sfp_searxng.py)
+  _searxng_enabled: { group: 'websearch', label: 'Use SearXNG', description: 'Search the web for a person, email address or phone number through your own SearXNG server. Turn on after entering its address below.' },
+  _searxng_url: { group: 'websearch', label: 'SearXNG Address', description: 'Address of your SearXNG server, for example https://search.example.org. Empty by default.' },
+  _searxng_max_queries: { group: 'websearch', label: 'Most Searches per Target', description: 'Most searches SpiderFoot sends for one scan target. The real query rate is governed by the SearXNG server; this only caps what SpiderFoot sends.' },
+  _searxng_delay: { group: 'websearch', label: 'Seconds Between Searches', description: 'How long SpiderFoot waits between searches. The SearXNG server decides how fast the engines behind it may really be queried (its rate limiter and engine settings); this only caps what SpiderFoot sends.' },
+  _searxng_timeout: { group: 'websearch', label: 'Search Timeout (seconds)', description: 'How long to wait for each search.' },
+  _searxng_results: { group: 'websearch', label: 'Results per Search', description: 'Results kept from each search.' },
   _useragent: { group: 'network', label: 'User-Agent', description: "HTTP User-Agent string. Prefix with '@' to pick randomly from a file or URL." },
   _genericusers: { group: 'network', label: 'Generic Usernames', description: 'Usernames treated as generic (not attributable to one person) when found in scans.' },
 
