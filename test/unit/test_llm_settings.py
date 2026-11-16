@@ -177,7 +177,7 @@ def test_gui_model_wins_over_a_stale_model_passed_by_the_caller(monkeypatch):
 
     seen = []
 
-    async def fake_anthropic(messages, model, max_tokens, response_format):
+    async def fake_anthropic(messages, model, max_tokens, response_format, cache_prompt=False):
         seen.append(model)
         return "ok"
 
