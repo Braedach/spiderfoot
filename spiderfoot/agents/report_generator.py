@@ -389,6 +389,36 @@ def _backfill_scan_into_qdrant(scan_id: str, engine: "VectorCorrelationEngine") 
         return 0
 
 
+def _subject_links_text(dbh, scan_ids: List[str], target: str) -> str:
+    """The cross-scan section when the scan carries a subject label and other scans share it. Never raises."""
+    try:
+        from spiderfoot import SpiderFootHelpers
+        from spiderfoot.agents.subject_links import MAX_RELATED, link_scans, render_links
+
+        sid = scan_ids[0]
+        label = str((dbh.scanConfigGet(sid) or {}).get("_subject_label") or "").strip()
+        if not label:
+            return ""
+        scans = [{"scan_id": sid, "target": target, "target_type": SpiderFootHelpers.targetTypeFromString(target) or "",
+                  "rows": dbh.scanResultEvent(sid) or []}]
+        for inst in (dbh.scanInstanceList() or [])[:300]:
+            other = str(inst[0])
+            if other in scan_ids or len(scans) > MAX_RELATED:
+                continue
+            if str((dbh.scanConfigGet(other) or {}).get("_subject_label") or "").strip().lower() != label.lower():
+                continue
+            seed = str(inst[2])
+            scans.append({"scan_id": other, "target": seed,
+                          "target_type": SpiderFootHelpers.targetTypeFromString(seed) or "",
+                          "rows": dbh.scanResultEvent(other) or []})
+        if len(scans) < 2:
+            return ""
+        return render_links(link_scans(scans), label, sid)
+    except Exception as e:
+        logger.warning("Cross-scan links unavailable: %s", e)
+        return ""
+
+
 def _load_digest(scan_ids: List[str], target: str) -> dict:
     """Build the scan digest (and the appendix) from every event in the database. Never raises: on any failure the
     report is still written from the vector context alone, as before.
@@ -423,6 +453,9 @@ def _load_digest(scan_ids: List[str], target: str) -> dict:
                 texts.append(label + render_digest(d, max_chars=budget // max(1, len(scan_ids))))
                 appendices.append(render_appendix(d))
                 digests.append({k: d[k] for k in ("target", "target_type", "total_events", "accounting")})
+            linked = _subject_links_text(dbh, scan_ids, target)
+            if linked:
+                texts.append(linked)
         finally:
             dbh.close()
         return {"text": "\n\n".join(texts), "appendix": "\n\n".join(appendices), "digests": digests}

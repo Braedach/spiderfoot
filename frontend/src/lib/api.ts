@@ -164,6 +164,8 @@ export interface ScanCreateRequest {
   /** Optional, for person searches: where the subject is based. Weighs the accounts found; never sent to any service. */
   subject_country?: string;
   subject_region?: string;
+  /** Optional: scans sharing a label are about one subject; each report also sees the others. */
+  subject_label?: string;
 }
 
 /** Stealth level names accepted by the scan-creation endpoint. */
