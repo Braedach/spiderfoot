@@ -221,7 +221,7 @@ class TestProfileManager(unittest.TestCase):
         self.assertIsNotNone(p)
         self.assertEqual(
             set(p.include_modules),
-            {"sfp_phone", "sfp_countryname", "sfp_hudsonrock"},
+            {"sfp_phone", "sfp_countryname", "sfp_hudsonrock", "sfp_searxng"},
         )
         self.assertNotIn("sfp_callername", p.include_modules)       # its domain is parked
         # sfp_gravatar only reads email addresses: it can never run on a phone number
@@ -235,7 +235,7 @@ class TestProfileManager(unittest.TestCase):
             set(p.include_modules),
             {"sfp_accounts", "sfp_arin", "sfp_wikileaks",
              "sfp_github", "sfp_keybase", "sfp_venmo", "sfp_wikipediaedits", "sfp_hudsonrock",
-             "sfp_slideshare", "sfp_myspace", "sfp_tool_maigret", "sfp_ahmia", "sfp_torch"},
+             "sfp_slideshare", "sfp_myspace", "sfp_tool_maigret", "sfp_ahmia", "sfp_torch", "sfp_searxng"},
         )
         self.assertIn("sfp_socialprofiles", p.optional_modules)
 
@@ -248,7 +248,7 @@ class TestProfileManager(unittest.TestCase):
              "sfp_pgp", "sfp_gravatar", "sfp_hudsonrock", "sfp_grep_app",
              "sfp_accounts", "sfp_wikileaks", "sfp_myspace",
              "sfp_github", "sfp_keybase", "sfp_venmo", "sfp_wikipediaedits",
-             "sfp_slideshare", "sfp_tool_user_scanner", "sfp_tool_maigret", "sfp_ahmia", "sfp_torch"},
+             "sfp_slideshare", "sfp_tool_user_scanner", "sfp_tool_maigret", "sfp_ahmia", "sfp_torch", "sfp_searxng"},
         )
         for dead in ("sfp_trumail", "sfp_searchcode", "sfp_twitter"):     # services gone or login-walled
             self.assertNotIn(dead, p.include_modules)
