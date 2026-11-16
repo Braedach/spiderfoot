@@ -201,6 +201,34 @@ class SpiderFootModernPlugin(SpiderFootPlugin):
     # Modern convenience methods (delegate to services or fallback)
     # ------------------------------------------------------------------
 
+    def _scope_egress_blocked(self, url: str) -> dict | None:
+        """Scope guard on outbound web requests (docs/scope-guard-design.md).
+
+        Returns a failed-fetch result when the request must not be made, else None. In log mode it only records.
+        Never raises: a problem in the guard must not stop a scan.
+        """
+        try:
+            policy = getattr(self.getTarget(), "scopePolicy", None)
+            if policy is None or policy.mode == "off":
+                return None
+            meta = getattr(self, "meta", {}) or {}
+            vendor = [meta.get("dataSource", {}).get("website", ""), meta.get("toolDetails", {}).get("website", "")]
+            vendor += [str(v) for k, v in (getattr(self, "opts", {}) or {}).items() if "url" in k.lower() and isinstance(v, str)]
+            from spiderfoot.scan.scope_policy import host_of
+            vendor_hosts = [host_of(v) or "" for v in vendor]
+            decision = policy.egress(self.__name__, url, vendor_hosts)
+            if decision.allowed:
+                return None
+            from spiderfoot.scan.scope_policy import ACTIVE_MODULES as _ACTIVE
+            policy.record(self.__name__, url, decision,
+                          "egress blocked" if (policy.mode == "enforce" and self.__name__ in _ACTIVE) else "egress would block")
+            from spiderfoot.scan.scope_policy import ACTIVE_MODULES
+            if policy.mode == "enforce" and self.__name__ in ACTIVE_MODULES:   # others are only ever logged
+                return {"content": None, "code": None, "headers": None, "realurl": url, "status": "scope-guard"}
+        except Exception:
+            return None
+        return None
+
     def fetch_url(self, url: str, method: str = "GET",
                   headers: dict | None = None,
                   data: Any | None = None,
@@ -216,6 +244,9 @@ class SpiderFootModernPlugin(SpiderFootPlugin):
         Returns a dict with keys: content, code, headers, realurl, status
         """
         t0 = time.monotonic()
+        blocked = self._scope_egress_blocked(url)
+        if blocked:
+            return blocked
         try:
             if self.http is not None:
                 # Translate modern kwargs to HttpService.fetch_url() params

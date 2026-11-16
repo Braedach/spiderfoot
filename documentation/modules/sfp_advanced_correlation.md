@@ -118,7 +118,7 @@ cross_platform_correlation = True
 ```bash
 curl -X POST http://localhost:8001/api/v1/scans \
   -H "Content-Type: application/json" \
-  -d '{"target": "user@example.com", "modules": ["sfp_social", "sfp_twitter", "sfp_tiktok_osint", "sfp_advanced_correlation"]}'
+  -d '{"target": "user@example.com", "modules": ["sfp_social", "sfp_tiktok_osint", "sfp_advanced_correlation"]}'
 ```
 
 ### Temporal Pattern Analysis
@@ -182,7 +182,7 @@ triggers:
 ### Recommended Combinations
 ```bash
 # Social media investigation with correlation
--m sfp_twitter,sfp_tiktok_osint,sfp_linkedin,sfp_advanced_correlation
+-m sfp_tiktok_osint,sfp_linkedin,sfp_advanced_correlation
 
 # Blockchain analysis with entity correlation
 -m sfp_blockchain_analytics,sfp_advanced_correlation

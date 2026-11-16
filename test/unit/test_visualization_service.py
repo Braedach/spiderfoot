@@ -73,9 +73,9 @@ class FakeDbh:
     def scanInstanceGet(self, scan_id):
         return self._scans.get(scan_id)
 
-    def scanResultEvent(self, scan_id, event_type=None):
+    def scanResultEvent(self, scan_id, event_type="ALL"):
         rows = self._results.get(scan_id, [])
-        if event_type:
+        if event_type and event_type != "ALL":      # "ALL" means no filter, as in the real SpiderFootDb
             return [r for r in rows if len(r) > 3 and r[3] == event_type]
         return rows
 
@@ -498,3 +498,40 @@ class TestVisualizationRouter:
         client = self._client(svc)
         resp = client.get("/visualization/heatmap/missing")
         assert resp.status_code == 404
+
+
+class StrictDbh(FakeDbh):
+    """Behaves like the real SpiderFootDb.scanResultEvent(): the "ALL" default applies only when the argument is
+    omitted, and an explicit None raises. FakeDbh accepted None, which is how an unfiltered graph request returning
+    HTTP 500 for every scan went unnoticed."""
+
+    def scanResultEvent(self, scan_id, event_type="ALL"):
+        if not isinstance(event_type, (str, list)):
+            raise TypeError(f"eventType is {type(event_type)}; expected str() or list()")
+        rows = self._results.get(scan_id, [])
+        if event_type != "ALL":
+            wanted = event_type if isinstance(event_type, list) else [event_type]
+            return [r for r in rows if len(r) > 3 and r[3] in wanted]
+        return rows
+
+
+class TestUnfilteredRequestsAgainstTheRealContract:
+
+    def _service(self):
+        repo, dbh = FakeRepo(), StrictDbh()
+        repo.add(FakeScanRecord(scan_id="S1"))
+        dbh._results["S1"] = [("t", "data", "mod", "IP_ADDRESS", "h", "ROOT")]
+        return VisualizationService(scan_repo=repo, dbh=dbh)
+
+    def test_an_unfiltered_graph_request_returns_the_events(self):
+        _info, results = self._service().get_graph_data("S1")
+        assert len(results) == 1
+
+    def test_a_filtered_graph_request_still_filters(self):
+        svc = self._service()
+        assert len(svc.get_graph_data("S1", event_type="IP_ADDRESS")[1]) == 1
+        assert svc.get_graph_data("S1", event_type="EMAILADDR")[1] == []
+
+    def test_the_multi_scan_graph_without_a_filter_works(self):
+        valid, results = self._service().get_multi_scan_graph_data(["S1"])
+        assert valid == ["S1"] and len(results) == 1

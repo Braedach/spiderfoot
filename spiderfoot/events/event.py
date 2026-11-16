@@ -300,6 +300,11 @@ class SpiderFootEvent:
         if not isinstance(data, str):
             raise TypeError(f"data is {type(data)}; expected str()")
 
+        # PostgreSQL text columns cannot hold a NUL (0x00): storing such an event failed ("A string literal cannot
+        # contain NUL (0x00) characters") and the event was lost. Binary-ish content (a fetched document, a banner)
+        # can carry them, so they are removed where every event is created, not in each storage path.
+        data = data.replace("\x00", "")
+
         if not data:
             raise ValueError(f"data is empty: '{str(data)}'")
 

@@ -76,3 +76,65 @@ class TestModuleCrt(TestModuleBase):
     def tearDown(self):
         """Clean up after each test."""
         super().tearDown()
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# crt.sh is often slow or overloaded. A live scan logged "No response from crt.sh" 40 times and its certificate
+# history stopped a year short of the live certificate.
+
+from unittest import mock as _mock
+
+
+class TestCrtRetries(TestModuleBase):
+
+    def _module(self, answers, **opts):
+        m = sfp_crt()
+        m.__name__ = "sfp_crt"
+        m.setup(SpiderFoot(self.default_options), {"_useragent": "SpiderFoot", "retrywait": 0, **opts})
+        self.calls = []
+        queue = list(answers)
+
+        def fake_fetch(url, **kw):
+            self.calls.append(url)
+            return queue.pop(0) if queue else None
+        m.fetch_url = fake_fetch
+        m.checkForStop = lambda: False
+        return m
+
+    def test_a_missing_answer_is_retried_and_a_later_success_is_used(self):
+        ok = {"code": "200", "content": '[{"id": 1}]'}
+        with _mock.patch("modules.sfp_crt.time.sleep"):
+            res = self._module([None, None, ok])._fetch_with_retry("https://crt.sh/?q=x")
+        assert res is ok and len(self.calls) == 3
+
+    def test_a_server_error_or_rate_limit_is_retried(self):
+        ok = {"code": "200", "content": "x"}
+        with _mock.patch("modules.sfp_crt.time.sleep"):
+            res = self._module([{"code": "503", "content": ""}, {"code": "429", "content": ""}, ok])._fetch_with_retry("u")
+        assert res is ok
+
+    def test_a_clean_answer_including_not_found_is_not_retried(self):
+        for answer in ({"code": "200", "content": "[]"}, {"code": "404", "content": ""}):
+            with _mock.patch("modules.sfp_crt.time.sleep"):
+                m = self._module([answer])
+                assert m._fetch_with_retry("u") is answer and len(self.calls) == 1
+
+    def test_it_gives_up_after_the_configured_retries(self):
+        with _mock.patch("modules.sfp_crt.time.sleep"):
+            m = self._module([None] * 10, retries=1)
+            assert m._fetch_with_retry("u") is None
+        assert len(self.calls) == 2
+
+    def test_the_pause_grows_with_each_retry(self):
+        with _mock.patch("modules.sfp_crt.time.sleep") as sleep:
+            self._module([None] * 5, retries=3, retrywait=2)._fetch_with_retry("u")
+        assert [c.args[0] for c in sleep.call_args_list] == [2.0, 4.0, 6.0]
+
+    def test_zero_retries_means_one_attempt(self):
+        with _mock.patch("modules.sfp_crt.time.sleep"):
+            m = self._module([None, None], retries=0)
+            m._fetch_with_retry("u")
+        assert len(self.calls) == 1
+
+    def test_the_options_are_documented(self):
+        assert set(sfp_crt.opts) == set(sfp_crt.optdescs)
