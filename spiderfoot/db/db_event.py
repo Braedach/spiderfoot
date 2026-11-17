@@ -245,6 +245,39 @@ class EventManager:
             except psycopg2.Error as e:
                 raise OSError("SQL error encountered when fetching result events") from e
 
+    def scanResultEventGraph(self, instanceId: str, eventType: str = 'ALL') -> list:
+        """Result events in the 15-column layout the graph builders expect.
+
+        ``SpiderFootHelpers.buildGraphData`` / ``buildGraphJson`` / ``buildGraphGexf`` read, per row: ``[1]`` data,
+        ``[2]`` the data of the event it came from, ``[4]`` type, ``[8]`` hash and ``[11]`` the type's category
+        (ENTITY, INTERNAL, DESCRIPTOR, DATA...). ``scanResultEvent`` returns a 9-column row without those, which made the
+        builders raise and the graph come out empty for every scan.
+        """
+        if not isinstance(instanceId, str):
+            raise TypeError(f"instanceId is {type(instanceId)}; expected str()")
+        if not isinstance(eventType, str):
+            raise TypeError(f"eventType is {type(eventType)}; expected str()")
+        qry = ("SELECT ROUND(c.generated) AS generated, c.data, COALESCE(s.data, c.data) AS source_data, c.module, c.type, "
+               "c.confidence, c.visibility, c.risk, c.hash, c.source_event_hash, COALESCE(t.event_descr, c.type), "
+               "COALESCE(t.event_type, 'DATA'), c.scan_instance_id, c.false_positive, COALESCE(s.false_positive, 0) "
+               "FROM tbl_scan_results c "
+               "LEFT JOIN tbl_scan_results s ON s.hash = c.source_event_hash AND s.scan_instance_id = c.scan_instance_id "
+               "LEFT JOIN tbl_event_types t ON t.event = c.type "
+               f"WHERE c.scan_instance_id = {self._ph}")
+        qvars = [instanceId]
+        if eventType != "ALL":
+            qry += f" AND c.type = {self._ph}"
+            qvars.append(eventType)
+        qry += " ORDER BY c.generated"
+        with self.dbhLock:
+            try:
+                self.dbh.execute(qry, qvars)
+                rows = self.dbh.fetchall()
+                self.conn.commit()
+                return rows
+            except psycopg2.Error as e:
+                raise OSError("SQL error encountered when fetching graph events") from e
+
     def scanResultEventUnique(self, instanceId: str, eventType: str = 'ALL', filterFp: bool = False) -> list:
         """Retrieve unique scan result events grouped by type and data."""
         if not isinstance(instanceId, str):

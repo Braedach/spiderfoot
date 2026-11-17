@@ -79,6 +79,9 @@ class FakeDbh:
             return [r for r in rows if len(r) > 3 and r[3] == event_type]
         return rows
 
+    def scanResultEventGraph(self, scan_id, event_type="ALL"):
+        return self.scanResultEvent(scan_id, event_type)
+
     def scanResultSummary(self, scan_id, group_by="type"):
         return self._summaries.get(scan_id, [])
 
@@ -535,3 +538,51 @@ class TestUnfilteredRequestsAgainstTheRealContract:
     def test_the_multi_scan_graph_without_a_filter_works(self):
         valid, results = self._service().get_multi_scan_graph_data(["S1"])
         assert valid == ["S1"] and len(results) == 1
+
+
+def _row(data, source, etype, h, category, module="sfp_x"):
+    """A row in the 15-column layout the graph builders read (see SpiderFootDb.scanResultEventGraph)."""
+    return (0, data, source, module, etype, "ROOT", 100, 100, h, 0, 0, category, "S1", 0, 0)
+
+
+class TestTheGraphIsBuiltFromRealRows:
+    """The graph builders were fed 9-column rows, raised, and returned an empty graph for every scan. These tests run
+    the real builders (the older ones above replace them with a stub)."""
+
+    ROWS = [
+        # The scan's own root event: hash "ROOT", and its children name it as their source.
+        _row("example.org", "example.org", "ROOT", "ROOT", "INTERNAL"),
+        _row("example.org", "example.org", "INTERNET_NAME", "h1", "ENTITY"),
+        _row("93.184.216.34", "example.org", "IP_ADDRESS", "h2", "ENTITY"),
+        _row("Perth, AU", "93.184.216.34", "GEOINFO", "h3", "DESCRIPTOR"),
+    ]
+
+    def _client(self):
+        repo, dbh = FakeRepo(), FakeDbh()
+        repo.add(FakeScanRecord(scan_id="S1"))
+        dbh._results["S1"] = list(self.ROWS)
+        return TestClient(_build_test_app(VisualizationService(scan_repo=repo, dbh=dbh)))
+
+    def test_the_json_graph_has_nodes_and_edges(self):
+        body = self._client().get("/visualization/graph/S1").json()
+        assert len(body["nodes"]) >= 2
+        assert body["edges"]
+
+    def test_the_gexf_export_has_nodes(self):
+        resp = self._client().get("/visualization/graph/S1?format=gexf")
+        assert resp.status_code == 200
+        assert "<node " in resp.text
+
+    def test_a_type_filter_is_accepted(self):
+        resp = self._client().get("/visualization/graph/S1?filter_type=IP_ADDRESS")
+        assert resp.status_code == 200
+
+    def test_the_multi_scan_graph_has_nodes(self):
+        body = self._client().get("/visualization/graph/multi?scan_ids=S1&format=json").json()
+        assert body["nodes"]
+
+    def test_the_database_layer_offers_the_15_column_query(self):
+        from spiderfoot.db import SpiderFootDb
+        from spiderfoot.db.db_event import EventManager
+        assert callable(getattr(EventManager, "scanResultEventGraph", None))
+        assert callable(getattr(SpiderFootDb, "scanResultEventGraph", None))

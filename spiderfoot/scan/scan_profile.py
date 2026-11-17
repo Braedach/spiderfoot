@@ -316,7 +316,7 @@ class ScanProfile:
 
 
 # Module options that expand a scan beyond the target: they look up the netblock, subnet or neighbours of an address.
-EXPANSION_OPTION_KEYS = ("netblocklookup", "subnetlookup", "netblockscan", "scan_netblocks")
+EXPANSION_OPTION_KEYS = ("netblocklookup", "subnetlookup", "netblockscan", "scan_netblocks", "expandasnetblocks")
 
 
 # The searches the New Scan page offers, and the profile each one runs. "target_types" are the SpiderFoot target types
@@ -793,6 +793,9 @@ class ProfileManager:
             ],
             exclude_flags=["errorprone", "tor", "invasive", "tool"],
             disable_expansion=True,
+            # The target of an ASN scan is the AS itself, so listing the netblocks that AS announces is the scan, not a
+            # wander to someone else's network. Every other expansion stays off.
+            module_options={"sfp_ripe": {"expandasnetblocks": True}},
             max_threads=2,
             timeout_minutes=30,
             tags=["asn", "registry", "passive"],
