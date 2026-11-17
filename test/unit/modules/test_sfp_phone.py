@@ -214,7 +214,11 @@ class TestPhoneDescribe(TestModuleBase):
     def test_a_fixed_line_gets_a_location(self):
         out = self._run(FIXED)
         assert out["PHONE_NUMBER_TYPE"] == "Fixed line"
-        assert out["GEOINFO"] == "Armadale"                # the geocoder lookup was commented out before
+        assert out["GEOINFO"] == "Armadale, AU"            # the map places it by the country code at the end
+
+    def test_a_mobile_number_still_says_which_country_it_belongs_to(self):
+        # libphonenumber has no finer location for a mobile, but the map needs a country to place the number.
+        assert self._run(MOBILE)["GEOINFO"] == "AU"
 
     def test_an_invalid_number_is_reported_as_invalid_and_not_typed(self):
         out = self._run(GARBAGE)

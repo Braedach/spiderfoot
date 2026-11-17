@@ -13,9 +13,20 @@ from __future__ import annotations
 """Executes correlation rules against scan data using pluggable strategies."""
 
 import logging
+import threading
 from collections import defaultdict
 from typing import Any, Callable
 from spiderfoot.correlation.rule_loader import RuleLoader
+
+# One run at a time per scan inside a process, so two triggers for the same scan cannot interleave their clear and write.
+_SCAN_RUN_LOCKS: dict[str, threading.Lock] = {}
+_SCAN_RUN_LOCKS_GUARD = threading.Lock()
+
+
+def _scan_lock(scan_id: str) -> threading.Lock:
+    with _SCAN_RUN_LOCKS_GUARD:
+        return _SCAN_RUN_LOCKS.setdefault(scan_id, threading.Lock())
+
 
 class RuleExecutionStrategy:
     """Base class for pluggable rule execution strategies."""
@@ -401,7 +412,23 @@ class RuleExecutor:
         self.debug = debug
 
     def run(self) -> dict:
-        """Execute all enabled rules in sequence and return aggregated results."""
+        """Execute all enabled rules in sequence and return aggregated results.
+
+        For a single scan the results are replaced, not added to: the scanner, the correlation service and the manual
+        "run correlations" action can all run the same scan, and each used to add a full copy.
+        """
+        if len(self.scan_ids) == 1 and hasattr(self.dbh, 'correlationResultsClear'):
+            with _scan_lock(self.scan_ids[0]):
+                try:
+                    removed = self.dbh.correlationResultsClear(self.scan_ids[0])
+                    if removed:
+                        self.log.info("Replacing %s earlier correlation result(s) for scan %s", removed, self.scan_ids[0])
+                except Exception as e:
+                    self.log.warning("Could not clear earlier correlation results for %s: %s", self.scan_ids[0], e)
+                return self._run_rules()
+        return self._run_rules()
+
+    def _run_rules(self) -> dict:
         for rule in self.rules:
             if not rule.get('enabled', True):
                 self.log.info(f"Skipping disabled rule: {rule.get('id', rule.get('meta', {}).get('name', 'unknown'))}")

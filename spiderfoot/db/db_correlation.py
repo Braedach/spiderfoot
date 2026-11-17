@@ -37,6 +37,32 @@ class CorrelationManager:
     def _is_transient_error(self, exc: BaseException) -> bool:
         return is_transient_error(exc)
 
+    def correlationResultsClear(self, instanceId: str) -> int:
+        """Delete every correlation result stored for a scan, so a new run replaces them instead of adding a copy.
+
+        Returns the number of results removed.
+        """
+        if not isinstance(instanceId, str):
+            raise TypeError(f"instanceId is {type(instanceId)}; expected str()")
+        ph = get_placeholder(self.db_type)
+        with self.dbhLock:
+            try:
+                self.dbh.execute(
+                    f"DELETE FROM tbl_scan_correlation_results_events WHERE correlation_id IN "
+                    f"(SELECT id FROM tbl_scan_correlation_results WHERE scan_instance_id = {ph})", [instanceId])
+                self.dbh.execute(
+                    f"DELETE FROM tbl_scan_correlation_results WHERE scan_instance_id = {ph}", [instanceId])
+                removed = getattr(self.dbh, "rowcount", 0) or 0
+                self.conn.commit()
+                return int(removed)
+            except Exception as e:
+                self._log_db_error("Unable to clear correlation results", e)
+                try:
+                    self.conn.rollback()
+                except Exception:
+                    pass
+                raise OSError("Unable to clear correlation results") from e
+
     def correlationResultCreate(self, instanceId: str, event_hash: str, ruleId: str,
         ruleName: str, ruleDescr: str, ruleRisk: str, ruleYaml: str, correlationTitle: str, eventHashes: list) -> str:
         """Create a new correlation result and associate event hashes."""

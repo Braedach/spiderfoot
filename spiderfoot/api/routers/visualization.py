@@ -56,7 +56,7 @@ async def get_multi_scan_graph_data(
 
         if format.lower() == "gexf":
             graph_data = SpiderFootHelpers.buildGraphGexf(
-                valid_ids, all_results, include_internal
+                valid_ids, "SpiderFoot Export", all_results, [filter_type] if filter_type else None
             )
             return Response(
                 content=graph_data,
@@ -67,7 +67,7 @@ async def get_multi_scan_graph_data(
             )
 
         graph_data = SpiderFootHelpers.buildGraphJson(
-            valid_ids, all_results, include_internal
+            valid_ids, all_results, [filter_type] if filter_type else None
         )
         return JSONResponse(
             content=json.loads(graph_data) if isinstance(graph_data, str) else graph_data
@@ -93,11 +93,14 @@ async def get_scan_graph_data(
 ) -> Response:
     """Generate graph visualization data for a scan."""
     try:
-        _info, results = svc.get_graph_data(scan_id, event_type=filter_type)
+        info, results = svc.get_graph_data(scan_id, event_type=filter_type)
+        # The graph builders mark the scan's target as the root node and take the event types to keep as ``flt``.
+        root = [str(info.get("target") or scan_id)]
+        keep = [filter_type] if filter_type else None
 
         if format.lower() == "gexf":
             graph_data = SpiderFootHelpers.buildGraphGexf(
-                [scan_id], results, include_internal
+                root, "SpiderFoot Export", results, keep
             )
             return Response(
                 content=graph_data,
@@ -107,9 +110,7 @@ async def get_scan_graph_data(
                 },
             )
 
-        graph_data = SpiderFootHelpers.buildGraphJson(
-            [scan_id], results, include_internal
-        )
+        graph_data = SpiderFootHelpers.buildGraphJson(root, results, keep)
         return JSONResponse(
             content=json.loads(graph_data) if isinstance(graph_data, str) else graph_data
         )

@@ -52,8 +52,14 @@ class sfp_ripe(SpiderFootAsyncPlugin):
     }
 
     # Default options
-    opts = {}
-    optdescs = {}
+    opts = {
+        "expandasnetblocks": True,
+    }
+    optdescs = {
+        "expandasnetblocks": "When the AS that owns an address belongs to the same organisation, follow every netblock that "
+                             "AS announces. Turn off to keep the scan to the target itself: an address scan that followed "
+                             "them walked hundreds of netblocks owned by others.",
+    }
 
     results = None
     currentEventSrc = None
@@ -363,6 +369,10 @@ class sfp_ripe(SpiderFootAsyncPlugin):
             # Don't report additional netblocks from this AS if we've
             # already found this AS before.
             if eventData in self.nbreported:
+                return
+
+            if not self.opts.get("expandasnetblocks", True):
+                self.debug(f"Not following the netblocks of {eventData}: expansion is switched off for this scan.")
                 return
 
             # Find all the netblocks owned by this AS

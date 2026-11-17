@@ -726,6 +726,10 @@ class SpiderFootDb:
             instanceId, eventType, srcModule, data,
             sourceId, correlationId, filterFp,
         )
+    def scanResultEventGraph(self, instanceId: str, eventType: str = 'ALL') -> list:
+        """Retrieve result events in the 15-column layout the graph builders expect."""
+        return self._event.scanResultEventGraph(instanceId, eventType)
+
     def scanResultEventUnique(self, instanceId: str, eventType: str = 'ALL', filterFp: bool = False) -> list:
         """Retrieve unique scan result events."""
         return self._event.scanResultEventUnique(instanceId, eventType, filterFp)
@@ -767,6 +771,9 @@ class SpiderFootDb:
             instanceId, event_hash, ruleId, ruleName, ruleDescr,
             ruleRisk, ruleYaml, correlationTitle, eventHashes,
         )
+    def correlationResultsClear(self, instanceId: str) -> int:
+        """Delete a scan's correlation results (a new run replaces them)."""
+        return self._correlation.correlationResultsClear(instanceId)
     def scanCorrelationSummary(self, instanceId: str, by: str = "rule") -> list:
         """Retrieve a summary of scan correlations."""
         return self._correlation.scanCorrelationSummary(instanceId, by)

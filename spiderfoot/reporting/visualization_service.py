@@ -65,6 +65,12 @@ class VisualizationService:
         # TypeError, which made every unfiltered graph request return HTTP 500.
         return self._dbh.scanResultEvent(scan_id, event_type or "ALL") or []
 
+    def _get_graph_results(self, scan_id: str, event_type=None):
+        """Result rows in the layout the graph builders read (see ``scanResultEventGraph``)."""
+        if self._dbh is None:
+            return []
+        return self._dbh.scanResultEventGraph(scan_id, event_type or "ALL") or []
+
     def _get_summary(self, scan_id: str, group_by: str = "type"):
         if self._dbh is None:
             return []
@@ -86,7 +92,7 @@ class VisualizationService:
             Tuple of (scan_info_dict, raw_result_rows).
         """
         info = self._require_scan(scan_id)
-        results = self._get_results(scan_id, event_type)
+        results = self._get_graph_results(scan_id, event_type)
         return info, results
 
     def get_multi_scan_graph_data(
@@ -105,7 +111,7 @@ class VisualizationService:
             try:
                 self._require_scan(sid)
                 valid_ids.append(sid)
-                all_results.extend(self._get_results(sid, event_type))
+                all_results.extend(self._get_graph_results(sid, event_type))
             except VisualizationServiceError:
                 log.warning("Scan %s not found, skipping", sid)
         return valid_ids, all_results

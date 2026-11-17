@@ -109,8 +109,11 @@ class sfp_phone(SpiderFootAsyncPlugin):
                 emit("PROVIDER_TELCO", facts["carrier"])
             if facts["valid"] and facts["line_type"] != "Unknown":
                 emit("PHONE_NUMBER_TYPE", facts["line_type"])
-            if facts["location"]:
-                emit("GEOINFO", facts["location"])
+            # The map places a GEOINFO event by its two-letter country code, so always say which country the number
+            # belongs to, even when libphonenumber has no finer location (mobile numbers carry only the country).
+            region = facts.get("region_code")
+            if facts["location"] or (facts["valid"] and region):
+                emit("GEOINFO", ", ".join(p for p in (facts["location"], region) if p))
             emit("RAW_RIR_DATA", json.dumps(facts, indent=2))
 
     _LINE_TYPES = {

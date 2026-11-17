@@ -40,6 +40,17 @@ from spiderfoot import SpiderFootEvent
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
 
 
+def _coordinates(lat, lon) -> str | None:
+    """``"lat,lon"`` when both are valid numbers inside the globe, else None."""
+    try:
+        la, lo = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return None
+    if not (-90 <= la <= 90 and -180 <= lo <= 180) or (la == 0 and lo == 0):
+        return None
+    return f"{la:.4f},{lo:.4f}"
+
+
 class sfp_ipapico_modern(SpiderFootAsyncPlugin):
 
     """Queries ipapi.co to identify geolocation of IP Addresses """
@@ -86,6 +97,7 @@ class sfp_ipapico_modern(SpiderFootAsyncPlugin):
         """Return the list of events this module produces."""
         return [
             "GEOINFO",
+            "PHYSICAL_COORDINATES",
             "RAW_RIR_DATA",
         ]
 
@@ -149,6 +161,11 @@ class sfp_ipapico_modern(SpiderFootAsyncPlugin):
 
             evt = SpiderFootEvent('GEOINFO', location, self.__name__, event)
             self.notifyListeners(evt)
+
+            # The map pins an address only when it has coordinates; the service returns them, so pass them on.
+            coords = _coordinates(data.get('latitude'), data.get('longitude'))
+            if coords:
+                self.notifyListeners(SpiderFootEvent('PHYSICAL_COORDINATES', coords, self.__name__, event))
 
             evt = SpiderFootEvent(
                 'RAW_RIR_DATA', str(data), self.__name__, event)

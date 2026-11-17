@@ -94,7 +94,7 @@ class sfp_ipinfo_modern(SpiderFootAsyncPlugin):
 
     def producedEvents(self) -> list[str]:
         """Return the list of events this module produces."""
-        return ["GEOINFO"]
+        return ["GEOINFO", "PHYSICAL_COORDINATES"]
 
     def queryIP(self, ip: str) -> dict | None:
         """Query ipinfo.io for IP geolocation.
@@ -188,3 +188,13 @@ class sfp_ipinfo_modern(SpiderFootAsyncPlugin):
 
         evt = SpiderFootEvent("GEOINFO", location, self.__name__, event)
         self.notifyListeners(evt)
+
+        # ipinfo.io returns "lat,lon" in `loc`; the map pins an address only when it has coordinates.
+        parts = str(data.get('loc') or '').split(',')
+        if len(parts) == 2:
+            try:
+                la, lo = float(parts[0]), float(parts[1])
+            except ValueError:
+                la = lo = None
+            if la is not None and -90 <= la <= 90 and -180 <= lo <= 180 and not (la == 0 and lo == 0):
+                self.notifyListeners(SpiderFootEvent("PHYSICAL_COORDINATES", f"{la:.4f},{lo:.4f}", self.__name__, event))

@@ -75,7 +75,7 @@ class sfp_intelx(SpiderFootAsyncPlugin):
     # Option descriptions
     optdescs = {
         "api_key": "IntelligenceX API key.",
-        "base_url": "API URL, as provided in your IntelligenceX account settings.",
+        "base_url": "API host, as shown in your IntelligenceX account settings (2.intelx.io for a paid key, free.intelx.io for the free one). A pasted https:// address is accepted.",
         "checkcohosts": "Check co-hosted sites?",
         "checkaffiliates": "Check affiliates?",
         'netblocklookup': "Look up all IPs on netblocks deemed to be owned by your target for possible hosts on the same target subdomain/domain?",
@@ -112,6 +112,19 @@ class sfp_intelx(SpiderFootAsyncPlugin):
                 "INTERNET_NAME", "DOMAIN_NAME",
                 "EMAILADDR", "EMAILADDR_GENERIC"]
 
+    def host(self) -> str:
+        """The API host from the ``base_url`` option, however it was typed.
+
+        The account page shows the address as ``https://free.intelx.io/``, so people paste that; the module adds the
+        scheme itself, which produced ``https://https://free.intelx.io//...`` and a search that never reached the server.
+        """
+        from urllib.parse import urlparse
+        raw = str(self.opts.get('base_url') or '').strip()
+        if not raw:
+            return ""
+        parsed = urlparse(raw if "://" in raw else "//" + raw)
+        return (parsed.netloc or parsed.path).strip("/").lower()
+
     def query(self, qry: str, qtype: str):
         """Query the data source."""
         retdata = list()
@@ -134,7 +147,7 @@ class sfp_intelx(SpiderFootAsyncPlugin):
             "terminate": []
         }
 
-        url = 'https://' + self.opts['base_url'] + '/' + qtype + '/search'
+        url = 'https://' + self.host() + '/' + qtype + '/search'
         res = self.fetch_url(url, postData=json.dumps(payload),
                                headers=headers, timeout=self.opts['_fetchtimeout'])
 
@@ -206,7 +219,7 @@ class sfp_intelx(SpiderFootAsyncPlugin):
         if self.errorState:
             return
 
-        if self.opts['api_key'] == "" or self.opts['base_url'] == "":
+        if self.opts['api_key'] == "" or self.host() == "":
             self.error(
                 "You enabled sfp_intelx but did not set an API key and/or base URL!")
             self.errorState = True
@@ -264,9 +277,8 @@ class sfp_intelx(SpiderFootAsyncPlugin):
                 e = SpiderFootEvent(evt, val, self.__name__, event)
                 self.notifyListeners(e)
 
-        from urllib.parse import urlparse
-        parsed_url = urlparse(self.opts['base_url'])
-        if parsed_url.hostname == "public.intelx.io" or eventName != "INTERNET_NAME":
+        # The free and public tiers do not include the phonebook search, so only the paid host is asked for it.
+        if self.host() in ("public.intelx.io", "free.intelx.io") or eventName != "INTERNET_NAME":
             return
 
         data = self.query(eventData, "phonebook")
