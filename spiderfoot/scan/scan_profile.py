@@ -316,7 +316,11 @@ class ScanProfile:
 
 
 # Module options that expand a scan beyond the target: they look up the netblock, subnet or neighbours of an address.
-EXPANSION_OPTION_KEYS = ("netblocklookup", "subnetlookup", "netblockscan", "scan_netblocks", "expandasnetblocks")
+EXPANSION_OPTION_KEYS = (
+    "netblocklookup", "subnetlookup", "netblockscan", "scan_netblocks", "expandasnetblocks",
+    # reputation feeds that check every address in an owned netblock
+    "checknetblocks",
+)
 
 
 # The searches the New Scan page offers, and the profile each one runs. "target_types" are the SpiderFoot target types

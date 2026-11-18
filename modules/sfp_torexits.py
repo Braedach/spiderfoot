@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 
-from netaddr import IPNetwork
+from netaddr import IPAddress, IPNetwork
 
 from spiderfoot import SpiderFootEvent
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
@@ -59,12 +59,14 @@ class sfp_torexits(SpiderFootAsyncPlugin):
 
     results = None
     errorState = False
+    _exit_set = None
 
     def setup(self, sfc: SpiderFoot, userOpts: dict = None) -> None:
         """Set up the module."""
         super().setup(sfc, userOpts or {})
         self.results = self.tempStorage()
         self.errorState = False
+        self._exit_set = None
         self.__dataSource__ = "torproject.org"
     def watchedEvents(self) -> list:
         """Return the list of events this module watches."""
@@ -85,9 +87,22 @@ class sfp_torexits(SpiderFootAsyncPlugin):
             "TOR_EXIT_NODE",
         ]
 
+    def exitNodeSet(self) -> frozenset | None:
+        """Return the exit node addresses as a set, built once per scan.
+
+        The relay list is several megabytes of JSON. Parsing it for every
+        address checked made a scan of an IP inside a /11 effectively endless.
+        """
+        if self._exit_set is None:
+            exit_addresses = self.retrieveExitNodes()
+            if not exit_addresses:
+                return None
+            self._exit_set = frozenset(exit_addresses)
+        return self._exit_set
+
     def queryExitNodes(self, ip: str) -> bool:
         """Query ExitNodes."""
-        exit_addresses = self.retrieveExitNodes()
+        exit_addresses = self.exitNodeSet()
 
         if not exit_addresses:
             self.errorState = True
@@ -98,6 +113,33 @@ class sfp_torexits(SpiderFootAsyncPlugin):
             return True
 
         return False
+
+    def exitNodesInNetblock(self, netblock: str) -> list | None:
+        """Return the exit nodes inside a netblock without enumerating it.
+
+        Walks the exit node list (a few thousand entries) rather than every
+        address in the block, so a /8 costs the same as a /30.
+        """
+        exit_addresses = self.exitNodeSet()
+
+        if not exit_addresses:
+            self.errorState = True
+            return None
+
+        try:
+            network = IPNetwork(netblock)
+        except Exception as e:
+            self.debug(f"Could not parse netblock {netblock}: {e}")
+            return []
+
+        found = []
+        for addr in exit_addresses:
+            try:
+                if IPAddress(addr) in network:
+                    found.append(addr)
+            except Exception:
+                continue
+        return sorted(found)
 
     def retrieveExitNodes(self) -> list | None:
         """RetrieveExitNodes."""
@@ -203,31 +245,27 @@ class sfp_torexits(SpiderFootAsyncPlugin):
             if not self.opts.get('checknetblocks', False):
                 return
 
-        addrs = list()
         if eventName.startswith("NETBLOCK"):
-            for addr in IPNetwork(eventData):
-                addrs.append(str(addr))
+            addrs = self.exitNodesInNetblock(eventData)
+            if addrs is None:
+                return
         else:
-            addrs.append(eventData)
+            addrs = [eventData] if self.queryExitNodes(eventData) else []
+            if self.errorState:
+                return
 
         for addr in addrs:
             if self.checkForStop():
                 return
 
-            if self.errorState:
-                return
-
             self.results[addr] = True
-
-            if not self.queryExitNodes(addr):
-                continue
 
             # For netblocks, we need to create the associated IP address event first.
             if eventName == 'NETBLOCK_OWNER':
                 pevent = SpiderFootEvent(
                     "IP_ADDRESS", addr, self.__name__, event)
                 self.notifyListeners(pevent)
-            if eventName == 'NETBLOCKV6_OWNER':
+            elif eventName == 'NETBLOCKV6_OWNER':
                 pevent = SpiderFootEvent(
                     "IPV6_ADDRESS", addr, self.__name__, event)
                 self.notifyListeners(pevent)
