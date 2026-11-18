@@ -8,6 +8,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Fork-specific changes since 6.1.0, shipped as release candidates. The per-build record and the build and deploy
 procedure are in [`deploy/README.md`](deploy/README.md).
 
+### Fixed (rc.42, from the rc.41 IP address test scan)
+- **An IP address scan no longer stalls on Tor exit-node checking.** `sfp_torexits` checked an owned netblock by listing every address in it and re-parsing the multi-megabyte Tor relay list for each one. For an address inside a /11 (about two million addresses) that never finished: one worker thread sat at 100% CPU and the scan stopped producing events. The relay list is now parsed once per scan and a netblock is checked by looking for exit nodes inside it, so a /8 costs the same as a /30. Address results are unchanged.
+- **The Tor exit-node events from a netblock now hang off the right parent.** For an IPv4 netblock, the `TOR_EXIT_NODE` event was attached to the netblock instead of the `IP_ADDRESS` event created for it (an `if`/`if`/`else` that should have been `if`/`elif`/`else`).
+- **The IP address profile no longer runs the "check every address in the owning netblock" sweeps.** `checknetblocks`, the option the reputation feed modules use for that, joins the options the "no expansion" setting turns off. A single-address scan stays on the address; other scans are unchanged.
+
 ### Fixed (rc.41, from the rc.40 test scans)
 - **An IP address scan no longer walks other people's networks.** The one module that turns an AS into netblocks (`sfp_ripe`) had no switch, so an address scan followed 958 netblocks, ran 1,063 WHOIS lookups and harvested 4,937 third-party email events, then stalled. It has a new option, `expandasnetblocks`, which the IP and ASN profiles' "no expansion" setting now turns off; the ASN profile keeps it on for its own AS, since listing what that AS announces is the scan. Other scans are unchanged.
 - **The scan graph was empty for every scan.** The graph builders need 15-column event rows and were given 9-column ones, so they raised and returned nothing. A new query supplies the right rows; the multi-scan and GEXF exports pass their arguments in the right order.

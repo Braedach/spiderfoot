@@ -62,3 +62,10 @@ def test_the_person_and_domain_profiles_are_untouched():
     for name in ("person-name", "email-address", "phone-number", "full-footprint"):
         p = get_profile_manager().get(name)
         assert p.module_option_overrides(mods, ["sfp_ripe"]) == {}, name
+
+
+def test_netblock_reputation_sweep_is_an_expansion_switch():
+    """The owning /11 of a single address must not be swept address by address."""
+    from modules.sfp_torexits import sfp_torexits
+    assert "checknetblocks" in EXPANSION_OPTION_KEYS
+    assert "checknetblocks" in sfp_torexits.opts

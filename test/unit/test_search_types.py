@@ -124,7 +124,7 @@ def test_expansion_options_are_switched_off_only_where_a_module_has_them():
     out = p.module_option_overrides(_modules(), ["sfp_a", "sfp_b", "sfp_c"])
     assert out == {"sfp_a": {"netblocklookup": False, "subnetlookup": False},
                    "sfp_b": {"netblockscan": False, "scan_netblocks": False}}
-    assert set(EXPANSION_OPTION_KEYS) == {"netblocklookup", "subnetlookup", "netblockscan", "scan_netblocks", "expandasnetblocks"}
+    assert set(EXPANSION_OPTION_KEYS) == {"netblocklookup", "subnetlookup", "netblockscan", "scan_netblocks", "expandasnetblocks", "checknetblocks"}
 
 
 def test_without_the_flag_nothing_is_switched_off():
