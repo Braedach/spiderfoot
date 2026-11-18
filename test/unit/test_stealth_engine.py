@@ -403,15 +403,18 @@ class TestProxyRotator:
     def test_cooldown_recovery(self):
         """Unhealthy proxies recover after cooldown period."""
         proxies = self._make_proxies(1)
-        rotator = ProxyRotator(proxies, max_consecutive_failures=2, cooldown_seconds=0.01)
+        rotator = ProxyRotator(proxies, max_consecutive_failures=2, cooldown_seconds=0.3)
         rotator.record_result("proxy0.example.com:8080", success=False)
         rotator.record_result("proxy0.example.com:8080", success=False)
-        # Proxy is unhealthy
+        # Proxy is unhealthy (well inside the cooldown, so a slow runner cannot pass it early)
         assert rotator.get_next() is None
-        # Wait for cooldown
-        time.sleep(0.02)
-        # Now it should be available again
-        assert rotator.get_next() is not None
+        # Poll until the cooldown has elapsed rather than trusting one fixed sleep
+        deadline = time.monotonic() + 5
+        recovered = None
+        while recovered is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+            recovered = rotator.get_next()
+        assert recovered is not None
 
     def test_add_remove_proxy(self):
         """Can add and remove proxies dynamically."""

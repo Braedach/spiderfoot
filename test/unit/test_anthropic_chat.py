@@ -133,7 +133,7 @@ class _Agent(BaseAgent):
 
 @pytest.mark.asyncio
 async def test_agent_calls_claude_directly_when_provider_is_anthropic():
-    agent = _Agent(AgentConfig(name="t", llm_provider="anthropic", llm_model="claude-sonnet-5"))
+    agent = _Agent(AgentConfig(name="t", llm_provider="anthropic", llm_model="claude-sonnet-5", llm_api_key="test-key"))
     client = MagicMock()
     client.messages.create = AsyncMock(return_value=_reply("answer"))
     client.close = AsyncMock()
@@ -178,7 +178,7 @@ class TestFallback:
     @pytest.mark.asyncio
     async def test_agent_uses_the_beta_endpoint_when_on(self, monkeypatch):
         monkeypatch.delenv("SF_LLM_FALLBACK", raising=False)
-        agent = _Agent(AgentConfig(name="t", llm_provider="anthropic", llm_model="claude-sonnet-5-5"))
+        agent = _Agent(AgentConfig(name="t", llm_provider="anthropic", llm_model="claude-sonnet-5-5", llm_api_key="test-key"))
         client = MagicMock()
         client.beta.messages.create = AsyncMock(return_value=_reply("rescued"))
         client.close = AsyncMock()

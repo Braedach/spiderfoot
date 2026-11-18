@@ -215,10 +215,14 @@ class TestNormalizeEvents(unittest.TestCase):
     def test_tuple_input(self):
         svc = ExportService()
         result = svc._normalize_events([
-            ("hash1", "IP_ADDRESS", "1.2.3.4", "mod", "src", 100, 100, 0),
+            # scanResultEvent() row order: generated, data, module, hash, type,
+            # source_event_hash, confidence, visibility, risk
+            (1700000000, "1.2.3.4", "mod", "hash1", "IP_ADDRESS", "src", 100, 100, 0),
         ])
         self.assertEqual(result[0]["type"], "IP_ADDRESS")
         self.assertEqual(result[0]["data"], "1.2.3.4")
+        self.assertEqual(result[0]["module"], "mod")
+        self.assertEqual(result[0]["source_event_hash"], "src")
 
     def test_type_filter(self):
         svc = ExportService(ExportConfig(event_types=["IP_ADDRESS"]))
