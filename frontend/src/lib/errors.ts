@@ -11,6 +11,7 @@ const MAX_ERROR_LENGTH = 500;
 export function sanitizeErrorText(raw: string): string {
   return raw
     .replace(/<[^>]*>/g, '')          // strip HTML tags
+    // eslint-disable-next-line no-control-regex -- the control characters are what this strips
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '') // strip control chars (keep \t \n \r)
     .slice(0, MAX_ERROR_LENGTH)
     .trim();
