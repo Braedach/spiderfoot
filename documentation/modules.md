@@ -79,6 +79,7 @@ SpiderFoot integrates **29 external security tool modules** for active scanning.
 - **sfp_nuclei**: Template-based vulnerability scanner
 - **sfp_tool_snallygaster**: Secret file and vulnerability scanner
 - **sfp_tool_dalfox**: XSS parameter scanner
+- **sfp_tool_sqlmap**: SQL injection detection (detection only; web application test profile)
 
 Note: CMS detection is covered by sfp_tool_whatweb/sfp_httpx (CMSeeK produced
 only WEBSERVER_TECHNOLOGY, the same event those already emit); JS library
@@ -143,6 +144,7 @@ Below is a complete list of all documented modules. Click a module name to view 
 | [sfp_tiktok_osint](modules/sfp_tiktok_osint.md) | Comprehensive TikTok intelligence gathering including user profiles and content analysis. |
 | sfp_tool_arjun | HTTP parameter discovery and enumeration. |
 | sfp_tool_dalfox | XSS parameter scanner and vulnerability finder. |
+| sfp_tool_sqlmap | SQL injection detection through sqlmap (detection only, risk 1, nothing extracted). |
 | sfp_tool_dnsx | DNS toolkit for resolution, brute-forcing, and wildcard filtering. |
 | sfp_tool_dnstwist | Domain typosquat and similar domain detection. |
 | sfp_tool_ffuf | Fast web fuzzer for directory and parameter brute-forcing. |

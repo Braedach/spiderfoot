@@ -175,7 +175,16 @@ RUN set -e; \
             test "$(git -C "$d" rev-parse HEAD)" = "$sha"; rm -rf "$d/.git"; }; \
     pin /tools/nuclei-templates https://github.com/projectdiscovery/nuclei-templates.git f8b8b8dcd70d93826c3767e1829ef8243af9f03b; \
     pin /tools/testssl.sh       https://github.com/testssl/testssl.sh.git               97763a411c525720a5f9bd9d2cded416b10f210a; \
-    pin /tools/nikto            https://github.com/sullo/nikto.git                      d201dac320fc5187eac75e723dd07a716196ec5a
+    pin /tools/nikto            https://github.com/sullo/nikto.git                      d201dac320fc5187eac75e723dd07a716196ec5a; \
+    pin /tools/sqlmap           https://github.com/sqlmapproject/sqlmap.git             6faa9bb929347189a62c046d7d02349140e9933d
+# sqlmap 1.10.11 (tag of 2026-10-30; pure Python, its few dependencies are vendored in thirdparty/, nothing to pip install).
+# The detection-only module never uses the OS-takeover payloads, so they are removed: the compiled helper binaries,
+# the web shells and stagers, the UDF libraries and the test suite. Leaving them in produces secret-scanner noise and
+# ships attack payloads nothing here can reach. Checked 2026-11-19: sqlmap still starts and finds an injection
+# against its own vulnserver with them gone. sqlmap's licence is GPLv2+ with terms that make a program running it a
+# derived work; the module is GPL-2.0-or-later for that reason (see modules/sfp_tool_sqlmap.py).
+RUN find /tools/sqlmap/extra /tools/sqlmap/data -type f \( -name '*.exe_' -o -name '*.dll_' -o -name '*.so_' -o -name '*.dylib_' -o -name '*.bin' \) -delete && \
+    rm -rf /tools/sqlmap/data/shell /tools/sqlmap/data/udf /tools/sqlmap/tests /tools/sqlmap/.github
 RUN rm -rf /tools/dl
 
 # -- Stage 6: runtime - Debian 13, same Python as the base so the copied venv resolves --
@@ -213,6 +222,7 @@ COPY --from=tool-downloader /tools/bin/          /tools/bin/
 COPY --from=tool-downloader /tools/nuclei-templates /tools/nuclei-templates
 COPY --from=tool-downloader /tools/testssl.sh    /tools/testssl.sh
 COPY --from=tool-downloader /tools/nikto         /tools/nikto
+COPY --from=tool-downloader /tools/sqlmap        /tools/sqlmap
 COPY --from=wordlists       /tools/wordlists     /tools/wordlists
 
 # App venv first so a bare `python` is the application's; the tools venv only supplies its own console scripts.

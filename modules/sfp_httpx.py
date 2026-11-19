@@ -18,6 +18,7 @@ from typing import Any
 
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
 from spiderfoot import SpiderFootEvent
+from spiderfoot import auth_headers
 
 
 class sfp_httpx(SpiderFootAsyncPlugin):
@@ -202,6 +203,7 @@ class sfp_httpx(SpiderFootAsyncPlugin):
         if self.opts["tls_grab"]:
             cmd.append("-tls-grab")
 
+        cmd.extend(auth_headers.flag_args(self.opts, "-H"))  # authenticated test: the target only, never logged
         return cmd
 
     def _parse_result(self, line: str, parent_event: Any) -> None:
@@ -303,7 +305,8 @@ class sfp_httpx(SpiderFootAsyncPlugin):
                 # An origin URL names its own port too: probe it, not the fixed port list.
                 explicit_port=(event.eventType == "TCP_PORT_OPEN" or is_url),
             )
-            self.debug(f"Running: {' '.join(cmd)}")
+            # Header values (an authenticated test) are a credential: never put the command line in the log.
+            self.debug(f"Running httpx ({len(cmd)} arguments)")
 
             proc = subprocess.run(
                 cmd,

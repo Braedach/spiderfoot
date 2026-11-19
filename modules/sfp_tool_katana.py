@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
 from spiderfoot import SpiderFootEvent
+from spiderfoot import auth_headers
 
 
 class sfp_tool_katana(SpiderFootAsyncPlugin):
@@ -175,6 +176,7 @@ class sfp_tool_katana(SpiderFootAsyncPlugin):
         if self.opts["scope_filter"]:
             cmd.extend(["-fs", self.opts["scope_filter"]])
 
+        cmd.extend(auth_headers.flag_args(self.opts, "-H"))  # authenticated test: the target only, never logged
         try:
             proc = subprocess.run(
                 cmd, capture_output=True, text=True,

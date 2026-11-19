@@ -18,6 +18,7 @@ import urllib.parse
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
 from spiderfoot import SpiderFootEvent
 from spiderfoot.url_targets import directory_base
+from spiderfoot import auth_headers
 
 # Names Windows reserves for devices. A request for one (with or without an extension) is answered
 # by the operating system, not by the web application.
@@ -186,6 +187,7 @@ class sfp_tool_ffuf(SpiderFootAsyncPlugin):
         if self.opts["method"] != "GET":
             cmd.extend(["-X", self.opts["method"]])
 
+        cmd.extend(auth_headers.flag_args(self.opts, "-H"))  # authenticated test: the target only, never logged
         try:
             proc = subprocess.run(
                 cmd, capture_output=True, text=True,

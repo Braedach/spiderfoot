@@ -130,6 +130,11 @@ class ConfigManager:
             raise TypeError(f"optMap is {type(optMap)}; expected dict()")
         if not optMap:
             raise ValueError("optMap is empty")
+        # A request header for an authenticated test is a credential: held in Redis for the scan, never stored here.
+        from spiderfoot.auth_headers import SECRET_SCAN_OPTS
+        optMap = {k: v for k, v in optMap.items() if k not in SECRET_SCAN_OPTS}
+        if not optMap:
+            return
         ph = get_placeholder(self.db_type)
         upsert_clause = get_upsert_clause(self.db_type, 'tbl_scan_config', ['scan_instance_id', 'component', 'opt'], ['val'])
         qry = f"INSERT INTO tbl_scan_config (scan_instance_id, component, opt, val) VALUES ({ph}, {ph}, {ph}, {ph}) {upsert_clause}"

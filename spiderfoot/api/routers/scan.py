@@ -90,6 +90,13 @@ class ScanRequest(BaseModel):
                     "email search and a phone search of one person). The report of each then also sees the others and "
                     "says what they confirm about each other. Stays in this installation.",
     )
+    request_headers: list[str] | None = Field(
+        None, max_length=5,
+        description="Optional, for a profile that requires authorisation: request headers ('Name: value', for example "
+                    "'Cookie: session=...' or 'Authorization: Bearer ...') the active tools send to the target so the "
+                    "logged-in part of the application is tested. A credential: held in Redis for the scan, never "
+                    "stored with it or logged, and gone when the scan has started.",
+    )
     authorised_to_test: bool | None = Field(
         None,
         description="Required (true) to start a profile that tests the target actively, such as 'web-app-test': the "
@@ -124,6 +131,23 @@ def _require_test_authorisation(profile, scan_request: "ScanRequest") -> None:
             detail=f"The '{profile.name}' profile tests a web application: the target must be a domain name or an IP "
                    f"address, not a {ttype or 'value of unknown type'}.",
         )
+
+
+def _stash_request_headers(profile, scan_request: "ScanRequest", scan_id: str) -> None:
+    """Validate the optional authentication headers and hand them to Redis (never to the database or the task arguments)."""
+    if not scan_request.request_headers:
+        return
+    from spiderfoot import auth_headers
+    if not getattr(profile, "requires_authorisation", False):
+        raise HTTPException(status_code=422, detail="request_headers is only accepted for a profile that tests the "
+                                                    "target actively and requires authorisation.")
+    try:
+        headers = auth_headers.parse_headers(scan_request.request_headers)
+    except auth_headers.HeaderError as e:
+        raise HTTPException(status_code=422, detail=e.safe_message) from e
+    if not auth_headers.stash(scan_id, headers):
+        raise HTTPException(status_code=503, detail="The credential store (Redis) is not available, so the headers "
+                                                    "cannot be held safely. Start the scan without them or retry.")
 
 
 def _authorisation_record(scan_request: "ScanRequest") -> dict:
@@ -953,6 +977,7 @@ async def create_scan(
                     )
                 all_mods = _get_all_modules_dict()
                 _require_test_authorisation(profile, scan_request)
+                _stash_request_headers(profile, scan_request, scan_id)
                 modules = profile.resolve_modules(all_mods, modules_with_credentials(sf_config.get("__modules__")))
                 # A profile is more than a module list: apply its settings to this scan only. Its per-module options
                 # (and, for the IP and ASN profiles, the switching off of neighbour expansion) used to be ignored here.

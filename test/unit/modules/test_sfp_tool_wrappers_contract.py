@@ -29,7 +29,7 @@ TOOL_MODULES = [
     "sfp_tool_arjun", "sfp_tool_dalfox", "sfp_tool_dnsx",
     "sfp_tool_ffuf", "sfp_tool_gau", "sfp_tool_gitleaks",
     "sfp_tool_gowitness", "sfp_tool_katana",
-    "sfp_tool_masscan", "sfp_tool_massdns",
+    "sfp_tool_masscan", "sfp_tool_massdns", "sfp_tool_sqlmap",
     "sfp_tool_naabu", "sfp_tool_nikto", "sfp_tool_sslscan", "sfp_tool_sslyze",
     "sfp_tool_tlsx",
 ]

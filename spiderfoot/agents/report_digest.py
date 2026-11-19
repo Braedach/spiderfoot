@@ -101,7 +101,7 @@ MAX_DATA_CHARS = 280
 
 # Modules that test a web application's behaviour (injection, scripting flaws, parameters). If none ran, the report says
 # the application layer was not tested.
-APPLICATION_TEST_MODULES = frozenset({"sfp_tool_dalfox", "sfp_tool_arjun"})
+APPLICATION_TEST_MODULES = frozenset({"sfp_tool_dalfox", "sfp_tool_arjun", "sfp_tool_sqlmap"})
 BREACH_MODULES = frozenset({"sfp_haveibeenpwned", "sfp_intelx", "sfp_leakcheck", "sfp_dehashed", "sfp_emailrep",
                             "sfp_hudsonrock", "sfp_apileak"})
 

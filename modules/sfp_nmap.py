@@ -26,6 +26,43 @@ from spiderfoot import SpiderFootEvent
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
 
 
+# NSE scripts that only read what a service volunteers or answers to a harmless probe: no login attempts, no exploits,
+# no denial of service, no fuzzing. Used by the `service_checks` option (the network service test profile).
+SAFE_SERVICE_SCRIPTS = (
+    "ssh2-enum-algos", "ssh-hostkey", "ssh-auth-methods",          # SSH: algorithms, host keys, offered auth methods
+    "ftp-anon", "ftp-syst",                                        # FTP: anonymous access allowed? server type
+    "smb-protocols", "smb2-security-mode", "smb-os-discovery",     # SMB: dialects, signing, OS banner
+    "smtp-commands", "imap-capabilities", "pop3-capabilities",     # mail services: advertised capabilities
+    "rdp-enum-encryption", "vnc-info", "telnet-encryption",        # remote access: encryption, protocol
+    "mysql-info", "ms-sql-info", "redis-info", "mongodb-info",     # databases: version and exposure
+    "ldap-rootdse", "dns-recursion", "http-methods", "snmp-info",  # directory, open resolver, HTTP verbs, SNMP
+)
+# Script categories and name fragments that are never passed through, whatever `script_scan` says.
+_BLOCKED_SCRIPT_CATEGORIES = frozenset({"brute", "dos", "exploit", "fuzzer", "intrusive", "vuln", "malware", "all"})
+_BLOCKED_SCRIPT_FRAGMENTS = ("brute", "dos", "exploit", "fuzz", "slowloris", "vuln", "crack", "backdoor")
+_SCRIPT_TOKEN = re.compile(r"^[A-Za-z0-9_.\-]+$")
+
+
+def safe_script_arg(spec: str, service_checks: bool = False) -> str:
+    """The --script value to use: allowed names and categories only, plus the curated list when asked.
+
+    Anything that is not a plain name or category (boolean expressions, paths, wildcards) is dropped, as are the
+    categories and names that could guess logins, exploit, fuzz or knock a service over.
+    """
+    kept = []
+    for token in str(spec or "").split(","):
+        token = token.strip()
+        low = token.lower()
+        if not token or not _SCRIPT_TOKEN.match(token):
+            continue
+        if low in _BLOCKED_SCRIPT_CATEGORIES or any(f in low for f in _BLOCKED_SCRIPT_FRAGMENTS):
+            continue
+        kept.append(token)
+    if service_checks:
+        kept.extend(x for x in SAFE_SERVICE_SCRIPTS if x not in kept)
+    return ",".join(kept)
+
+
 class sfp_nmap(SpiderFootAsyncPlugin):
     """Nmap — network exploration and port scanning."""
 
@@ -62,7 +99,8 @@ class sfp_nmap(SpiderFootAsyncPlugin):
         'port_range': '-F',           # -F (fast/top 100), or custom like 1-1000
         'service_detection': True,
         'os_detection': False,
-        'script_scan': '',            # NSE scripts: 'default', 'vuln', 'safe', etc.
+        'script_scan': '',            # NSE scripts by name or category; brute, dos, exploit, fuzzer, intrusive and vuln are refused
+        'service_checks': False,      # run the curated read-only service scripts (SAFE_SERVICE_SCRIPTS)
         'timing': 'T3',              # T0-T5
         'max_retries': 2,
         'host_timeout': 300,          # seconds per host
@@ -77,7 +115,8 @@ class sfp_nmap(SpiderFootAsyncPlugin):
         'port_range': "Port range: '-F' (fast/top 100), '--top-ports 1000', or '1-65535'.",
         'service_detection': "Enable service/version detection (-sV).",
         'os_detection': "Enable OS detection (-O, requires root).",
-        'script_scan': "NSE script categories to run (e.g. 'default', 'vuln', 'safe'). Empty = none.",
+        'script_scan': "NSE scripts or categories to run (e.g. 'default', 'safe', 'ssh-hostkey'). Empty = none. Login guessing, exploit, fuzzing, denial-of-service, intrusive and vuln scripts are refused.",
+        'service_checks': "Also run a fixed list of read-only service checks (SSH, FTP, SMB, mail, remote access, databases, LDAP, DNS, HTTP, SNMP). No logins are tried.",
         'timing': "Timing template: T0 (paranoid) to T5 (insane). Default T3.",
         'max_retries': "Max probe retries per port.",
         'host_timeout': "Timeout per host in seconds.",
@@ -182,7 +221,7 @@ class sfp_nmap(SpiderFootAsyncPlugin):
             cmd.append('-O')
 
         # NSE scripts
-        scripts = self.opts.get('script_scan', '')
+        scripts = safe_script_arg(self.opts.get('script_scan', ''), bool(self.opts.get('service_checks', False)))
         if scripts:
             cmd.extend(['--script', scripts])
 

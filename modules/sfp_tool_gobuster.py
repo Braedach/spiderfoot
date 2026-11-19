@@ -268,7 +268,7 @@ class sfp_tool_gobuster(SpiderFootAsyncPlugin):
         gobuster writes each hit to the output file as it finds it, so a run that hits the wall-clock limit still
         leaves usable results; those are returned instead of being thrown away.
         """
-        self.debug(f"Executing command: {cmd}")
+        self.debug(f"Executing gobuster ({len(cmd)} arguments)")
         output_file = tempfile.NamedTemporaryFile(mode="w+", delete=False, suffix=".json")
         output_file.close()
 

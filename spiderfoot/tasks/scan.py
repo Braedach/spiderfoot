@@ -261,6 +261,16 @@ def run_scan(
                 scan_id, global_opts["_stealth_level"],
             )
 
+        # Authentication headers for an authenticated test: taken out of Redis here, so they never travel in the task
+        # arguments and are not stored with the scan.
+        try:
+            from spiderfoot import auth_headers
+            _hdrs = auth_headers.take(scan_id)
+            if _hdrs:
+                global_opts[auth_headers.OPT_KEY] = _hdrs
+        except Exception:
+            logger.warning("scan %s: could not read its request headers", scan_id)
+
         # ── Progress polling ─────────────────────────────────────────────
         # Started just before the scanner runs, stopped in every exit path
         # below (success, timeout, and error) — see _poll_scan_progress().

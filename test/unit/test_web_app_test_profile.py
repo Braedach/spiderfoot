@@ -54,8 +54,9 @@ def test_it_enforces_the_scope_guard(profile):
     assert profile.apply_overrides({"_scope_guard_mode": "log"})["_scope_guard_mode"] == "enforce"
 
 
-def test_sql_injection_tools_and_exploit_frameworks_are_not_in_it(profile):
-    assert not [m for m in profile.include_modules if "sqlmap" in m or "metasploit" in m or "exploit" in m]
+def test_exploit_frameworks_are_not_in_it_and_sql_injection_testing_is_detection_only(profile):
+    assert not [m for m in profile.include_modules if "metasploit" in m or "exploit" in m]
+    assert "sfp_tool_sqlmap" in profile.include_modules       # detection only, see test_sfp_tool_sqlmap.py
 
 
 def test_it_is_in_the_api_listing(profile, catalog):
@@ -101,4 +102,19 @@ def test_the_statement_is_recorded_with_the_scan_and_only_when_made():
 
 def test_other_profiles_do_not_require_authorisation():
     pm = get_profile_manager()
-    assert [p.name for p in pm.list_profiles() if p.requires_authorisation] == ["web-app-test"]
+    assert sorted(p.name for p in pm.list_profiles() if p.requires_authorisation) == ["network-service-test", "web-app-test"]
+
+
+def test_network_service_test_profile_is_gated_governed_and_read_only():
+    from spiderfoot.scan.scan_profile import EXPANSION_OPTION_KEYS
+    pm = get_profile_manager()
+    prof = pm.get("network-service-test")
+    assert prof.requires_authorisation is True
+    assert prof.option_overrides["_scope_guard_mode"] == "enforce"
+    assert prof.disable_expansion
+    assert prof.module_options["sfp_nmap"]["service_checks"] is True
+    assert "sfp_tool_onesixtyone" not in prof.include_modules          # guesses SNMP community strings
+    assert not [m for m in prof.include_modules if any(x in m for x in ("brute", "hydra", "metasploit", "sqlmap"))]
+    assert [m for m in prof.include_modules if m.startswith("sfp_tool_") or m == "sfp_nmap"]
+    assert all(m in ACTIVE_MODULES for m in prof.include_modules if m.startswith("sfp_tool_") or m == "sfp_nmap")
+    assert "checknetblocks" in EXPANSION_OPTION_KEYS
