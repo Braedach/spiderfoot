@@ -8,6 +8,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Fork-specific changes since 6.1.0, shipped as release candidates. The per-build record and the build and deploy
 procedure are in [`deploy/README.md`](deploy/README.md).
 
+### Fixed (rc.44)
+- **The frontend image is rebuilt on nginx 1.30.7.** The scan gate rejected rc.43's frontend for six fixable critical/high nginx CVEs in 1.30.6; the base image pin moves to 1.30.7 (digest-pinned, as before). rc.43 was never published. It also carries the unit-test fixes from PR #104 (test-only).
+
 ### Fixed (rc.42, from the rc.41 IP address test scan)
 - **An IP address scan no longer stalls on Tor exit-node checking.** `sfp_torexits` checked an owned netblock by listing every address in it and re-parsing the multi-megabyte Tor relay list for each one. For an address inside a /11 (about two million addresses) that never finished: one worker thread sat at 100% CPU and the scan stopped producing events. The relay list is now parsed once per scan and a netblock is checked by looking for exit nodes inside it, so a /8 costs the same as a /30. Address results are unchanged.
 - **The Tor exit-node events from a netblock now hang off the right parent.** For an IPv4 netblock, the `TOR_EXIT_NODE` event was attached to the netblock instead of the `IP_ADDRESS` event created for it (an `if`/`if`/`else` that should have been `if`/`elif`/`else`).

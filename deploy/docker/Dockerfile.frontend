@@ -27,6 +27,8 @@
 #     rebuilt it. The digest pins the base; this one package comes from the distro.
 #   - Likewise upgrades libexpat (2026-11-03): the newest nginx:1.30-alpine still carried 2.9.0-r0
 #     (CVE-2026-117610, CVE-2026-118370, fixed in 2.10.0-r0).
+#   - nginx base re-pinned to 1.30.7 (2026-11-19): 1.30.6 carried six fixable critical/high nginx CVEs
+#     (CVE-2026-121810, -123007, -123633, -113425, -118899, -123634) that the scan gate rejected.
 #   - Dropped `apk add gettext`: the official nginx image already ships
 #     envsubst (gettext-envsubst + libintl), so it was a redundant package and
 #     an unpinned network fetch at build time.
@@ -61,7 +63,7 @@ COPY . .
 RUN npx vite build --outDir dist
 
 # ---------- Stage 2: Serve ----------
-FROM nginx:1.30-alpine@sha256:47928bf67eb62a1863cb08d9ecb52d3e704304ba614eaee17884204677702951
+FROM nginx:1.30-alpine@sha256:3bc3836dc0be3b811f238210360bf8e7ca8a2d0effdae46160bf1f3578710051
 
 # Remove default site
 RUN rm -rf /usr/share/nginx/html/* /etc/nginx/conf.d/default.conf
