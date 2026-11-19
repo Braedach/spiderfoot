@@ -65,6 +65,17 @@ def client():
 # TaskRecord / TaskEntry models
 # ===================================================================
 
+
+def _wait_for(condition, timeout=5.0, interval=0.02):
+    """Poll until ``condition()`` is true (tasks run on worker threads, so fixed sleeps are flaky under load)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(interval)
+    return condition()
+
+
 class TestTaskRecord:
     def test_to_dict(self):
         r = TaskRecord(
@@ -288,7 +299,7 @@ class TestTaskManagerCallbacks:
         results = []
         mgr.on_task_complete(lambda r: results.append(r))
         mgr.submit(TaskType.GENERIC, lambda: "done", task_id="cb1")
-        time.sleep(0.5)
+        assert _wait_for(lambda: len(results) >= 1)
         assert len(results) == 1
         assert results[0].task_id == "cb1"
         assert results[0].state == TaskState.COMPLETED
@@ -328,7 +339,7 @@ class TestTaskManagerHistoryPruning:
     def test_clear_completed(self, mgr):
         mgr.submit(TaskType.GENERIC, lambda: None, task_id="cc1")
         mgr.submit(TaskType.GENERIC, lambda: None, task_id="cc2")
-        time.sleep(0.5)
+        assert _wait_for(lambda: all(t.state == TaskState.COMPLETED for t in (mgr.get("cc1"), mgr.get("cc2")) if t))
         removed = mgr.clear_completed()
         assert removed >= 2
         assert mgr.task_count == 0
