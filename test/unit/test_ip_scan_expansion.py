@@ -69,3 +69,13 @@ def test_netblock_reputation_sweep_is_an_expansion_switch():
     from modules.sfp_torexits import sfp_torexits
     assert "checknetblocks" in EXPANSION_OPTION_KEYS
     assert "checknetblocks" in sfp_torexits.opts
+
+
+def test_web_app_test_profile_widens_nuclei_but_stays_detection_only():
+    prof = get_profile_manager().get("web-app-test")
+    tags = set(prof.module_options["sfp_nuclei"]["baseline_tags"].split(","))
+    assert {"ssl", "graphql", "swagger", "openapi", "cors", "jwt", "redirect", "crlf", "exposure", "misconfig"} <= tags
+    assert not tags & {"default-login", "intrusive", "dos", "fuzz", "bruteforce"}
+    # the module's own exclusion of dos, fuzz and intrusive templates must not be overridden by the profile
+    assert "template_exclude_tags" not in prof.module_options["sfp_nuclei"]
+    assert "template_exclude_tags" in __import__("modules.sfp_nuclei", fromlist=["x"]).sfp_nuclei.opts

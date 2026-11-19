@@ -714,7 +714,7 @@ class ProfileManager:
             display_name="Web Application Test",
             description=(
                 "ACTIVE testing of one web application: it crawls the site, finds its parameters and hidden paths, "
-                "and tests them for cross-site scripting, known vulnerabilities, misconfigurations and weak TLS. "
+                "and tests them for cross-site scripting, SQL injection (detection only), known vulnerabilities, misconfigurations and weak TLS. "
                 "Only for a target you are authorised to test: the scan will not start until you confirm that. "
                 "The scope guard is enforced, so the active tools contact the target's own hosts and nothing else."
             ),
@@ -723,15 +723,52 @@ class ProfileManager:
                 "sfp_dnsresolve", "sfp_spider", "sfp_httpx",                                   # find and crawl the application
                 "sfp_tool_whatweb", "sfp_tool_wafw00f", "sfp_tool_gowitness",                   # fingerprint, WAF, screenshots
                 "sfp_tool_katana", "sfp_tool_ffuf", "sfp_tool_arjun",                           # crawl, hidden paths, parameters
-                "sfp_tool_dalfox", "sfp_tool_nikto", "sfp_nuclei", "sfp_tool_snallygaster",     # test for weaknesses
+                "sfp_tool_dalfox", "sfp_tool_sqlmap", "sfp_tool_nikto", "sfp_nuclei", "sfp_tool_snallygaster",  # test for weaknesses
                 "sfp_sslcert", "sfp_tool_sslyze", "sfp_tool_testsslsh",                         # TLS
             ],
             option_overrides={"_scope_guard_mode": "enforce"},
+            # nuclei's cheap first pass, widened for application testing: API and GraphQL exposure (introspection,
+            # swagger/openapi documents), CORS and JWT weaknesses, open redirects and CRLF injection, CMS checks
+            # (Joomla, Drupal, Magento; WordPress and other CMSs are picked by the automatic pass once detected),
+            # exposed files and misconfigurations. The default exclusion of dos, fuzz and intrusive templates stays,
+            # and default-login (credential guessing) is not included: this profile detects, it does not try logins.
+            module_options={"sfp_nuclei": {"baseline_tags": (
+                "ssl,graphql,swagger,openapi,api,cors,jwt,redirect,crlf,joomla,drupal,magento,exposure,misconfig")}},
             exclude_flags=["tor", "errorprone"],
             requires_authorisation=True,
             max_threads=2,
             timeout_minutes=120,
             tags=["web", "dast", "active", "authorised-only"],
+        ))
+
+        # ── Network service test (added 2026-11-19, opt-in, authorised targets only) ──────────────────────────────
+        self.register(ScanProfile(
+            name="network-service-test",
+            display_name="Network Service Test",
+            description=(
+                "ACTIVE, read-only checks of the network services on one host: open ports and service versions, "
+                "and what SSH, FTP, SMB, mail, remote access, database, LDAP, DNS, HTTP and SNMP services reveal about "
+                "themselves (weak algorithms, anonymous access, missing signing, open resolvers), plus TLS strength. "
+                "It never tries logins, runs exploits, fuzzes or tests denial of service. Only for a target you are "
+                "authorised to test: the scan will not start until you confirm that. The scope guard is enforced, "
+                "so the tools contact the target's own addresses and nothing else."
+            ),
+            category=ProfileCategory.VULNERABILITY,
+            include_modules=[
+                "sfp_dnsresolve",
+                "sfp_nmap", "sfp_tool_naabu",                                      # ports, service versions, curated checks
+                "sfp_tool_nbtscan",                                                # NetBIOS names
+                "sfp_tool_tlsx", "sfp_tool_sslscan", "sfp_tool_sslyze", "sfp_tool_testsslsh",   # TLS
+            ],
+            option_overrides={"_scope_guard_mode": "enforce"},
+            module_options={"sfp_nmap": {"service_checks": True, "service_detection": True,
+                                         "port_range": "--top-ports 1000"}},
+            exclude_flags=["tor", "errorprone"],
+            disable_expansion=True,
+            requires_authorisation=True,
+            max_threads=2,
+            timeout_minutes=120,
+            tags=["network", "active", "authorised-only"],
         ))
 
         # ── Search by IP address and by ASN (added 2026-11-16, docs/scope-guard-design.md) ─────────────────────────

@@ -108,6 +108,7 @@ each one's events. Their module files have been removed from `modules/`.
 | Tool       | Module                    | Purpose                             | Install   |
 |------------|---------------------------|--------------------------------------|-----------|
 | dalfox     | `sfp_tool_dalfox`         | XSS parameter scanning              | Go build  |
+| sqlmap     | `sfp_tool_sqlmap`         | SQL injection detection (only)      | Pinned git checkout |
 | nikto      | `sfp_tool_nikto`          | Classic web vulnerability scanner   | git clone |
 
 #### Secret & JS Analysis
@@ -271,6 +272,7 @@ TCP_PORT_OPEN └──→ sfp_tool_tlsx       ──→ SSL_CERTIFICATE_* (TLS 
 | `sfp_tool_arjun` | Arjun | `LINKED_URL_INTERNAL`, `URL_FORM` | `URL_FORM`, `RAW_RIR_DATA` |
 | `sfp_tool_nikto` | Nikto | `DOMAIN_NAME`, `IP_ADDRESS`, `LINKED_URL_INTERNAL` | `VULNERABILITY_*`, `WEBSERVER_BANNER` |
 | `sfp_tool_dalfox` | Dalfox | `URL_FORM`, `LINKED_URL_INTERNAL` | `VULNERABILITY_*` |
+| `sfp_tool_sqlmap` | sqlmap | `URL_FORM`, `LINKED_URL_INTERNAL` | `VULNERABILITY_CVE_CRITICAL`, `RAW_RIR_DATA` |
 | `sfp_tool_gitleaks` | Gitleaks | `PUBLIC_CODE_REPO` | `PASSWORD_COMPROMISED`, `VULNERABILITY_GENERAL` |
 | `sfp_tool_naabu` | Naabu | `IP_ADDRESS`, `INTERNET_NAME`, `DOMAIN_NAME` | `TCP_PORT_OPEN` |
 | `sfp_tool_masscan` | Masscan | `IP_ADDRESS`, `NETBLOCK_OWNER` | `TCP_PORT_OPEN`, `WEBSERVER_BANNER` |

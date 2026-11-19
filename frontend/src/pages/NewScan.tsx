@@ -44,6 +44,7 @@ export default function NewScanPage() {
   const [subjectCountry, setSubjectCountry] = useState('');
   const [subjectRegion, setSubjectRegion] = useState('');
   const [authorisedToTest, setAuthorisedToTest] = useState(false);
+  const [requestHeaders, setRequestHeaders] = useState('');
   const [subjectLabel, setSubjectLabel] = useState('');
   const [userEditedCountry, setUserEditedCountry] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<string | null>(null);
@@ -202,6 +203,10 @@ export default function NewScanPage() {
     } else if (tab === 'profile' && selectedProfile) {
       payload.profile = selectedProfile;
       if (profileNeedsAuthorisation) payload.authorised_to_test = true;
+      if (selectedProfile === 'web-app-test') {
+        const headers = requestHeaders.split('\n').map((h) => h.trim()).filter(Boolean);
+        if (headers.length > 0) payload.request_headers = headers;
+      }
     } else if (tab === 'data' && selectedTypes.size > 0) {
       payload.type_filter = [...selectedTypes];
     } else if (tab === 'usecase' && selectedSearch) {
@@ -422,6 +427,26 @@ export default function NewScanPage() {
                     <strong>I am authorised to test this target.</strong> This profile tests the target actively (crawling, fuzzing and probing for weaknesses). Run it only against systems you own or have written permission to test.
                   </span>
                 </label>
+              )}
+              {profileNeedsAuthorisation && selectedProfile === 'web-app-test' && (
+                <div className="space-y-1" data-testid="request-headers">
+                  <label htmlFor="request-headers-input" className="text-sm font-medium text-foreground">
+                    Request headers for a logged-in test (optional)
+                  </label>
+                  <textarea
+                    id="request-headers-input"
+                    className="input w-full font-mono text-xs"
+                    rows={3}
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder={'Cookie: session=...\nAuthorization: Bearer ...'}
+                    value={requestHeaders}
+                    onChange={(e) => setRequestHeaders(e.target.value)}
+                  />
+                  <p className="text-xs text-dark-400">
+                    One per line, up to 5. These are credentials: they are sent only to the target, held for this scan alone, not stored with it and not logged. Use a test account, and expect the tools to act as that user.
+                  </p>
+                </div>
               )}
             </div>
           )}

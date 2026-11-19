@@ -19,6 +19,13 @@ def main() -> int:
     from spiderfoot.scan.scanner import startSpiderFootScanner
 
     queue = mp.Queue()
+    try:
+        from spiderfoot import auth_headers
+        _hdrs = auth_headers.take(payload["scan_id"])
+        if _hdrs:
+            payload["config"][auth_headers.OPT_KEY] = _hdrs
+    except Exception:
+        pass
     logListenerSetup(queue, payload["config"])
     startSpiderFootScanner(
         queue,

@@ -34,7 +34,7 @@ ACTIVE_MODULES: frozenset[str] = frozenset({
     # flagged "invasive": already gated before this policy
     "sfp_junkfiles", "sfp_nmap", "sfp_nuclei", "sfp_portscan_tcp", "sfp_tool_arjun", "sfp_tool_dalfox",
     "sfp_tool_ffuf", "sfp_tool_gobuster", "sfp_tool_katana", "sfp_tool_masscan", "sfp_tool_naabu",
-    "sfp_tool_nikto",
+    "sfp_tool_nikto", "sfp_tool_sqlmap",
     # contact event hosts but were never gated (found in the rc.39 IP scan: 193 and 80 third-party hosts)
     "sfp_sslcert", "sfp_httpx", "sfp_filemeta", "sfp_tool_gowitness", "sfp_tool_nbtscan",
     "sfp_tool_onesixtyone", "sfp_tool_snallygaster", "sfp_tool_sslscan", "sfp_tool_sslyze",

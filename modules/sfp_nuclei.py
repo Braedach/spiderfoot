@@ -27,6 +27,7 @@ from pathlib import Path
 
 from spiderfoot import SpiderFootEvent
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
+from spiderfoot import auth_headers
 
 
 class sfp_nuclei(SpiderFootAsyncPlugin):
@@ -234,6 +235,7 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
         if custom_dir and os.path.isdir(custom_dir):
             cmd.extend(['-t', custom_dir])
 
+        cmd.extend(auth_headers.flag_args(self.opts, '-H'))  # authenticated test: the target only, never logged
         return cmd + list(selection or [])
 
     def _selections(self) -> list[list[str]]:

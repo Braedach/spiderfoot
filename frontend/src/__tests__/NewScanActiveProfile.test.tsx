@@ -76,6 +76,27 @@ describe('active-testing profile', () => {
     expect(create.mock.calls[0][0]).toMatchObject({ profile: 'web-app-test', authorised_to_test: true });
   });
 
+  it('sends the optional request headers, one per line, and nothing when the box is empty', async () => {
+    await openProfile('Web Application Test');
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.change(screen.getByLabelText(/Request headers for a logged-in test/), {
+      target: { value: 'Cookie: session=abc\n\n  Authorization: Bearer tok  \n' },
+    });
+    await waitFor(() => expect(launch().disabled).toBe(false));
+    fireEvent.click(launch());
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(create.mock.calls[0][0].request_headers).toEqual(['Cookie: session=abc', 'Authorization: Bearer tok']);
+  });
+
+  it('sends no request_headers when none were typed', async () => {
+    await openProfile('Web Application Test');
+    fireEvent.click(screen.getByRole('checkbox'));
+    await waitFor(() => expect(launch().disabled).toBe(false));
+    fireEvent.click(launch());
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(create.mock.calls[0][0]).not.toHaveProperty('request_headers');
+  });
+
   it('forgets the confirmation when another profile is chosen and back', async () => {
     await openProfile('Web Application Test');
     fireEvent.click(screen.getByRole('checkbox'));

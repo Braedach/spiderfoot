@@ -16,6 +16,7 @@ import tempfile
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
 from spiderfoot import SpiderFootEvent
 from spiderfoot.url_targets import endpoint_key
+from spiderfoot import auth_headers
 
 
 class sfp_tool_arjun(SpiderFootAsyncPlugin):
@@ -129,6 +130,8 @@ class sfp_tool_arjun(SpiderFootAsyncPlugin):
         if self.opts["stable"]:
             cmd.append("--stable")
 
+        if auth_headers.from_opts(self.opts):
+            cmd.extend(["--headers", auth_headers.joined(self.opts)])  # authenticated test, never logged
         try:
             proc = subprocess.run(
                 cmd, capture_output=True, text=True,
