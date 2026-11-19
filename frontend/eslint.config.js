@@ -26,6 +26,7 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ['dist/', 'node_modules/', '*.config.*'],
+    // src/api/generated is written by openapi-ts and overwritten on every regeneration
+    ignores: ['dist/', 'node_modules/', '*.config.*', 'src/api/generated/'],
   },
 );

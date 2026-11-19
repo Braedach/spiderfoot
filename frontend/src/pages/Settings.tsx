@@ -161,7 +161,7 @@ export default function SettingsPage() {
 
   const togglePassword = (key: string) => {
     const next = new Set(showPasswords);
-    next.has(key) ? next.delete(key) : next.add(key);
+    if (next.has(key)) next.delete(key); else next.add(key);
     setShowPasswords(next);
   };
 

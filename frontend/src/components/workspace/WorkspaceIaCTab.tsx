@@ -488,7 +488,7 @@ function WorkspaceIaCPanel({ scans }: { scans: Scan[] }) {
   }, [included, provider, includeTerraform, includeAnsible, includeDocker, includePacker, runValidate]);
 
   const toggleScan = (scanId: string) =>
-    setIncludedIds(prev => { const n = new Set(prev); n.has(scanId) ? n.delete(scanId) : n.add(scanId); return n; });
+    setIncludedIds(prev => { const n = new Set(prev); if (n.has(scanId)) n.delete(scanId); else n.add(scanId); return n; });
 
   const allFiles = result
     ? Object.entries(result.bundle).flatMap(([cat, catFiles]) =>
