@@ -5,6 +5,20 @@ For the full list of changes see [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
+## Upgrading the fork build to rc.40 or later (from rc.39 or earlier)
+
+**rc.40 removes 13 modules whose services are gone.** There is no stack file change and no database change; set
+`SPIDERFOOT_TAG` and redeploy. The removed modules are `sfp_sublist3r`, `sfp_duckduckgo`, `sfp_bgpview`, `sfp_sorbs`,
+`sfp_zonefiles`, `sfp_onionsearchengine`, `sfp_callername`, `sfp_trumail`, `sfp_searchcode`, `sfp_twitter`,
+`sfp_threatminer`, `sfp_tool_wappalyzer` and `sfp_tool_phoneinfoga` (and `sfp_onioncity`, which needed a key and a service that
+no longer answers). An API call, a saved schedule or a custom profile that names one of them will no longer find it:
+remove the name. The shipped profiles already do not use them. Stored settings for them are ignored.
+
+Optional: the person profiles use `sfp_searxng` only once you enter your own SearXNG address under Settings, Web Search.
+From rc.41 an IP address scan stays on the address; from rc.42 it finishes. rc.43 was never published; go from rc.42 to rc.44.
+
+---
+
 ## Upgrading the fork build to rc.35 or later
 
 **rc.35 is a breaking change** for an existing stack. The steps, in order:

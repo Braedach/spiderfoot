@@ -833,6 +833,23 @@ now read from `/etc/davros/ghcr-token` works (GHCR login succeeded).
   working outbound proxy, New Scan selections that run what the screen says, and the selection shown in Scan Settings.
   Stack files 2.16.0 (Podman) / 2.6.0 (Docker). **Breaking:** needs the new stack file; Tor is on by default; the
   proxy setting now takes effect; "All Modules" and "By Required Data" select different modules (see `UPGRADING.md`).
+- rc.44: the frontend image moves to nginx 1.30.7 (digest-pinned). rc.43 (the unit-test fixes, 9,367 tests passing and
+  none failing) was never published: its scan gate rejected the frontend for six fixable critical/high nginx CVEs
+  (CVE-2026-121810, -123007, -123633, -113425, -118899, -123634) in 1.30.6, newer than rc.42's scan. The pin is
+  refreshed by the procedure in `docker/Dockerfile.frontend`. No stack file change; set `SPIDERFOOT_TAG` and redeploy.
+- rc.42: an IP address scan no longer stalls. `sfp_torexits` listed every address of an owned netblock (a /11, about two
+  million addresses) and re-parsed the multi-megabyte Tor relay list for each; it now parses the list once and checks a
+  netblock by looking for exit nodes inside it. `checknetblocks` is also switched off by the IP profile's "no expansion"
+  setting. Found with a py-spy dump of the stuck worker thread. The rc.42 IP scan finished in 7.5 minutes.
+- rc.41 (from the rc.40 test scans): an IP address scan no longer walks other people's networks (`sfp_ripe`
+  `expandasnetblocks`), the scan graph is no longer empty (15-column event rows), GeoMap has pins for IP addresses and a
+  country for phone numbers, correlation results are no longer stored twice, and IntelX accepts the address as its account
+  page shows it. No stack file change.
+- rc.40: web search for people through the owner's SearXNG server (`sfp_searxng`, Settings > Web Search), the
+  `web-app-test`, `ip-address` and `asn` profiles, an egress health monitor, cross-scan subject labels, the AI report written
+  from a digest of every event, and many accuracy fixes. **Breaking:** 13 dead modules are removed (see `UPGRADING.md`).
+- rc.39: `dnspython` 2.9.2 (rc.38 failed the scan gate on 2.9.0 and 2.9.1 and was never published; rc.39 carries
+  everything in rc.38, including nuclei finally running and three modules that crashed on their first event).
 - rc.37: the phone, email and person-name profiles follow the usernames and profiles they find and pick up keyed modules
   once their key is saved; the spider no longer fetches a page twice under `:80` and bare spellings; Shodan's
   "no information" answer is not an error; the dashboard Tor status is consistent across API processes and the
@@ -911,7 +928,7 @@ fork's own.
 - AI features call Anthropic directly (Claude Sonnet 5.5, see "AI model") (`sf-agents`; the provider and key are set in
   the GUI, see "AI providers"). There is no LLM proxy: the LiteLLM gateway was removed
   after its supply-chain breach, and it had only relayed to Anthropic anyway.
-- This runs 284 OSINT modules, including active recon tools that make
+- This runs 285 OSINT modules, including active recon tools that make
   outbound requests to third parties. Only scan targets you are authorised to
   investigate.
 - `sf-tor` connects to the Tor network from the moment the stack starts (see "Tor" above). It keeps no state on
