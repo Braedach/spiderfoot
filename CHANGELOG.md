@@ -3,6 +3,11 @@
 All notable changes to SpiderFoot are documented in this file.  
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased (frontend image fix, not yet in a build)
+
+### Security
+- **Frontend image: libxml2 upgraded from Alpine.** The rc.46 scan gate failed on the frontend image: libxml2 2.13.9-r2 carries CVE-2026-86144 (HIGH, fixed in 2.13.9-r3) and the pinned nginx 1.30.7 base still ships r2. Nothing was pushed. The image build now upgrades libxml2 with the other distro packages (brotli-libs, libexpat, libxslt). Checked by hand: `apk upgrade libxml2` on the pinned base gives 2.13.9-r3.
+
 ## Unreleased (rc.46 candidate)
 
 ### Fixed
