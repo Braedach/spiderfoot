@@ -9,6 +9,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **katana: headless pass for single-page apps.** After a normal crawl of a host front page, if the result is scripts but almost no pages, katana runs once more in headless-browser mode with XHR capture (`-headless -no-sandbox -xhr`, depth 2) and reports the API calls the app makes. Found by running it by hand on grimmory: the normal crawl saw only the JavaScript bundles; the headless pass found `/api/v1/public-settings` and `/api/v1/setup/status`. New options `spa_headless` (on), `spa_max_runs` (10), `spa_timeout` (240 s).
 - **katana: every host gets a crawl.** The cap of 25 starting URLs was spent on blog pages of one host, so grimmory.baden was never crawled in the rc.45 scan. A host not crawled yet now always gets one crawl, with its own limit (`max_host_seeds`, 60).
 
+## Unreleased (arjun fix, not yet in a build)
+
+### Fixed
+- **arjun never returned anything.** Two causes, both found by running arjun 2.2.7 by hand against demo.testfire.net. (1) The module defaulted to `--stable`, which makes arjun wait 6 to 12 seconds between requests, so one URL takes about 15 minutes and the 180 second limit always killed it (21 of 21 runs timed out in the rc.45 scan; 20 of 20 in the earlier one). Stable mode is now off by default (the same URL finishes in 19 seconds) and the per-URL limit is 300 seconds. (2) arjun 2.x writes `{url: {"params": [...]}}` but the module only accepted `{url: [...]}`, so a finished run would still have been discarded. Both formats are read now. Hidden parameters arjun finds feed the other web tools.
+
+## Unreleased (rc.47 candidate)
+
+### Added
+- **sqlmap now tests forms, including POST.** For every `URL_FORM` page the module also runs sqlmap's `--forms` mode, which finds the page's forms, their method and their fields itself, so login, search and feedback forms are tested as well as links with query parameters. Findings name the form's own URL and the parameter place (POST or GET). Still detection only: risk 1, no stacked queries, nothing extracted. New option `test_forms` (default on). A `--forms` run counts as one target against `max_targets`.
+
+## Unreleased (frontend image fix, not yet in a build)
+
+### Security
+- **Frontend image: libxml2 upgraded from Alpine.** The rc.46 scan gate failed on the frontend image: libxml2 2.13.9-r2 carries CVE-2026-86144 (HIGH, fixed in 2.13.9-r3) and the pinned nginx 1.30.7 base still ships r2. Nothing was pushed. The image build now upgrades libxml2 with the other distro packages (brotli-libs, libexpat, libxslt). Checked by hand: `apk upgrade libxml2` on the pinned base gives 2.13.9-r3.
+
 ## Unreleased (rc.46 candidate)
 
 ### Fixed
