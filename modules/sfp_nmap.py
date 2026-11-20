@@ -206,8 +206,7 @@ class sfp_nmap(SpiderFootAsyncPlugin):
         # Port range
         port_range = self.opts.get('port_range', '-F')
         if port_range.startswith('-'):
-            cmd.append(port_range)
-        elif port_range.startswith('--'):
+            # '-F' is one argument; '--top-ports 1000' is two and must be split or nmap rejects it
             cmd.extend(port_range.split())
         else:
             cmd.extend(['-p', port_range])
