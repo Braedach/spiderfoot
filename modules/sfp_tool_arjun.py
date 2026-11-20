@@ -48,9 +48,9 @@ class sfp_tool_arjun(SpiderFootAsyncPlugin):
         "timeout": 15,
         "method": "GET",
         "wordlist": "",
-        "stable": True,
+        "stable": False,
         "max_targets": 50,
-        "run_timeout": 180,
+        "run_timeout": 300,
     }
 
     optdescs = {
@@ -59,7 +59,7 @@ class sfp_tool_arjun(SpiderFootAsyncPlugin):
         "timeout": "Request timeout in seconds.",
         "method": "HTTP method (GET, POST, JSON, XML).",
         "wordlist": "Custom wordlist path (blank=built-in).",
-        "stable": "Use stable mode (slower but more reliable).",
+        "stable": "Use arjun's stable mode. It waits 6-12 seconds between requests, so one URL takes about 15 minutes and normally exceeds run_timeout. Leave off unless the target blocks fast scanning.",
         "max_targets": "Maximum number of URLs to test.",
         "run_timeout": "Total run timeout per URL in seconds.",
     }
@@ -147,6 +147,9 @@ class sfp_tool_arjun(SpiderFootAsyncPlugin):
 
                 # arjun outputs {url: [params]}
                 for url, params in results.items():
+                    # arjun 2.x writes {url: {"params": [...], "method": ..., "headers": ...}}; older versions {url: [...]}
+                    if isinstance(params, dict):
+                        params = params.get("params")
                     if isinstance(params, list) and params:
                         param_str = "&".join(f"{p}=FUZZ" for p in params)
                         separator = "&" if "?" in url else "?"
