@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 
 from spiderfoot import SpiderFootEvent
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
@@ -54,11 +55,17 @@ class sfp_ripe(SpiderFootAsyncPlugin):
     # Default options
     opts = {
         "expandasnetblocks": True,
+        "retries": 2,
+        "retrywait": 3,
+        "min_timeout": 20,
     }
     optdescs = {
         "expandasnetblocks": "When the AS that owns an address belongs to the same organisation, follow every netblock that "
                              "AS announces. Turn off to keep the scan to the target itself: an address scan that followed "
                              "them walked hundreds of netblocks owned by others.",
+        "retries": "How many times to retry a RIPEstat request that gets no answer. One timeout used to lose the netblock, the AS, the company and the abuse contacts of the whole scan.",
+        "retrywait": "Seconds to wait before the first retry (it grows with each further retry).",
+        "min_timeout": "Minimum seconds to wait for a RIPEstat answer (its whois answer for a large netblock is about 50 KB).",
     }
 
     results = None
@@ -109,8 +116,19 @@ class sfp_ripe(SpiderFootAsyncPlugin):
         if url in self.memCache:
             return self.memCache[url]
 
-        res = self.fetch_url(url, timeout=self.opts['_fetchtimeout'],
-                               useragent=self.opts['_useragent'])
+        # RIPEstat is sometimes slow and its whois answer is large (about 50 KB for a /11). One timeout used to lose the
+        # netblock, the AS, the company and the abuse contacts for the whole scan, so a missing answer is retried.
+        timeout = max(int(self.opts['_fetchtimeout']), int(self.opts.get('min_timeout', 20)))
+        attempts = 1 + max(0, int(self.opts.get('retries', 2)))
+        res = {'content': None, 'code': None}
+        for attempt in range(attempts):
+            res = self.fetch_url(url, timeout=timeout, useragent=self.opts['_useragent'])
+            if res['content'] is not None:
+                break
+            if attempt + 1 < attempts:
+                self.debug(f"No answer from RIPEstat for {url} (attempt {attempt + 1} of {attempts}); retrying.")
+                time.sleep(float(self.opts.get('retrywait', 3)) * (attempt + 1))
+
         if res['content'] is not None:
             self.memCache[url] = res
             self.lastContent = res['content']
