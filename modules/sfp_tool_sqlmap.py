@@ -1,10 +1,13 @@
 """SpiderFoot module: sqlmap - SQL injection detection.
 
-Runs sqlmap against a URL that has query parameters and reports the injection points it confirms.
+Runs sqlmap against a URL that has query parameters, and against pages that contain forms (sqlmap's --forms option
+finds the form and its method and fields itself, so POST forms such as login and search boxes are tested too), and
+reports the injection points it confirms.
 
 DETECTION ONLY. The command line is built here from a fixed list, never from event data or free-form options:
   * risk is always 1 (risk 2 and 3 add heavy and potentially data-changing payloads) and level is capped at 3;
   * stacked queries are never used (that technique can run statements on the database);
+  * a form test only sends sqlmap's detection payloads to the form's own fields; it never submits real data or logs in;
   * nothing is extracted: no --dump, --dbs, --passwords, --os-*, --file-* or --sql-* option is ever passed.
 It is only meant for the authorised web application test profile, where the scope guard keeps it on the target.
 
@@ -40,6 +43,7 @@ MAX_EVIDENCE_CHARS = 600
 _PARAM_RE = re.compile(r"^Parameter: (?P<param>.+?) \((?P<place>[^)]+)\)\s*$")
 _TYPE_RE = re.compile(r"^\s+Type: (?P<v>.+)$")
 _TITLE_RE = re.compile(r"^\s+Title: (?P<v>.+)$")
+_TARGET_RE = re.compile(r"^#\d+/\d+ (?:GET|POST) (?P<url>\S+)")
 _DBMS_RE = re.compile(r"^back-end DBMS: (?P<v>.+)$", re.MULTILINE)
 
 
@@ -73,6 +77,7 @@ class sfp_tool_sqlmap(SpiderFootAsyncPlugin):
         "level": 1,
         "techniques": ALLOWED_TECHNIQUES,
         "request_timeout": 15,
+        "test_forms": True,
     }
 
     optdescs = {
@@ -82,6 +87,7 @@ class sfp_tool_sqlmap(SpiderFootAsyncPlugin):
         "level": "Detection level, 1 to 3 (higher tests more places and sends more requests). Risk is fixed at 1.",
         "techniques": "Techniques to use, any of B (boolean), E (error), U (union), T (time). Stacked queries are never used.",
         "request_timeout": "Seconds to wait for each HTTP response.",
+        "test_forms": "Also test the forms found on pages (POST and GET forms, including login and search boxes).",
     }
 
     results = None
@@ -128,7 +134,7 @@ class sfp_tool_sqlmap(SpiderFootAsyncPlugin):
             level = 1
         return max(1, min(level, MAX_LEVEL))
 
-    def _command(self, binary, url, outdir):
+    def _command(self, binary, url, outdir, forms=False):
         # A fixed argument list; `url` is only ever the value of -u. No shell is involved.
         cmd = [
             sys.executable, binary,
@@ -144,34 +150,47 @@ class sfp_tool_sqlmap(SpiderFootAsyncPlugin):
             "--flush-session",
             "--output-dir", outdir,
         ]
+        if forms:
+            cmd.append("--forms")                            # sqlmap finds the page's forms and their fields itself
         if auth_headers.from_opts(self.opts):
             cmd.extend(["--headers", auth_headers.joined(self.opts)])   # authenticated test; never logged
         return cmd
 
     @staticmethod
     def parse(output):
-        """Return ([{param, place, techniques: [(type, title)]}], dbms or None) from sqlmap's text output.
+        """Return ([{param, place, techniques: [(type, title)], url?}], dbms or None) from sqlmap's text output.
 
-        The result block sits between two ``---`` lines after "sqlmap identified the following injection point(s)".
+        Each result block sits between two ``---`` lines after "sqlmap identified the following injection point(s)".
+        A --forms run can print several blocks (one per injectable form); a ``#1/2 POST <url>`` line before a block
+        names the form's URL, which is stored as ``url``.
         """
         findings = []
         current = None
         pending_type = None
+        target_url = None
         started = False      # saw the header line
         opened = False       # saw the opening ---
         for raw in output.splitlines():
             line = raw.rstrip()
             if not started:
-                started = line.startswith("sqlmap identified the following injection point")
+                m = _TARGET_RE.match(line)
+                if m:
+                    target_url = m.group("url")
+                    continue
+                if line.startswith("sqlmap identified the following injection point"):
+                    started, opened, current, pending_type = True, False, None, None
                 continue
             if line.strip() == "---":
                 if not opened:
                     opened = True
                     continue
-                break        # the closing marker ends the block
+                started = False      # the closing marker ends this block; another may follow
+                continue
             m = _PARAM_RE.match(line)
             if m:
                 current = {"param": m.group("param"), "place": m.group("place"), "techniques": []}
+                if target_url:
+                    current["url"] = target_url
                 findings.append(current)
                 pending_type = None
                 continue
@@ -194,13 +213,25 @@ class sfp_tool_sqlmap(SpiderFootAsyncPlugin):
         url = event.data
         if self.errorState:
             return
-        if not self._testable(url):
+        try:
+            parts = urlsplit(url)
+        except ValueError:
             return
-        key = endpoint_key(url, with_param_names=True)
-        if key is None or key in self.results:
+        if parts.scheme not in ("http", "https") or not parts.netloc:
             return
-        self.results[key] = True
-        if self._runs >= self.opts["max_targets"]:
+        if self._testable(url):
+            key = endpoint_key(url, with_param_names=True)
+            if key is not None and key not in self.results:
+                self.results[key] = True
+                self._run(url, event, forms=False)
+        if event.eventType == "URL_FORM" and self.opts.get("test_forms", True):
+            fkey = "forms:" + parts.netloc + parts.path
+            if fkey not in self.results:
+                self.results[fkey] = True
+                self._run(url, event, forms=True)
+
+    def _run(self, url, event, forms):
+        if self.errorState or self._runs >= self.opts["max_targets"]:
             return
         self._runs += 1
 
@@ -213,7 +244,7 @@ class sfp_tool_sqlmap(SpiderFootAsyncPlugin):
         with tempfile.TemporaryDirectory(prefix="sf-sqlmap-") as outdir:
             try:
                 proc = subprocess.run(
-                    self._command(binary, url, outdir), capture_output=True, text=True,
+                    self._command(binary, url, outdir, forms=forms), capture_output=True, text=True,
                     timeout=int(self.opts["timeout"]) + 30,
                 )
             except subprocess.TimeoutExpired:
@@ -233,7 +264,8 @@ class sfp_tool_sqlmap(SpiderFootAsyncPlugin):
             if self.checkForStop():
                 return
             kinds = "; ".join(f"{t} ({title})" for t, title in f["techniques"]) or "injectable"
-            text = f"SQL injection in {f['place']} parameter '{f['param']}' at {url}\nTechniques: {kinds}"
+            where = f.get("url") or url
+            text = f"SQL injection in {f['place']} parameter '{f['param']}' at {where}\nTechniques: {kinds}"
             if dbms:
                 text += f"\nBack-end DBMS: {dbms}"
             self.notifyListeners(SpiderFootEvent("VULNERABILITY_CVE_CRITICAL", text, self.__name__, event))
