@@ -113,6 +113,8 @@ def _run(cls, event_type, data, **opts):
     m._runs = 0
     m.seedKeys = set()
     m.seedCount = 0
+    m.hostSeeds = set()
+    m.spaRuns = 0
     m.errorState = False
     m.notifyListeners = MagicMock()
     m.checkForStop = MagicMock(return_value=False)
