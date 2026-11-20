@@ -3,6 +3,12 @@
 All notable changes to SpiderFoot are documented in this file.  
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased (single-page-app crawling, not yet in a build)
+
+### Added
+- **katana: headless pass for single-page apps.** After a normal crawl of a host front page, if the result is scripts but almost no pages, katana runs once more in headless-browser mode with XHR capture (`-headless -no-sandbox -xhr`, depth 2) and reports the API calls the app makes. Found by running it by hand on grimmory: the normal crawl saw only the JavaScript bundles; the headless pass found `/api/v1/public-settings` and `/api/v1/setup/status`. New options `spa_headless` (on), `spa_max_runs` (10), `spa_timeout` (240 s).
+- **katana: every host gets a crawl.** The cap of 25 starting URLs was spent on blog pages of one host, so grimmory.baden was never crawled in the rc.45 scan. A host not crawled yet now always gets one crawl, with its own limit (`max_host_seeds`, 60).
+
 ## Unreleased (rc.46 candidate)
 
 ### Fixed
