@@ -3,6 +3,11 @@
 All notable changes to SpiderFoot are documented in this file.  
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased (arjun fix, not yet in a build)
+
+### Fixed
+- **arjun never returned anything.** Two causes, both found by running arjun 2.2.7 by hand against demo.testfire.net. (1) The module defaulted to `--stable`, which makes arjun wait 6 to 12 seconds between requests, so one URL takes about 15 minutes and the 180 second limit always killed it (21 of 21 runs timed out in the rc.45 scan; 20 of 20 in the earlier one). Stable mode is now off by default (the same URL finishes in 19 seconds) and the per-URL limit is 300 seconds. (2) arjun 2.x writes `{url: {"params": [...]}}` but the module only accepted `{url: [...]}`, so a finished run would still have been discarded. Both formats are read now. Hidden parameters arjun finds feed the other web tools.
+
 ## Unreleased (rc.47 candidate)
 
 ### Added
