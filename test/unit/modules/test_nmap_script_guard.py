@@ -37,3 +37,18 @@ def test_the_curated_list_is_itself_clean():
 def test_the_option_exists_and_is_off_by_default():
     assert sfp_nmap.opts["service_checks"] is False
     assert "service_checks" in sfp_nmap.optdescs
+
+
+@pytest.mark.parametrize("port_range,expected", [
+    ("-F", ["-F"]),
+    ("--top-ports 1000", ["--top-ports", "1000"]),
+    ("1-1000", ["-p", "1-1000"]),
+])
+def test_port_range_becomes_valid_nmap_arguments(port_range, expected):
+    mod = sfp_nmap.__new__(sfp_nmap)
+    mod.opts = dict(sfp_nmap.opts, port_range=port_range)
+    mod._is_root = False
+    cmd = mod._build_nmap_cmd("192.0.2.1")
+    assert all(" " not in a for a in cmd[:cmd.index("192.0.2.1")] if a != "--version-all"), cmd
+    i = cmd.index(expected[0])
+    assert cmd[i:i + len(expected)] == expected

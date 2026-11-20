@@ -3,6 +3,12 @@
 All notable changes to SpiderFoot are documented in this file.  
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased (rc.46 candidate)
+
+### Fixed
+- **Network service test: nmap rejected the port range.** The `--top-ports 1000` setting was passed to nmap as one argument (`unrecognized option`), so the nmap service checks never ran. It is now split into two arguments. `-F` and `1-1000` style ranges behave as before.
+- **NetBIOS scan had no tool path.** `sfp_tool_nbtscan` logged "did not set a path to the tool" in the network service test and tools-only profiles. Both profiles now point it at `/usr/bin/nbtscan`, where the active-scanner image installs it.
+
 ## [Unreleased] — braedach fork builds (`v6.1.0-bd.1-rc.N`)
 
 Fork-specific changes since 6.1.0, shipped as release candidates. The per-build record and the build and deploy
