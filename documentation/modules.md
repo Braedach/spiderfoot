@@ -79,7 +79,7 @@ SpiderFoot integrates **29 external security tool modules** for active scanning.
 - **sfp_nuclei**: Template-based vulnerability scanner
 - **sfp_tool_snallygaster**: Secret file and vulnerability scanner
 - **sfp_tool_dalfox**: XSS parameter scanner
-- **sfp_tool_sqlmap**: SQL injection detection (detection only; web application test profile)
+- **sfp_tool_sqlmap**: SQL injection detection (detection only; web application test profile; tests link parameters and POST/GET forms)
 
 Note: CMS detection is covered by sfp_tool_whatweb/sfp_httpx (CMSeeK produced
 only WEBSERVER_TECHNOLOGY, the same event those already emit); JS library

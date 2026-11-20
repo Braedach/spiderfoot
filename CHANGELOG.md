@@ -3,6 +3,11 @@
 All notable changes to SpiderFoot are documented in this file.  
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased (rc.47 candidate)
+
+### Added
+- **sqlmap now tests forms, including POST.** For every `URL_FORM` page the module also runs sqlmap's `--forms` mode, which finds the page's forms, their method and their fields itself, so login, search and feedback forms are tested as well as links with query parameters. Findings name the form's own URL and the parameter place (POST or GET). Still detection only: risk 1, no stacked queries, nothing extracted. New option `test_forms` (default on). A `--forms` run counts as one target against `max_targets`.
+
 ## Unreleased (frontend image fix, not yet in a build)
 
 ### Security

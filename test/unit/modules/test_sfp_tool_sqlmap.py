@@ -151,3 +151,69 @@ def test_it_is_an_active_invasive_module_and_registered_everywhere_that_matters(
         inc = p["include_modules"] if isinstance(p, dict) else p.include_modules
         if name != "web-app-test":
             assert "sfp_tool_sqlmap" not in (inc or [])
+
+
+FORMS_OUTPUT = """\
+[INFO] found a total of 2 targets
+#1/2 POST http://h/doLogin
+POST data: uid=&passw=&btnSubmit=Login
+do you want to test this form? [Y/n/q]
+sqlmap identified the following injection point(s) with a total of 40 HTTP(s) requests:
+---
+Parameter: uid (POST)
+    Type: boolean-based blind
+    Title: OR boolean-based blind - WHERE or HAVING clause
+    Payload: uid=x' OR 1=1-- -&passw=&btnSubmit=Login
+---
+#2/2 GET http://h/search.jsp?q=
+sqlmap identified the following injection point(s) with a total of 12 HTTP(s) requests:
+---
+Parameter: q (GET)
+    Type: error-based
+    Title: MySQL error-based
+    Payload: q=1 AND 1=1
+---
+back-end DBMS: MySQL
+"""
+
+
+def test_parse_reads_several_blocks_and_their_form_urls():
+    findings, dbms = sfp_tool_sqlmap.parse(FORMS_OUTPUT)
+    assert dbms == "MySQL"
+    assert [(f["place"], f["param"], f["url"]) for f in findings] == [
+        ("POST", "uid", "http://h/doLogin"), ("GET", "q", "http://h/search.jsp?q=")]
+
+
+def test_a_form_page_is_tested_with_forms_and_the_post_finding_names_the_form_url():
+    m = make()
+    done = MagicMock(returncode=0, stdout=FORMS_OUTPUT, stderr="")
+    with patch.object(sfp_tool_sqlmap, "_find_binary", return_value="/tools/sqlmap/sqlmap.py"), \
+            patch("modules.sfp_tool_sqlmap.subprocess.run", return_value=done) as run:
+        m.handleEvent(ev("http://h/login.jsp", "URL_FORM"))
+    cmd = run.call_args.args[0]
+    assert "--forms" in cmd and cmd[cmd.index("-u") + 1] == "http://h/login.jsp"
+    assert cmd[cmd.index("--risk") + 1] == "1" and "--dump" not in cmd and "--technique" in cmd
+    texts = [c.args[0].data for c in m.notifyListeners.call_args_list if c.args[0].eventType == "VULNERABILITY_CVE_CRITICAL"]
+    assert len(texts) == 2 and "POST parameter 'uid' at http://h/doLogin" in texts[0]
+
+
+def test_forms_are_tested_once_per_page_and_only_for_form_events():
+    m = make()
+    run = run_with(m, CLEAN, ["http://h/login.jsp"])             # a plain link: no form test, no parameter
+    run.assert_not_called()
+    m = make()
+    done = MagicMock(returncode=0, stdout=CLEAN, stderr="")
+    with patch.object(sfp_tool_sqlmap, "_find_binary", return_value="/x"), \
+            patch("modules.sfp_tool_sqlmap.subprocess.run", return_value=done) as run:
+        for _ in range(3):
+            m.handleEvent(ev("http://h/login.jsp", "URL_FORM"))
+    assert run.call_count == 1
+
+
+def test_form_testing_can_be_switched_off():
+    m = make(test_forms=False)
+    done = MagicMock(returncode=0, stdout=CLEAN, stderr="")
+    with patch.object(sfp_tool_sqlmap, "_find_binary", return_value="/x"), \
+            patch("modules.sfp_tool_sqlmap.subprocess.run", return_value=done) as run:
+        m.handleEvent(ev("http://h/login.jsp", "URL_FORM"))
+    run.assert_not_called()
