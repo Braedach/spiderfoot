@@ -8,6 +8,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - **sqlmap now tests forms, including POST.** For every `URL_FORM` page the module also runs sqlmap's `--forms` mode, which finds the page's forms, their method and their fields itself, so login, search and feedback forms are tested as well as links with query parameters. Findings name the form's own URL and the parameter place (POST or GET). Still detection only: risk 1, no stacked queries, nothing extracted. New option `test_forms` (default on). A `--forms` run counts as one target against `max_targets`.
 
+## Unreleased (frontend image fix, not yet in a build)
+
+### Security
+- **Frontend image: libxml2 upgraded from Alpine.** The rc.46 scan gate failed on the frontend image: libxml2 2.13.9-r2 carries CVE-2026-86144 (HIGH, fixed in 2.13.9-r3) and the pinned nginx 1.30.7 base still ships r2. Nothing was pushed. The image build now upgrades libxml2 with the other distro packages (brotli-libs, libexpat, libxslt). Checked by hand: `apk upgrade libxml2` on the pinned base gives 2.13.9-r3.
+
 ## Unreleased (rc.46 candidate)
 
 ### Fixed
