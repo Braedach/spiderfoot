@@ -833,6 +833,13 @@ now read from `/etc/davros/ghcr-token` works (GHCR login succeeded).
   working outbound proxy, New Scan selections that run what the screen says, and the selection shown in Scan Settings.
   Stack files 2.16.0 (Podman) / 2.6.0 (Docker). **Breaking:** needs the new stack file; Tor is on by default; the
   proxy setting now takes effect; "All Modules" and "By Required Data" select different modules (see `UPGRADING.md`).
+- rc.47: all fixes since rc.45 in one build. sqlmap tests forms (POST and GET) as well as link parameters; katana runs
+  a headless-browser pass on single-page apps and crawls every new host; arjun works (stable mode off, arjun 2.x output
+  read); the network service test's nmap port range and nbtscan path are fixed; one slow RIPEstat answer no longer loses
+  an address's ownership data (retries); the frontend image upgrades libxml2 (CVE-2026-86144). rc.46 (tagged, with the
+  RIPE, nmap and nbtscan fixes) was never published: its scan gate rejected the frontend for libxml2 2.13.9-r2.
+- rc.45: sqlmap (detection only), authenticated test request headers, wider nuclei checks, the network service test
+  profile, frontend lint fixes. Deployed on baden.
 - rc.44: the frontend image moves to nginx 1.30.7 (digest-pinned). rc.43 (the unit-test fixes, 9,367 tests passing and
   none failing) was never published: its scan gate rejected the frontend for six fixable critical/high nginx CVEs
   (CVE-2026-121810, -123007, -123633, -113425, -118899, -123634) in 1.30.6, newer than rc.42's scan. The pin is
