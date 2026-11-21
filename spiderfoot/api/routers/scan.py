@@ -27,7 +27,7 @@ from spiderfoot.scan.scanner import startSpiderFootScanner
 from spiderfoot.scan.scan_service_facade import ScanService, ScanServiceError
 from spiderfoot.sflib.core import SpiderFoot
 
-from ..dependencies import get_app_config, get_api_key, optional_auth, get_scan_service, safe_filename, SafeId
+from ..dependencies import get_app_config, with_fresh_settings, get_api_key, optional_auth, get_scan_service, safe_filename, SafeId
 from ..pagination import PaginationParams, paginate
 from ..schemas import (
     ScanCreateResponse,
@@ -941,7 +941,7 @@ async def create_scan(
 ) -> ScanCreateResponse:
     """Create and start a new scan."""
     try:
-        config = get_app_config()
+        config = with_fresh_settings(get_app_config())   # not the cached copy: a setting saved a moment ago must reach this scan
         scan_id = SpiderFootHelpers.genScanInstanceId()
         target_type = SpiderFootHelpers.targetTypeFromString(scan_request.target)
         if not target_type:

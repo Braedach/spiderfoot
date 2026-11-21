@@ -65,6 +65,10 @@ NIKTO_COVERAGE = {"max_targets": 0, "total_budget": 0, "request_timeout": 10, "t
 NAABU_COVERAGE = {"max_targets": 0, "total_budget": 3600}
 # and for nuclei: a saved max_targets=20 (the old default) meant only the first 20 targets found were ever tested
 NUCLEI_COVERAGE = {"max_targets": 0, "total_budget": 0}
+# nuclei templates that are never run by these profiles: they flood, fuzz or are intrusive. A saved copy of an older or edited
+# setting must not drop them (this is what keeps a detection-only profile detection only)
+NUCLEI_SAFETY = {"template_exclude_tags": "dos,fuzz,intrusive"}
+NUCLEI_PINS = {**NUCLEI_COVERAGE, **NUCLEI_SAFETY}
 _NOT_CREDENTIALS = {"remote_password", "remote_ssh_key", "remote_ssh_key_data"}
 
 
@@ -707,7 +711,7 @@ class ProfileManager:
             ],
             module_options={"sfp_tool_nbtscan": {"nbtscan_path": "/usr/bin/nbtscan"},
                             "sfp_tool_nikto": dict(NIKTO_COVERAGE),
-                            "sfp_nuclei": dict(NUCLEI_COVERAGE),
+                            "sfp_nuclei": dict(NUCLEI_PINS),
                             "sfp_tool_naabu": dict(NAABU_COVERAGE),
                             # pinned: an older saved copy of the global settings holds stable=True and 180 s, which made
                             # every arjun run time out (a normal run takes about 20 seconds)
@@ -751,7 +755,7 @@ class ProfileManager:
             # and default-login (credential guessing) is not included: this profile detects, it does not try logins.
             module_options={"sfp_tool_nikto": dict(NIKTO_COVERAGE),
                             "sfp_tool_naabu": dict(NAABU_COVERAGE),
-                            "sfp_nuclei": {**NUCLEI_COVERAGE, "baseline_tags": (
+                            "sfp_nuclei": {**NUCLEI_PINS, "baseline_tags": (
                 "ssl,graphql,swagger,openapi,api,cors,jwt,redirect,crlf,joomla,drupal,magento,exposure,misconfig")},
                             # pinned: an older saved copy of the global settings holds stable=True and 180 s, which made
                             # every arjun run time out (a normal run takes about 20 seconds)
@@ -838,7 +842,7 @@ class ProfileManager:
             exclude_flags=["errorprone", "tor"],
             module_options={"sfp_tool_nikto": dict(NIKTO_COVERAGE),
                             "sfp_tool_naabu": dict(NAABU_COVERAGE),
-                            "sfp_nuclei": dict(NUCLEI_COVERAGE)},
+                            "sfp_nuclei": dict(NUCLEI_PINS)},
             disable_expansion=True,
             max_threads=4,
             timeout_minutes=60,
