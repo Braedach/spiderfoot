@@ -49,7 +49,7 @@ after about 15 minutes of use). Do not run rc.32 or rc.33.
 ## Upgrading the fork build (`v6.1.0-bd.1-rc.N`) to rc.31
 
 This fork's builds are release candidates published by `deploy/publish.sh`; the build and deploy procedure is in
-[`deploy/README.md`](deploy/README.md). **rc.31 is a breaking change** for an existing stack:
+[`deploy/REFERENCE.md`](deploy/README.md). **rc.31 is a breaking change** for an existing stack:
 
 1. Take the stack file from the same tag (`deploy/stack-podman.yml` 2.15.0 or `deploy/stack-docker.yml` 2.5.0). The stack
    files are not inside the images, so a new tag does not update them. The API and workers now need the embedding settings

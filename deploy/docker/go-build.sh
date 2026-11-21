@@ -35,7 +35,7 @@
 #       That is also why a tool whose go.mod has them cannot use `go install
 #       pkg@version` at all (gowitness); it is built from a checkout instead.
 #     - The binary is not tested against the newer dependencies by the build. The
-#       smoke tests in deploy/README.md ("Testing an image") do that.
+#       smoke tests in deploy/REFERENCE.md ("Testing an image") do that.
 #
 # Changelog:
 #   1.0.0 (2026-10-23) - Initial version.

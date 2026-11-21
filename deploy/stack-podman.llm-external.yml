@@ -4,7 +4,7 @@
 # for llm-net (Ollama reachability for sf-api/sf-agents) instead of the
 # default empty network the base file creates. Add this file with a second
 # `-f` on every podman-compose invocation, and set SF_LLM_NETWORK in the
-# stack's env file to the existing network's name - see deploy/README.md,
+# stack's env file to the existing network's name - see deploy/REFERENCE.md,
 # "Ollama and the LLM network".
 #
 #   podman-compose -f stack-podman.yml -f stack-podman.llm-external.yml \

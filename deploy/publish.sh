@@ -42,7 +42,7 @@
 #       scopes granted. SCOPE WARNING: a classic PAT with `repo` is NOT limited
 #       to one repository - it can read and write every repo the account can
 #       reach, private ones included. Use a token created only for this, kept
-#       only on the build host, and rotate it. See deploy/README.md "Token
+#       only on the build host, and rotate it. See deploy/REFERENCE.md "Token
 #       scope". Read directly from /etc/davros/ghcr-token, the build host's one
 #       token file (root-only, chmod 600, OUTSIDE the repo; Design-Reference
 #       17.1, decision 59). Prompted for when that file is missing. When GitHub
