@@ -3,6 +3,12 @@
 All notable changes to SpiderFoot are documented in this file.  
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased (rc.48: fixes found by testing rc.47)
+
+### Fixed
+- **arjun still timed out in rc.47.** The rc.47 test scans stored `stable=1` and `run_timeout=180` for arjun, copied from an older saved copy of the global settings, so the new defaults never applied (every run ended at exactly 180 s; run by hand the same URL finishes in 19 s). The Web Application Test and External Tools Only profiles now pin `stable` off and `run_timeout` 300 for arjun. arjun also skips scripts, styles, images and documents, which take no parameters (the rc.47 scans spent runs on `.js`, `.css`, `.gif` and `.xls` files).
+- **sqlmap never tested the login form.** A login page reaches the scan as a plain link, not as a form event, and sqlmap's 10 target slots were used up by links with query parameters within two minutes, so the POST login on demo.testfire.net was never tried. Any page-like URL (not a script, image or document) is now form-tested once, with its own budget (`max_form_pages`, 15) separate from `max_targets`.
+
 ## Unreleased (rc.47: all fixes since rc.45; rc.46 was tagged but failed its scan gate and was never published)
 
 ### Added
