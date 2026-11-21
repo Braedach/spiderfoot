@@ -58,6 +58,9 @@ log = logging.getLogger("spiderfoot.scan_profile")
 # An option that holds a third-party secret. Same rule as the Modules page (frontend/src/lib/settingsMeta.ts), so a
 # module the page shows as "configured" is one a profile counts as configured.
 _CREDENTIAL_OPT = re.compile(r"(api[_-]?key|apikey|_token$|^token$|_secret|secret$|password|pwd$|_key$)", re.I)
+# pinned in every profile that runs nikto: an older saved copy of the global settings holds max_targets=20, which made nikto
+# test only the first 20 servers a scan found (a different 20 each time), so a saved value must not override these
+NIKTO_COVERAGE = {"max_targets": 0, "total_budget": 7200, "request_timeout": 10, "timeout": 300}
 _NOT_CREDENTIALS = {"remote_password", "remote_ssh_key", "remote_ssh_key_data"}
 
 
@@ -388,6 +391,7 @@ class ProfileManager:
             ),
             category=ProfileCategory.RECONNAISSANCE,
             use_cases=["Footprint"],
+            module_options={"sfp_tool_nikto": dict(NIKTO_COVERAGE)},
             exclude_flags=["tor", "errorprone"],
             max_threads=3,
             tags=["comprehensive", "active"],
@@ -697,6 +701,7 @@ class ProfileManager:
                 "sfp_spider",
             ],
             module_options={"sfp_tool_nbtscan": {"nbtscan_path": "/usr/bin/nbtscan"},
+                            "sfp_tool_nikto": dict(NIKTO_COVERAGE),
                             # pinned: an older saved copy of the global settings holds stable=True and 180 s, which made
                             # every arjun run time out (a normal run takes about 20 seconds)
                             "sfp_tool_arjun": {"stable": False, "run_timeout": 300}},
@@ -736,7 +741,8 @@ class ProfileManager:
             # (Joomla, Drupal, Magento; WordPress and other CMSs are picked by the automatic pass once detected),
             # exposed files and misconfigurations. The default exclusion of dos, fuzz and intrusive templates stays,
             # and default-login (credential guessing) is not included: this profile detects, it does not try logins.
-            module_options={"sfp_nuclei": {"baseline_tags": (
+            module_options={"sfp_tool_nikto": dict(NIKTO_COVERAGE),
+                            "sfp_nuclei": {"baseline_tags": (
                 "ssl,graphql,swagger,openapi,api,cors,jwt,redirect,crlf,joomla,drupal,magento,exposure,misconfig")},
                             # pinned: an older saved copy of the global settings holds stable=True and 180 s, which made
                             # every arjun run time out (a normal run takes about 20 seconds)
@@ -820,6 +826,7 @@ class ProfileManager:
                 "sfp_hybrid_analysis", "sfp_leakix",
             ],
             exclude_flags=["errorprone", "tor"],
+            module_options={"sfp_tool_nikto": dict(NIKTO_COVERAGE)},
             disable_expansion=True,
             max_threads=4,
             timeout_minutes=60,
