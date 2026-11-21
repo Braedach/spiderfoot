@@ -48,3 +48,19 @@ def test_both_output_formats_produce_a_form_url(payload):
 def test_stable_mode_is_off_by_default():
     m, run = run_with_output({})
     assert "--stable" not in run.call_args.args[0]
+
+
+@pytest.mark.parametrize("url", ["http://h/app.js", "http://h/style.css?v=2", "http://h/logo.GIF", "http://h/a.xls"])
+def test_static_files_are_not_tested(url):
+    m = make()
+    with patch.object(sfp_tool_arjun, "_find_binary", return_value="/bin/arjun"), \
+            patch("modules.sfp_tool_arjun.subprocess.run") as run:
+        m.handleEvent(SpiderFootEvent("LINKED_URL_INTERNAL", url, "sfp_spider", None))
+    run.assert_not_called()
+
+
+def test_the_active_profiles_pin_arjun_to_fast_mode():
+    from spiderfoot.scan.scan_profile import ProfileManager
+    pm = ProfileManager()
+    for name in ("web-app-test", "tools-only"):
+        assert pm.get(name).module_options["sfp_tool_arjun"] == {"stable": False, "run_timeout": 300}

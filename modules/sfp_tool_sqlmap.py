@@ -68,12 +68,14 @@ class sfp_tool_sqlmap(SpiderFootAsyncPlugin):
         },
     }
 
-    _runs = 0  # runs started so far this scan (reset in setup); the cap counts these, not URLs seen
+    _runs = 0  # parameter runs started so far this scan (reset in setup); the cap counts these, not URLs seen
+    _form_runs = 0  # form-page runs started so far (own cap, so parameter URLs cannot use up the form budget)
 
     opts = {
         "sqlmap_path": "",
         "timeout": 300,
         "max_targets": 10,
+        "max_form_pages": 15,
         "level": 1,
         "techniques": ALLOWED_TECHNIQUES,
         "request_timeout": 15,
@@ -84,6 +86,7 @@ class sfp_tool_sqlmap(SpiderFootAsyncPlugin):
         "sqlmap_path": "Path to sqlmap.py. Leave blank to use the copy in the image (/tools/sqlmap/sqlmap.py).",
         "timeout": "Seconds one target may take before it is stopped.",
         "max_targets": "Maximum number of endpoints to test per scan.",
+        "max_form_pages": "Maximum number of pages to check for forms per scan (separate from max_targets).",
         "level": "Detection level, 1 to 3 (higher tests more places and sends more requests). Risk is fixed at 1.",
         "techniques": "Techniques to use, any of B (boolean), E (error), U (union), T (time). Stacked queries are never used.",
         "request_timeout": "Seconds to wait for each HTTP response.",
@@ -97,6 +100,7 @@ class sfp_tool_sqlmap(SpiderFootAsyncPlugin):
         self.errorState = False
         self.results = self.tempStorage()
         self._runs = 0
+        self._form_runs = 0
 
     def watchedEvents(self):
         return ["URL_FORM", "LINKED_URL_INTERNAL"]
@@ -112,6 +116,16 @@ class sfp_tool_sqlmap(SpiderFootAsyncPlugin):
             if candidate and os.path.isfile(candidate):
                 return candidate
         return None
+
+    _STATIC = (
+        ".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp", ".woff", ".woff2", ".ttf", ".map",
+        ".pdf", ".xls", ".xlsx", ".doc", ".docx", ".zip", ".gz", ".mp4", ".mp3",
+    )
+
+    @classmethod
+    def _page_like(cls, parts):
+        """A path that can be an HTML page (not a script, image, font or document)."""
+        return not parts.path.lower().endswith(cls._STATIC)
 
     @staticmethod
     def _testable(url):
@@ -224,16 +238,25 @@ class sfp_tool_sqlmap(SpiderFootAsyncPlugin):
             if key is not None and key not in self.results:
                 self.results[key] = True
                 self._run(url, event, forms=False)
-        if event.eventType == "URL_FORM" and self.opts.get("test_forms", True):
+        # A page's forms are found by sqlmap itself, so any page can be checked, not only URLs that already carry
+        # parameters. A login page is usually reached as a plain link (LINKED_URL_INTERNAL), never as a URL_FORM.
+        if self.opts.get("test_forms", True) and self._page_like(parts):
             fkey = "forms:" + parts.netloc + parts.path
             if fkey not in self.results:
                 self.results[fkey] = True
                 self._run(url, event, forms=True)
 
     def _run(self, url, event, forms):
-        if self.errorState or self._runs >= self.opts["max_targets"]:
+        if self.errorState:
             return
-        self._runs += 1
+        if forms:
+            if self._form_runs >= self.opts["max_form_pages"]:
+                return
+            self._form_runs += 1
+        else:
+            if self._runs >= self.opts["max_targets"]:
+                return
+            self._runs += 1
 
         binary = self._find_binary()
         if not binary:
