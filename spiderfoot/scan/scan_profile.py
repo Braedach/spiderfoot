@@ -696,7 +696,10 @@ class ProfileManager:
                 "sfp_dnsresolve",
                 "sfp_spider",
             ],
-            module_options={"sfp_tool_nbtscan": {"nbtscan_path": "/usr/bin/nbtscan"}},
+            module_options={"sfp_tool_nbtscan": {"nbtscan_path": "/usr/bin/nbtscan"},
+                            # pinned: an older saved copy of the global settings holds stable=True and 180 s, which made
+                            # every arjun run time out (a normal run takes about 20 seconds)
+                            "sfp_tool_arjun": {"stable": False, "run_timeout": 300}},
             exclude_flags=["errorprone"],
             max_threads=4,
             timeout_minutes=120,
@@ -734,7 +737,10 @@ class ProfileManager:
             # exposed files and misconfigurations. The default exclusion of dos, fuzz and intrusive templates stays,
             # and default-login (credential guessing) is not included: this profile detects, it does not try logins.
             module_options={"sfp_nuclei": {"baseline_tags": (
-                "ssl,graphql,swagger,openapi,api,cors,jwt,redirect,crlf,joomla,drupal,magento,exposure,misconfig")}},
+                "ssl,graphql,swagger,openapi,api,cors,jwt,redirect,crlf,joomla,drupal,magento,exposure,misconfig")},
+                            # pinned: an older saved copy of the global settings holds stable=True and 180 s, which made
+                            # every arjun run time out (a normal run takes about 20 seconds)
+                            "sfp_tool_arjun": {"stable": False, "run_timeout": 300}},
             exclude_flags=["tor", "errorprone"],
             requires_authorisation=True,
             max_threads=2,

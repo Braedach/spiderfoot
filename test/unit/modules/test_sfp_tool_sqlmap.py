@@ -29,9 +29,10 @@ CLEAN = "[12:00:00] [WARNING] GET parameter 'id' does not seem to be injectable\
 def make(**opts):
     m = sfp_tool_sqlmap()
     m.sf = MagicMock()
-    m.opts = dict(sfp_tool_sqlmap.opts, **opts)
+    m.opts = dict(sfp_tool_sqlmap.opts, **dict({"test_forms": False}, **opts))   # forms off unless a test turns them on
     m.results = {}
     m._runs = 0
+    m._form_runs = 0
     m.errorState = False
     m.notifyListeners = MagicMock()
     m.checkForStop = MagicMock(return_value=False)
@@ -185,7 +186,7 @@ def test_parse_reads_several_blocks_and_their_form_urls():
 
 
 def test_a_form_page_is_tested_with_forms_and_the_post_finding_names_the_form_url():
-    m = make()
+    m = make(test_forms=True)
     done = MagicMock(returncode=0, stdout=FORMS_OUTPUT, stderr="")
     with patch.object(sfp_tool_sqlmap, "_find_binary", return_value="/tools/sqlmap/sqlmap.py"), \
             patch("modules.sfp_tool_sqlmap.subprocess.run", return_value=done) as run:
@@ -197,17 +198,31 @@ def test_a_form_page_is_tested_with_forms_and_the_post_finding_names_the_form_ur
     assert len(texts) == 2 and "POST parameter 'uid' at http://h/doLogin" in texts[0]
 
 
-def test_forms_are_tested_once_per_page_and_only_for_form_events():
-    m = make()
-    run = run_with(m, CLEAN, ["http://h/login.jsp"])             # a plain link: no form test, no parameter
-    run.assert_not_called()
-    m = make()
+def test_a_plain_linked_page_is_form_tested_but_a_script_is_not():
+    m = make(test_forms=True)
+    run = run_with(m, CLEAN, ["http://h/login.jsp", "http://h/app.js", "http://h/logo.gif"])
+    assert run.call_count == 1
+    cmd = run.call_args.args[0]
+    assert "--forms" in cmd and cmd[cmd.index("-u") + 1] == "http://h/login.jsp"
+
+
+def test_forms_are_tested_once_per_page():
+    m = make(test_forms=True)
     done = MagicMock(returncode=0, stdout=CLEAN, stderr="")
     with patch.object(sfp_tool_sqlmap, "_find_binary", return_value="/x"), \
             patch("modules.sfp_tool_sqlmap.subprocess.run", return_value=done) as run:
         for _ in range(3):
             m.handleEvent(ev("http://h/login.jsp", "URL_FORM"))
     assert run.call_count == 1
+
+
+def test_parameter_runs_cannot_use_up_the_form_page_budget():
+    m = make(test_forms=True, max_targets=1, max_form_pages=5)
+    urls = ["http://h/a.jsp?x=1", "http://h/b.jsp?y=1", "http://h/login.jsp"]
+    run = run_with(m, CLEAN, urls)
+    cmds = [c.args[0] for c in run.call_args_list]
+    assert any("--forms" in c and c[c.index("-u") + 1] == "http://h/login.jsp" for c in cmds)
+    assert sum("--forms" not in c for c in cmds) == 1             # parameter cap still holds
 
 
 def test_form_testing_can_be_switched_off():

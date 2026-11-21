@@ -12,11 +12,18 @@ import json
 import os
 import subprocess
 import tempfile
+from urllib.parse import urlsplit
 
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
 from spiderfoot import SpiderFootEvent
 from spiderfoot.url_targets import endpoint_key
 from spiderfoot import auth_headers
+
+
+STATIC_SUFFIXES = (
+    ".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp", ".woff", ".woff2", ".ttf", ".map",
+    ".pdf", ".xls", ".xlsx", ".doc", ".docx", ".zip", ".gz", ".mp4", ".mp3",
+)
 
 
 class sfp_tool_arjun(SpiderFootAsyncPlugin):
@@ -99,6 +106,8 @@ class sfp_tool_arjun(SpiderFootAsyncPlugin):
             return
         if not data.startswith("http"):
             return
+        if urlsplit(data).path.lower().endswith(STATIC_SUFFIXES):
+            return  # scripts, styles, images and documents take no parameters
         # parameter discovery is per endpoint: page.jsp?id=1 and page.jsp?id=2 are the same endpoint
         key = endpoint_key(data)
         if key is None or key in self.results:
