@@ -46,6 +46,8 @@ Open http://localhost:5001 and log in with the admin password the script printed
 *AI Connections* page if you want AI reports. Details, Podman, upgrades and building your own images:
 [`deploy/README.md`](deploy/README.md).
 
+Guides: [CVEs by software version](docs/cve-by-version.md), [scan coverage and saved settings](docs/scan-coverage.md).
+
 Only scan targets you are authorised to test.
 
 ## Licence
