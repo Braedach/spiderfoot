@@ -15,7 +15,7 @@ no longer answers). An API call, a saved schedule or a custom profile that names
 remove the name. The shipped profiles already do not use them. Stored settings for them are ignored.
 
 Optional: the person profiles use `sfp_searxng` only once you enter your own SearXNG address under Settings, Web Search.
-From rc.41 an IP address scan stays on the address; from rc.42 it finishes. rc.43 was never published; go from rc.42 to rc.44. rc.46 was tagged but never published (its scan gate failed on the frontend image); go from rc.45 to rc.47 or rc.48.
+From rc.41 an IP address scan stays on the address; from rc.42 it finishes. rc.43 was never published; go from rc.42 to rc.44. rc.46 was tagged but never published (its scan gate failed on the frontend image); go from rc.45 to rc.47, rc.48 or rc.49.
 
 ---
 

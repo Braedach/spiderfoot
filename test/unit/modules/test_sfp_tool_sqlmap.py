@@ -232,3 +232,36 @@ def test_form_testing_can_be_switched_off():
             patch("modules.sfp_tool_sqlmap.subprocess.run", return_value=done) as run:
         m.handleEvent(ev("http://h/login.jsp", "URL_FORM"))
     run.assert_not_called()
+
+
+HEURISTIC = """[13:34:57] [INFO] heuristic (basic) test shows that POST parameter 'uid' might be SQL injectable (possible DBMS: 'Apache Derby')
+[13:35:10] [WARNING] POST parameter 'uid' does not seem to be injectable
+[13:35:24] [WARNING] heuristic (basic) test shows that POST parameter 'btnSubmit' might not be SQL injectable
+"""
+
+
+def test_parse_leads_reads_only_parameters_that_might_be_injectable():
+    assert sfp_tool_sqlmap.parse_leads(HEURISTIC) == [("POST", "uid", "Apache Derby")]
+
+
+def test_an_unconfirmed_lead_is_reported_as_a_general_finding_not_a_critical_one():
+    m = make(test_forms=True)
+    done = MagicMock(returncode=0, stdout=HEURISTIC, stderr="")
+    with patch.object(sfp_tool_sqlmap, "_find_binary", return_value="/x"), \
+            patch("modules.sfp_tool_sqlmap.subprocess.run", return_value=done):
+        m.handleEvent(ev("http://h/login.jsp", "URL_FORM"))
+    kinds = [c.args[0].eventType for c in m.notifyListeners.call_args_list]
+    assert kinds == ["VULNERABILITY_GENERAL"]
+    text = m.notifyListeners.call_args_list[0].args[0].data
+    assert "Possible SQL injection (unconfirmed): POST parameter 'uid'" in text and "Apache Derby" in text
+
+
+def test_a_confirmed_parameter_is_not_also_reported_as_a_lead():
+    m = make()
+    out = HEURISTIC.replace("uid", "id").replace("POST", "GET") + OUTPUT
+    done = MagicMock(returncode=0, stdout=out, stderr="")
+    with patch.object(sfp_tool_sqlmap, "_find_binary", return_value="/x"), \
+            patch("modules.sfp_tool_sqlmap.subprocess.run", return_value=done):
+        m.handleEvent(ev("http://h/x?id=1"))
+    kinds = [c.args[0].eventType for c in m.notifyListeners.call_args_list]
+    assert "VULNERABILITY_GENERAL" not in kinds and "VULNERABILITY_CVE_CRITICAL" in kinds
