@@ -12,11 +12,20 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
 import time
+from urllib.parse import urlsplit
 
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
 from spiderfoot import SpiderFootEvent
-from spiderfoot.url_targets import host_key
+
+
+# A plain-http address on one of these ports is a TLS service (a scan finds "http://host:443" when a crawler or a banner
+# gives the port but not the scheme). nikto speaking plain http to it waits out the whole per-server allowance.
+TLS_PORTS = frozenset({443, 4443, 8443, 9443})
+SOFT_BUDGET = 0.7   # past this share of total_budget every new run is shortened, so later servers still get tested
+HARD_BUDGET = 1.5   # past this share nothing new starts and the servers left are listed
+SHORT_RUN = 90      # seconds a run may take once the soft share is passed
 
 
 class sfp_tool_nikto(SpiderFootAsyncPlugin):
@@ -44,12 +53,14 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
     _runs = 0  # runs started so far this scan (reset in setup); the cap counts these, not URLs seen
     _spent = 0.0  # seconds of nikto time used so far this scan (reset in setup)
     _skipped = ()  # servers not tested because the limit or budget was spent (a list, set in setup)
+    _reported = 0  # how many of _skipped finish() has already put in the log
+    _lock = threading.Lock()  # handleEvent runs in a thread pool: the counters and the seen-set need it (replaced in setup)
 
     opts = {
         "nikto_path": "",
         "timeout": 300,
         "request_timeout": 10,
-        "total_budget": 7200,
+        "total_budget": 0,
         "tuning": "",
         "max_targets": 0,
         "port": "",
@@ -64,8 +75,8 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
         "timeout": "Longest nikto may spend on one web server, in seconds (passed to nikto as -maxtime).",
         "request_timeout": "How long nikto waits for one answer from a server, in seconds. Keep this short: a server that never "
                            "answers should cost seconds, not the whole per-server allowance.",
-        "total_budget": "Most nikto time to spend on one scan, in seconds (0 = no limit). Servers are tested in the order the scan "
-                        "finds them; once the budget is used up the rest are skipped and the scan log lists them.",
+        "total_budget": "Nikto time to spend on one scan, in seconds (0 = no limit, the default: each server is already bounded by timeout). Past 70% of it every run is cut to 90 s so later "
+                        "servers are still tested; past 150% nothing new starts and the scan log lists the servers left out.",
         "tuning": "Nikto tuning options (e.g. '1234' for test types, blank=all).",
         "max_targets": "Most web servers to test in one scan (0 = every server the scan finds). Leave at 0: a count limit "
                        "silently drops whichever servers the scan happens to find last, so a repeat scan tests different ones.",
@@ -87,6 +98,8 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
         self._runs = 0
         self._spent = 0.0
         self._skipped = []
+        self._reported = 0
+        self._lock = threading.Lock()
         self._catchall = None
 
     def watchedEvents(self):
@@ -129,42 +142,83 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
         except Exception:
             return False
 
+    @staticmethod
+    def _server(data):
+        """(key, target) for the web server an event names, or None. One key per scheme, host and port.
+
+        A plain-http address on a TLS port is the https server (see TLS_PORTS), and a default port is left out, so
+        ``http://h:443``, ``https://h:443`` and ``https://h`` are one server, tested once.
+        """
+        if "://" not in data:
+            return f"http://{data.lower()}", data      # a bare name or address (DOMAIN_NAME, IP_ADDRESS)
+        try:
+            parts = urlsplit(data.strip())
+            port = parts.port
+        except ValueError:
+            return None
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            return None
+        scheme = "https" if parts.scheme == "http" and port in TLS_PORTS else parts.scheme
+        host = parts.hostname.lower()
+        if ":" in host:
+            host = f"[{host}]"
+        default = 443 if scheme == "https" else 80
+        url = f"{scheme}://{host}" + (f":{port}" if port and port != default else "")
+        return url, url
+
+    def _allowance(self):
+        """Seconds the next run may take, or None when nothing more may start (call with the lock held)."""
+        limit = int(self.opts["max_targets"] or 0)
+        if limit and self._runs >= limit:
+            return None
+        full = float(self.opts["timeout"])
+        budget = float(self.opts["total_budget"] or 0)
+        if not budget:
+            return full
+        if self._spent >= budget * HARD_BUDGET:
+            return None
+        if self._spent >= budget * SOFT_BUDGET:
+            return min(full, SHORT_RUN)
+        return full
+
     def _skip(self, target):
-        """Record a server that was not tested. Said once when it starts, and summed up when the scan ends."""
+        """Record a server that was not tested, and say so now (the first as an error, the rest as notes)."""
         self._skipped = [*self._skipped, target]
         if len(self._skipped) == 1:
             self.error(f"nikto: not testing {target} or any server found after it: the run limit (max_targets "
                        f"{self.opts['max_targets']}) or the time budget (total_budget {self.opts['total_budget']} s, "
                        f"{int(self._spent)} s used) is spent. The full list is in the log when the scan ends.")
+        else:
+            self.info(f"nikto: not testing {target} (limit or time budget spent)")
 
-    def finished(self):
-        if self._skipped:
-            self.error(f"nikto did not test {len(self._skipped)} web server(s): " + ", ".join(self._skipped[:50])
-                       + (" ..." if len(self._skipped) > 50 else ""))
-        super().finished()
+    def finish(self):
+        """Called when the scan wraps up (possibly more than once): list the servers that were left untested."""
+        with self._lock:
+            new = list(self._skipped)[self._reported:]
+            self._reported = len(self._skipped)
+        if new:
+            self.error(f"nikto did not test {len(new)} web server(s): " + ", ".join(new[:50])
+                       + (" ..." if len(new) > 50 else ""))
+        super().finish()
 
     def handleEvent(self, event):
         data = event.data
         if self.errorState:
             return
         # nikto scans a whole web server, so run it once per server rather than once per page
-        if data.startswith("http"):
-            target = host_key(data)
-            if target is None:
+        server = self._server(data)
+        if server is None:
+            return
+        key, target = server
+        with self._lock:
+            if key in self.results:
                 return
-            key = target
-        else:
-            target = data
-            key = f"http://{data.lower()}"
-        if key in self.results:
-            return
-        self.results[key] = True
-        limit = int(self.opts["max_targets"] or 0)
-        budget = float(self.opts["total_budget"] or 0)
-        if (limit and self._runs >= limit) or (budget and self._spent >= budget):
-            self._skip(target)
-            return
-        self._runs += 1
+            self.results[key] = True
+            maxtime = self._allowance()
+            if maxtime is None:
+                self._skip(target)
+                return
+            self._runs += 1
 
         binary = self._find_binary()
         if not binary:
@@ -186,7 +240,7 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
             cmd.extend(["-Tuning", self.opts["tuning"]])
         if self.opts["plugins"]:
             cmd.extend(["-Plugins", self.opts["plugins"]])
-        cmd.extend(["-timeout", str(self.opts["request_timeout"]), "-maxtime", f"{int(self.opts['timeout'])}s"])
+        cmd.extend(["-timeout", str(self.opts["request_timeout"]), "-maxtime", f"{int(maxtime)}s"])
 
         cve_re = re.compile(r'CVE-\d{4}-\d+', re.IGNORECASE)
 
@@ -194,7 +248,7 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
         try:
             proc = subprocess.run(
                 cmd, capture_output=True, text=True,
-                timeout=self.opts["timeout"] + 60,
+                timeout=maxtime + 60,
             )
 
             # Parse CSV output
@@ -268,7 +322,8 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
         except Exception as e:
             self.error(f"nikto error: {e}")
         finally:
-            self._spent += time.monotonic() - started
+            with self._lock:
+                self._spent += time.monotonic() - started
             try:
                 os.unlink(output_path)
             except OSError:

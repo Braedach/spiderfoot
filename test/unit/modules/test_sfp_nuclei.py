@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
+import time
 from unittest.mock import MagicMock
 
 import modules.sfp_nuclei as mod
@@ -187,3 +189,90 @@ class TestNucleiModule(TestModuleBase):
         self.assertEqual(o("http://[::1]:80/"), "http://[::1]")
         for bad in ("ftp://x/", "not a url", "http://h:99999/", ""):
             self.assertIsNone(o(bad))
+
+    # ---- coverage: no silent cap, time shared out, nothing skipped without a line in the log
+    def _stub_timeouts(self):
+        self.timeouts = []
+
+        def fake_run(cmd, **kwargs):
+            if "-version" in cmd:
+                return MagicMock(returncode=0, stdout="v3.11.1", stderr="")
+            self.runs.append(cmd)
+            self.timeouts.append(kwargs.get("timeout"))
+            return MagicMock(returncode=0, stdout="", stderr="")
+        self._orig_run = mod.subprocess.run
+        mod.subprocess.run = fake_run
+        self.addCleanup(lambda: setattr(mod.subprocess, "run", self._orig_run))
+
+    def test_by_default_every_target_is_scanned_not_the_first_20(self):
+        self.assertEqual(sfp_nuclei.opts["max_targets"], 0)
+        self.assertEqual(sfp_nuclei.opts["total_budget"], 0)
+        m = self._module()
+        self._stub_run()
+        for i in range(90):
+            m.handleEvent(self._ev("IP_ADDRESS", f"198.51.100.{i}"))
+        self.assertEqual(len(self.runs), 180)            # 90 targets, two passes each
+        self.assertEqual(m._skipped, [])
+
+    def test_a_skipped_target_is_logged_when_it_is_skipped_and_listed_at_the_end(self):
+        m = self._module(max_targets=2)
+        self._stub_run()
+        infos = []
+        m.info = infos.append
+        for i in range(5):
+            m.handleEvent(self._ev("IP_ADDRESS", f"198.51.100.{i}"))
+        self.assertEqual(len(m._skipped), 3)
+        self.assertEqual(len(self.errors), 1)            # the first skip, said as it happens
+        self.assertEqual(len([t for t in infos if "not testing" in t]), 2)   # and each later one
+        m.finish()
+        self.assertIn("did not test 3 target(s)", self.errors[-1])
+        self.assertIn("198.51.100.4", self.errors[-1])
+
+    def test_finish_can_be_called_again_and_lists_each_skip_once(self):
+        m = self._module(max_targets=1)
+        self._stub_run()
+        for i in range(3):
+            m.handleEvent(self._ev("IP_ADDRESS", f"198.51.100.{i}"))
+        m.finish()
+        count = len(self.errors)
+        m.finish()
+        self.assertEqual(len(self.errors), count)
+
+    def test_the_summary_hook_is_the_one_the_framework_calls(self):
+        from spiderfoot.plugins.plugin import SpiderFootPlugin
+        self.assertIsNot(sfp_nuclei.finish, SpiderFootPlugin.finish)
+
+    def test_past_the_soft_share_runs_are_shortened_and_past_the_hard_share_nothing_starts(self):
+        m = self._module(total_budget=1000, max_scan_duration=600)
+        self._stub_timeouts()
+        m.handleEvent(self._ev("IP_ADDRESS", "198.51.100.1"))
+        m._spent = 800.0
+        m.handleEvent(self._ev("IP_ADDRESS", "198.51.100.2"))
+        m._spent = 1600.0
+        m.handleEvent(self._ev("IP_ADDRESS", "198.51.100.3"))
+        self.assertEqual(self.timeouts, [600, 600, 120, 120])
+        self.assertEqual(m._skipped, ["198.51.100.3"])
+
+    def test_time_is_counted_for_every_run(self):
+        m = self._module(total_budget=100000)
+        self._stub_run()
+        m.handleEvent(self._ev("IP_ADDRESS", "198.51.100.1"))
+        self.assertGreater(m._spent, 0.0)
+
+    def test_concurrent_events_scan_each_target_once(self):
+        m = self._module()
+        self._stub_run()
+        hosts = [f"198.51.100.{i % 15}" for i in range(150)]
+        threads = [threading.Thread(target=lambda hs=hosts[i::6]: [m.handleEvent(self._ev("IP_ADDRESS", h)) for h in hs])
+                   for i in range(6)]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+        self.assertEqual(len(self.runs), 30)             # 15 targets, two passes each
+        self.assertEqual(m._runs, 15)
+
+    def test_every_profile_that_runs_nuclei_pins_full_coverage(self):
+        from spiderfoot.scan.scan_profile import ProfileManager, NUCLEI_COVERAGE
+        mgr = ProfileManager()
+        for name in ("tools-only", "web-app-test", "ip-address"):
+            opts = mgr.get(name).module_options.get("sfp_nuclei")
+            self.assertTrue(opts and all(opts[k] == v for k, v in NUCLEI_COVERAGE.items()), name)
