@@ -5,6 +5,16 @@ For the full list of changes see [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
+## Upgrading to rc.50 (from rc.49 or earlier): old saved limits for nikto and naabu
+
+rc.50 removes the count limits that made nikto test only the first 20 web servers and naabu scan only the first 50 hosts of a scan.
+The shipped profiles (Full Footprint, Tools Only, Web Application Test, Network Service Test, IP Address) now pin the new values, so a scan
+started from a profile is not affected by an older saved setting. **A scan started with your own module list still uses what is saved.** If your
+deployment saved the old limits under Settings (they were stored as the defaults at first start), reset them to 0:
+`sfp_tool_nikto` option `max_targets`, and `sfp_tool_naabu` option `max_targets`. No stack file change; set `SPIDERFOOT_TAG` and redeploy.
+
+---
+
 ## Upgrading the fork build to rc.40 or later (from rc.39 or earlier)
 
 **rc.40 removes 13 modules whose services are gone.** There is no stack file change and no database change; set
@@ -15,7 +25,7 @@ no longer answers). An API call, a saved schedule or a custom profile that names
 remove the name. The shipped profiles already do not use them. Stored settings for them are ignored.
 
 Optional: the person profiles use `sfp_searxng` only once you enter your own SearXNG address under Settings, Web Search.
-From rc.41 an IP address scan stays on the address; from rc.42 it finishes. rc.43 was never published; go from rc.42 to rc.44. rc.46 was tagged but never published (its scan gate failed on the frontend image); go from rc.45 to rc.47, rc.48 or rc.49.
+From rc.41 an IP address scan stays on the address; from rc.42 it finishes. rc.43 was never published; go from rc.42 to rc.44. rc.46 was tagged but never published (its scan gate failed on the frontend image); go from rc.45 to rc.47, rc.48, rc.49 or rc.50.
 
 ---
 

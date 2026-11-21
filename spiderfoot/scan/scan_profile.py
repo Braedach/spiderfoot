@@ -61,6 +61,8 @@ _CREDENTIAL_OPT = re.compile(r"(api[_-]?key|apikey|_token$|^token$|_secret|secre
 # pinned in every profile that runs nikto: an older saved copy of the global settings holds max_targets=20, which made nikto
 # test only the first 20 servers a scan found (a different 20 each time), so a saved value must not override these
 NIKTO_COVERAGE = {"max_targets": 0, "total_budget": 7200, "request_timeout": 10, "timeout": 300}
+# the same for naabu (saved global settings held max_targets=50: the 51st and later hosts of a scan were never port-scanned)
+NAABU_COVERAGE = {"max_targets": 0, "total_budget": 3600}
 _NOT_CREDENTIALS = {"remote_password", "remote_ssh_key", "remote_ssh_key_data"}
 
 
@@ -391,7 +393,8 @@ class ProfileManager:
             ),
             category=ProfileCategory.RECONNAISSANCE,
             use_cases=["Footprint"],
-            module_options={"sfp_tool_nikto": dict(NIKTO_COVERAGE)},
+            module_options={"sfp_tool_nikto": dict(NIKTO_COVERAGE),
+                            "sfp_tool_naabu": dict(NAABU_COVERAGE)},
             exclude_flags=["tor", "errorprone"],
             max_threads=3,
             tags=["comprehensive", "active"],
@@ -702,6 +705,7 @@ class ProfileManager:
             ],
             module_options={"sfp_tool_nbtscan": {"nbtscan_path": "/usr/bin/nbtscan"},
                             "sfp_tool_nikto": dict(NIKTO_COVERAGE),
+                            "sfp_tool_naabu": dict(NAABU_COVERAGE),
                             # pinned: an older saved copy of the global settings holds stable=True and 180 s, which made
                             # every arjun run time out (a normal run takes about 20 seconds)
                             "sfp_tool_arjun": {"stable": False, "run_timeout": 300}},
@@ -742,6 +746,7 @@ class ProfileManager:
             # exposed files and misconfigurations. The default exclusion of dos, fuzz and intrusive templates stays,
             # and default-login (credential guessing) is not included: this profile detects, it does not try logins.
             module_options={"sfp_tool_nikto": dict(NIKTO_COVERAGE),
+                            "sfp_tool_naabu": dict(NAABU_COVERAGE),
                             "sfp_nuclei": {"baseline_tags": (
                 "ssl,graphql,swagger,openapi,api,cors,jwt,redirect,crlf,joomla,drupal,magento,exposure,misconfig")},
                             # pinned: an older saved copy of the global settings holds stable=True and 180 s, which made
@@ -774,7 +779,8 @@ class ProfileManager:
                 "sfp_tool_tlsx", "sfp_tool_sslscan", "sfp_tool_sslyze", "sfp_tool_testsslsh",   # TLS
             ],
             option_overrides={"_scope_guard_mode": "enforce"},
-            module_options={"sfp_nmap": {"service_checks": True, "service_detection": True,
+            module_options={"sfp_tool_naabu": dict(NAABU_COVERAGE),
+                            "sfp_nmap": {"service_checks": True, "service_detection": True,
                                          "port_range": "--top-ports 1000"},
                             "sfp_tool_nbtscan": {"nbtscan_path": "/usr/bin/nbtscan"}},
             exclude_flags=["tor", "errorprone"],
@@ -826,7 +832,8 @@ class ProfileManager:
                 "sfp_hybrid_analysis", "sfp_leakix",
             ],
             exclude_flags=["errorprone", "tor"],
-            module_options={"sfp_tool_nikto": dict(NIKTO_COVERAGE)},
+            module_options={"sfp_tool_nikto": dict(NIKTO_COVERAGE),
+                            "sfp_tool_naabu": dict(NAABU_COVERAGE)},
             disable_expansion=True,
             max_threads=4,
             timeout_minutes=60,
