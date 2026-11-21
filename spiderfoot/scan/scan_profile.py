@@ -738,6 +738,7 @@ class ProfileManager:
                 "sfp_tool_katana", "sfp_tool_ffuf", "sfp_tool_arjun",                           # crawl, hidden paths, parameters
                 "sfp_tool_dalfox", "sfp_tool_sqlmap", "sfp_tool_nikto", "sfp_nuclei", "sfp_tool_snallygaster",  # test for weaknesses
                 "sfp_sslcert", "sfp_tool_sslyze", "sfp_tool_testsslsh",                         # TLS
+                "sfp_cve_by_version",                                                           # known CVEs for versions seen or declared
             ],
             option_overrides={"_scope_guard_mode": "enforce"},
             # nuclei's cheap first pass, widened for application testing: API and GraphQL exposure (introspection,
