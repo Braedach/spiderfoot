@@ -8,7 +8,7 @@ text, so the callers can talk to Claude directly instead of through a proxy
 
 API facts this relies on (Claude Sonnet 5 / 5.5):
   * Sonnet 5.5's safeguards can decline security-flavoured input (``cyber`` and
-    four other categories); see ``response_text`` and deploy/README.md.
+    four other categories); see ``response_text`` and deploy/REFERENCE.md.
   * ``temperature``, ``top_p`` and ``top_k`` are rejected (HTTP 400), so none is
     sent.
   * Structured output is ``output_config.format`` with a ``json_schema``.

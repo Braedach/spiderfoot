@@ -35,7 +35,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased] — braedach fork builds (`v6.1.0-bd.1-rc.N`)
 
 Fork-specific changes since 6.1.0, shipped as release candidates. The per-build record and the build and deploy
-procedure are in [`deploy/README.md`](deploy/README.md).
+procedure are in [`deploy/REFERENCE.md`](deploy/README.md).
 
 ### Fixed (rc.46, from comparing the rc.45 test scans with the earlier ones)
 - **One slow RIPEstat answer no longer loses an address's ownership intelligence.** In an rc.45 IP scan the RIPEstat whois request for the owning /11 timed out (the same second as an OTX timeout, so the network hiccuped), `sfp_ripe` gave up on the whole address, and the scan lost the netblock, the AS, the company, the RIPE record and the abuse contacts that the same scan had found two days earlier. RIPEstat requests are now retried (`retries` 2, `retrywait` 3 seconds, growing) with a minimum timeout of 20 seconds (`min_timeout`; the whois answer for a large netblock is about 50 KB), and a failed answer is not cached.

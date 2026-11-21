@@ -53,7 +53,7 @@
 #     tagged v<upstream base>-bd.<N> for a release or v<upstream base>-bd.<N>-rc.<M> for a release candidate,
 #     e.g. v6.1.0-bd.1-rc.36. An -rc tag never moves :latest, and this stack never uses :latest: SPIDERFOOT_TAG is
 #     REQUIRED and has no default. No non-rc release exists yet. Which candidates were validated live, and which
-#     must not be run (rc.32 and rc.33: database connection leak), is recorded in deploy/README.md.
+#     must not be run (rc.32 and rc.33: database connection leak), is recorded in deploy/REFERENCE.md.
 #     The stack file is not inside the images: a new tag does not update it. Take the file from the tag you deploy.
 #
 #   Usage:
@@ -110,34 +110,8 @@
 #   2.6.4 (2026-11-14) - Mirrors stack-podman.yml 2.16.3: sf-tor healthcheck written without spaces. Also includes the 2.6.3 Summary rewrite.
 #   2.6.3 (2026-11-14) - Comments only: the Summary now mirrors stack-podman.yml 2.16.2 section for section (services, AI, Tor, modules,
 #     images and tags, the deployment sequence); only the Docker commands and sf-juiceshop differ. The development host is ceros.
-#   2.6.2 (2026-11-14) - Comments only: candidates are cut from main after the PR is merged (deploy/README.md, "The flow").
-#   2.6.1 (2026-11-14) - Comments only: the Tor service is described in the Summary. No change to any service.
-#   2.6.0 (2026-11-14) - Mirrors stack-podman.yml 2.16.0: new service sf-tor (Tor client, no published port), used only for .onion addresses.
-#     Needs images v6.1.0-bd.1-rc.35 or later.
-#   2.5.0 (2026-11-14) - Mirrors stack-podman.yml 2.15.0: api and Celery workers share the persistent embeddings-cache with sf-agents
-#     (chown -R 1000:1000 /srv/spiderfoot/embeddings-cache first; they run non-root). No HuggingFace key is needed.
-#   2.4.0 (2026-11-14) - Mirrors stack-podman.yml 2.14.0: sf-api and both Celery workers get SF_EMBEDDING_PROVIDER/MODEL/DIMENSIONS=fastembed,
-#     FASTEMBED_CACHE_PATH and HF_HOME on /tmp (they had no embedding settings, so scan findings were indexed with mock vectors while
-#     sf-agents searched with fastembed); sf-agents keeps its model in the persistent embeddings-cache. See stack-podman.yml 2.14.0.
-#   2.3.0 (2026-10-24) - Adds sf-juiceshop (OWASP Juice Shop), profile "testing", DELIBERATELY NOT mirrored to
-#     stack-podman.yml: a vulnerable-by-design scan target has no place in production. Off by default
-#     (COMPOSE_PROFILES must include "testing"); published on this host only, never through Zoraxy.
-#   2.2.0 (2026-10-24) - Mirrors stack-podman.yml 2.10.0: sf-litellm removed, sf-agents calls Claude directly.
-#   2.1.0 (2026-10-23) - Mirrors stack-podman.yml 2.9.0: tmpfs over /home/spiderfoot/.config, .cache and .pdcp on sf-celery-worker-active,
-#     plus cap_add NET_RAW, no-new-privileges off and NMAP_PRIVILEGED=1 (see the comment on the service).
-#   2.0.0 (2026-10-23) - Rewritten from scratch as a pull-only mirror of
-#     stack-podman.yml 2.8.0 (see its changelog for the shared history).
-#     Previous 1.x versions were a different design and are in git history.
-#     WHY it was replaced rather than patched: it built from source on the
-#     deploy host (the pattern is build elsewhere, pull here); it ran 11
-#     services against production's 9 (MinIO + init job and Tika, which
-#     production does not run); it used named volumes and its own env layout
-#     where production bind-mounts /srv/spiderfoot; and it had drifted behind
-#     production's fixes. A dev stack that does not mirror production cannot
-#     say whether a change is safe to release. Full reasoning: deploy/README.md.
-#
+#   Older entries: see the git history of this file.
 # =============================================================================
-
 name: spiderfoot
 
 services:

@@ -1,951 +1,106 @@
 # deploy/
 
-A personal deployment setup for this fork — a build script that publishes
-versioned images + a GitHub Release, and Compose stacks to run them.
-Separate from the rest of the repo on purpose (its own subfolder, touches
-nothing upstream owns) so pulling future changes from upstream never
-conflicts with it. It follows the same pattern as the maintainer's other
-forks (ARTEX was the first).
-
-Nothing here is required to use SpiderFoot itself — see the root
-`README.md` and upstream's `docker-compose.yml` for the general install
-paths. This is specifically how *this* deployment builds and runs it.
-
-## Layout
+How this fork is built, released and run. Everything here is separate from upstream's files, so pulling upstream never
+conflicts. The long history and policy detail is in [`REFERENCE.md`](REFERENCE.md).
 
 ```
 deploy/
-├── publish.sh                  # build + push + release — run on the build host only
-├── stack-podman.yml            # PRODUCTION deployment (Podman host) — use podman-compose, see below
-├── stack-podman.llm-external.yml # optional override: join an existing llm-net rather than create one
-├── stack-podman.env.example    # tracked template — names only, no real values
-├── stack-docker.yml            # DEVELOPMENT / sandbox deployment (Docker host)
-├── stack-docker.env.example    # tracked template — names only, no real values
-├── bootstrap-spiderfoot-env.sh # generates the real env file (secrets) once per deployment
-├── scan-gate.sh                # Trivy + Grype gate publish.sh runs on every image
-├── docker/                     # fork-owned Dockerfiles (base, frontend, active-scanner, go-build.sh)
-└── requirements*.in / .lock    # hash-locked Python: the app, and the active scanner's tools
+  publish.sh                    build the 5 images, scan them, push to GHCR, create the GitHub release (build host only)
+  scan-gate.sh                  the Trivy + Grype gate publish.sh runs on every image
+  stack-docker.yml              Docker Compose stack (development and general use)
+  stack-podman.yml              Podman stack (production here, run with podman-compose)
+  stack-*.env.example           environment templates, names only, no secrets
+  bootstrap-spiderfoot-env.sh   generates the real env file and its secrets, once per deployment
+  docker/                       fork-owned Dockerfiles (base, active-scanner, frontend)
+  requirements*.lock            hash-locked Python dependencies
 ```
 
-**`stack-podman.yml` is deployed with `podman-compose`** (in production, through the deploy tool). It used to be a
-hard requirement: `sf-agents` had a GPU device in Podman's own CDI syntax, which Docker Compose's CLI cannot parse.
-That device was removed in stack-podman 2.13.0, but the file has not been tested with Docker Compose's CLI since, so
-`podman-compose` remains the supported way to run it.
+Both stacks run the same nine services: `sf-postgres`, `sf-redis`, `sf-qdrant`, `sf-api`, `sf-celery-worker`,
+`sf-celery-worker-active` (needs `COMPOSE_PROFILES=scan`), `sf-frontend-ui` (port 5001), `sf-agents` and `sf-tor`.
+They only pull images; they never build.
 
-Both stacks run the same 9 services (8, plus the active-scan worker under the `scan` profile): `sf-postgres`,
-`sf-redis`, `sf-qdrant`, `sf-api`, `sf-celery-worker`, `sf-celery-worker-active`, `sf-frontend-ui`, `sf-agents` and
-`sf-tor`. The development stack can also start `sf-juiceshop` (profile `testing`). They only ever **pull** images. They never
-build anything. The development stack mirrors production on purpose: what is
-tested there is what runs here.
+## 1. Run it (pull published images)
 
-## The flow: branch → merge → test build → release
-
-Nothing is pushed straight to `main`. Work happens on a branch and reaches `main` only through a pull request, once
-its unit tests pass. Every build, test builds included, is made from a tagged commit on `main`. A **release
-candidate** is then deployed and soaked, and a problem it shows is fixed by the next pull request and the next
-candidate, never by changing a published tag. A release is cut only from a commit whose candidate has passed.
-An AI does the grunt work under human supervision.  It is fast & efficient,
-but follows guidelines set within another repository.  The AI model employed is mid-level
-and has proven itself to be very competant, and is capable of push-back on development decisions.
-
-| Step | Where | Command / action |
-|---|---|---|
-| 1. Develop | workstation | branch off `main`, commit, run the unit tests, push the branch, open a PR |
-| 2. Merge | GitHub | merge the PR (merge commit) once the tests pass and the change has been reviewed; delete the branch |
-| 3. Test build | workstation, then build host | on `main`, create an **annotated** tag `v6.1.0-bd.1-rc.N` (`git tag -a`) and push it, then run `publish.sh` on the build host in a **login shell**. Exact commands in "Cutting a build" below |
-| 4. Soak | test host | paste the stack file from the same tag into the deploy tool if its version changed, set `SPIDERFOOT_TAG`, **redeploy** the stack, then soak and test ("Deploying a build" below). The test host is the development host, or the production host while it is the only deployment in use |
-| 5. Fix forward | workstation | anything the soak shows goes back to step 1 and ships as the next candidate. Write the release notes for each candidate, with a **Breaking change** section when it needs one |
-| 6. Release | build host | tag the commit of the candidate that passed as `v6.1.0-bd.1`, push it, `./deploy/publish.sh v6.1.0-bd.1` |
-| 7. Deploy | production host | set `SPIDERFOOT_TAG=v6.1.0-bd.1` in the stack's environment and redeploy |
-
-Why merge before building: a candidate built from a branch tip is not the code that ends up on `main` once other
-work merges, so the thing that soaked is not the thing that is released. Building from `main` means the tag, the
-images and the history all name the same commit. The cost is that an unproven change is on `main` before it has run
-live; the unit tests and the review are the gate for that, and `main` is never deployed without a tag.
-
-### Cutting a build, step by step
-
-Every command, in order. Replace `N` with the next free rc number (`git tag -l 'v6.1.0-bd.1-rc.*' | sort -V | tail -1`).
-
-**1. Workstation: tag the commit and push the tag.**
+Needs Docker with the compose plugin, or Podman with `podman-compose`. About 2 GB of RAM and 10 GB of disk.
 
 ```bash
-git checkout main && git pull --ff-only          # builds are always cut from main
-git tag -a v6.1.0-bd.1-rc.N -m "rc.N: one line on what changed" HEAD
-git push origin v6.1.0-bd.1-rc.N
-git ls-remote --tags origin | grep 'rc\.N'           # must list the tag, and a "^{}" line for the commit
+git clone https://github.com/Braedach/spiderfoot.git && cd spiderfoot
+git checkout v6.1.0-bd.1-rc.49                      # the stack file must come from the tag you deploy
+
+sudo mkdir -p /srv/spiderfoot/{postgres,redis,qdrant,embeddings-cache}
+sudo chown -R 1000:1000 /srv/spiderfoot/embeddings-cache
+./deploy/bootstrap-spiderfoot-env.sh                # prints the secrets once: save them in a password manager
+sudo nano /srv/spiderfoot/stack-spiderfoot-env.env  # set SPIDERFOOT_TAG=v6.1.0-bd.1-rc.49 (required, no default)
+
+export COMPOSE_PROFILES=scan
+docker compose --env-file /srv/spiderfoot/stack-spiderfoot-env.env -f deploy/stack-docker.yml up -d
+docker ps --format '{{.Names}} {{.Status}}'         # wait for nine containers marked healthy
 ```
 
-The tag must be **annotated** (`-a`, with a message). `publish.sh` rejects a lightweight tag with
-"Tag … does not exist on origin" even when it was pushed. Never reuse or move a tag that has been
-published: a fix gets the next rc number.
+Open http://localhost:5001 and log in as `admin` with the password the script printed. Put a reverse proxy in front for
+anything beyond your own machine. Choose the AI provider and key on the *AI Connections* page; no key lives in the
+environment. Podman: use `podman-compose -f deploy/stack-podman.yml` instead (its header lists the extra steps).
 
-**2. Build host (`davros`, LXC 103 on the Proxmox host): start the build in the background.**
+**Upgrade:** check out the new tag, change `SPIDERFOOT_TAG`, then `pull` and `up -d`. Do not stop and start: that reuses
+the old containers. Read [`UPGRADING.md`](../UPGRADING.md) first when the release notes say *breaking*.
+
+## 2. Build the images yourself
+
+Run from the repository root with the tag checked out. Tag the result as `ghcr.io/braedach/spiderfoot-<service>:<tag>`
+and the stack file runs it unchanged. Allow 30 GB of disk, 6 GB of RAM and 20 to 45 minutes (the active scanner
+compiles Go and C tools).
 
 ```bash
-ssh root@<proxmox-host> "pct exec 103 -- bash -lc 'cd /opt/spiderfoot/src && nohup ./deploy/publish.sh v6.1.0-bd.1-rc.N > /opt/spiderfoot/spiderfoot-build-rcN.log 2>&1 < /dev/null &'"
+TAG=v6.1.0-bd.1-rc.49
+R=ghcr.io/braedach/spiderfoot
+docker build -f deploy/docker/Dockerfile.base -t $R-base:$TAG .
+docker build -f docker/Dockerfile.api             --build-arg BASE_IMAGE=$R-base:$TAG -t $R-api:$TAG .
+docker build -f docker/Dockerfile.scanner         --build-arg BASE_IMAGE=$R-base:$TAG -t $R-scanner:$TAG .
+docker build -f deploy/docker/Dockerfile.active-scanner --build-arg BASE_IMAGE=$R-base:$TAG -t $R-active-scanner:$TAG .
+docker build -f deploy/docker/Dockerfile.frontend -t $R-frontend:$TAG frontend/
 ```
 
-- Use `bash -lc` (a **login** shell). `git` lives in `/usr/local/bin`, which a plain `pct exec … bash -c` does not have
-  on its `PATH`, and the script then fails with `git: command not found`.
-- Run it from `/opt/spiderfoot/src`, the dedicated clone. `publish.sh` fetches the tag and checks it out there itself.
-- `nohup … &` with a log file lets the build outlive the SSH session. A full build takes about 35-45 minutes.
-- Only one build at a time: `publish.sh` removes the project's local images before and after a run.
+`BASE_IMAGE` must name the image you just built, so build `base` first. Then follow section 1, minus the pull.
 
-**3. Watch it.**
+## 3. Publish to your own registry (`publish.sh`)
+
+`publish.sh` builds the same five images, checks each carries the commit's revision, runs the scan gate (a fixable
+critical or high vulnerability or an unallowed secret blocks the push), pushes, and creates a GitHub release. To use it
+on your own fork, change `GHCR_NAMESPACE` and `GH_REPO_SLUG` near the top of the script, and the `image:` names in the
+stack files.
+
+- **Needs:** `git`, `docker`, the `gh` CLI, a **classic** GitHub token with `write:packages` and `repo` (GHCR pushes
+  do not work with fine-grained tokens), and 12 GB free under Docker's root.
+- **Token:** read from `/etc/davros/ghcr-token` (root-only, `chmod 600`) or prompted for. Never pass it as an
+  argument or commit it. A classic `repo` token reaches every repository you own: make one for this only, with an expiry.
+- **Tag:** must be annotated and already pushed. `v<base>-bd.<N>` is a release, `-rc.<M>` a test build; an `-rc` never
+  moves `:latest`.
 
 ```bash
-ssh root@<proxmox-host> "pct exec 103 -- tail -n 40 /opt/spiderfoot/spiderfoot-build-rcN.log"
+git checkout main && git pull --ff-only
+git tag -a v6.1.0-bd.1-rc.50 -m "rc.50: what changed" && git push origin v6.1.0-bd.1-rc.50
+nohup ./deploy/publish.sh v6.1.0-bd.1-rc.50 > build-rc50.log 2>&1 < /dev/null &
+tail -f build-rc50.log                              # healthy run ends: Scan gate passed, Pushed 5 images, Release URL
+./deploy/publish.sh v6.1.0-bd.1-rc.50 --check       # status only
 ```
 
-The log has a lot of Docker output; the lines that matter start with `[INFO]`, `[OK]`, `[WARN]`, `[ERROR]` or `[scan]`.
-
-Healthy order: `Source at v…-rc.N (<commit>)`, five `<image>: built`, `All 5 images carry revision <commit>`, five
-`[scan] <image>: PASS`, `Scan gate passed for all 5 images`, `Pushed 5 images at …`, `Release: https://github.com/…`,
-`Build and publish complete`. The images exist in the registry only after `Pushed 5 images`.
-
-**4. If the scan gate fails:** nothing is pushed. The per-image reports are in
-`/opt/spiderfoot/.spiderfoot-publish/scan-<tag>/` (`trivy-<image>.json`; the fixable HIGH/CRITICAL findings are the
-blockers). Fix it (usually a dependency bump, see "Bumping pins" and the written exceptions under "Supply-chain
-policy"), merge the fix by PR, then cut the **next** rc. Example: rc.28 failed on `soupsieve` 3.0.4 (a newly published
-HIGH, fixed in 4.0); the lock was bumped and rc.29 passed.
-
-**5. Edit the release notes if the build is a breaking change.** `publish.sh` creates the GitHub pre-release. If the new
-build needs a new stack file, new environment variables, a host-side step or changes a default, put a **Breaking change**
-section at the top of the notes saying what and why (`gh release edit <tag> --notes-file …`).
-
-### Deploying a build
-
-The stack files (`deploy/stack-podman.yml`, `deploy/stack-docker.yml`) are **not inside the images**, so a new tag does
-not update them. For each deploy:
-
-1. Paste the stack file from the tag you are deploying into the deploy tool (Dockhand), if its version header changed.
-2. Do any host-side step the release notes list (for example `chown -R 1000:1000 /srv/spiderfoot/embeddings-cache`).
-3. Set `SPIDERFOOT_TAG=v6.1.0-bd.1-rc.N` in the stack's environment, and nothing else.
-4. **Redeploy** the stack (in Dockhand: Redeploy; with compose: `up -d`, or `down` then `up -d`). Do **not** just Stop
-   and Start: that restarts the existing stopped containers, which keep their old image and environment, so the new tag
-   and stack file are ignored (rc.31 once came up on rc.29 this way). Redeploy recreates any container whose image,
-   environment or definition changed. There is no GPU device to strip any more (removed in stack-podman 2.13.0), so the
-   stack comes up as one unit.
-5. Check every container is `healthy` and that the running image tags are the new ones
-   (`podman ps --format '{{.Names}} {{.Image}} {{.Status}}'`). If a service is still on the old tag, the stack was
-   started rather than redeployed, or the tag change was not saved first.
-
-6. **Soak before the release notes go out.** Use the build for 20 minutes the way a user does (dashboard open, two or
-   three scans, a settings change) and watch the database connection count: it must stay flat.
-   `select client_addr, state, count(*) from pg_stat_activity where datname='spiderfoot' group by 1,2` in `sf-postgres`;
-   a healthy idle stack holds about 25 connections. rc.33 passed its unit tests and leaked one connection per request,
-   which only showed under real use (dashboard frozen, every call 500 after about 15 minutes).
-7. Check the dashboard's System health: every deployed subsystem `healthy`, and Tor `working` (it can read `checking`
-   for the first minute while Tor builds its first circuit). If Tor stays `not working`, look at `podman logs sf-tor`
-   and at whether a firewall or IDS/IPS between the host and the internet blocks Tor.
-
-### Tor
-
-`sf-tor` is a Tor client built from the base image. It publishes no port; only the stack's own containers can use it,
-and only `.onion` addresses are sent through it (Settings > Tor, default `sf-tor:9050`). It is on by default, so the
-host makes Tor connections from the moment the stack starts. To run without Tor, delete the `sf-tor` service from the
-stack file and turn off "Use Tor" in Settings; the dark-web modules then skip `.onion` pages. The general outbound
-proxy (Settings > Network & Proxy) is a separate setting for sites that must leave through a proxy.
-
-### Tag scheme
-
-`v<upstream base version>-bd.<N>` for a release, `…-rc.<M>` appended for a test
-build. Bare `vX.Y.Z` tags are **upstream's** namespace (upstream already owns
-`v6.1.0`) and `publish.sh` refuses them. A release tag moves `:latest`; an
-`-rc` tag **never does**, so a test build cannot reach anything that follows
-`:latest`. The stacks do not follow `:latest` anyway: `SPIDERFOOT_TAG` is
-required and has no default.
-
-## Build + publish
-
-```bash
-./deploy/publish.sh v6.1.0-bd.1-rc.1      # test build
-./deploy/publish.sh v6.1.0-bd.1           # release
-./deploy/publish.sh v6.1.0-bd.1 --check   # status only
-```
-
-Builds the 5 images (`base`, `api`, `scanner`, `active-scanner`, `frontend`),
-verifies each image's revision label equals the commit being shipped, pushes
-`ghcr.io/braedach/spiderfoot-<service>:<tag>`, and creates a GitHub Release
-(a *pre-release* for `-rc`) carrying the pushed image digests.
-
-**Needs:**
-- `git`, `docker` and the `gh` CLI on the build host — nothing else. The
-  Python, Node, Go and C toolchains all run inside the Dockerfiles' own
-  build stages.
-- a **classic** GitHub PAT, `write:packages` + `repo` scope (GHCR push does
-  not work reliably with a fine-grained PAT, regardless of the scopes
-  granted). It is **not** limited to this repository — see "Token scope"
-  below
-- the tag already pushed to `origin`
-- a clean clone dedicated to publishing — it checks the tag out in place
-- roughly 30GB free disk and 6GB RAM: `active-scanner` compiles Go and C tools
-  from source, and a cache-cold build can take over 20 minutes. `publish.sh` refuses to start with under 12 GB
-  free under Docker's root, and removes this project's local images (`spiderfoot-*` and the `ghcr.io/braedach/...`
-  tags of the five services) before a build and again on any exit, so a run that stops at the scan gate or the
-  push no longer leaves about 4 GB behind. Other projects' images are never touched.
-
-The build token lives in one shared file, `/etc/davros/ghcr-token` (root-only, `chmod 600`, outside every repository
-and Docker build context, shared by every project built on that host), and `publish.sh` reads it directly: no
-per-project copy and no symlink. If the file is missing it prompts for the token. If GitHub rejects the token it
-prompts for a replacement and overwrites the file only once the new token is accepted and you confirm saving it; it
-never deletes the shared file, because every project relies on it and a rejected login can be transient. It still
-refuses to run if its state directory (log and publish state) is inside the repo. Never pass the token as an argument
-or env var, and never commit it.
-
-**Token scope.** A classic PAT with `repo` can read and write *every*
-repository the account can reach, private ones included; it cannot be narrowed
-to one repo (only fine-grained tokens can, and those do not work for GHCR
-pushes). Whatever host holds it therefore holds that access. Use a token
-created only for this, keep it only on the build host, give it an expiry, and
-rotate it.
-
-**One-time GitHub setup:**
-- A brand-new image name is created **private** on GHCR; flip it to Public
-  once in the package settings. The 5 names above already exist.
-- Keep the inherited GitHub Actions publish workflows (`docker.yml`,
-  `release.yml`) **disabled** in the fork's Actions settings. `publish.sh` is
-  the only supported publisher; a tag push would otherwise trigger upstream's
-  own publish jobs.
-
-## Supply-chain policy
-
-Written after a baseline scan (2026-10-23) of the images production was running
-found the active-scanner at 42 critical / 985 high findings, the frontend at 2 /
-57, and secrets-scanning noise from a bundled exploit repository. The causes
-were structural, so the fixes are rules, not one-off patches:
-
-- **The tag pins SpiderFoot's source, nothing else.** The old Dockerfiles pulled
-  16 Go tools at `@latest`, six repositories at branch HEAD, unpinned pip and npm
-  packages and wordlists from moving branches, so rebuilding the same tag
-  tomorrow gave a different image. Everything the fork-owned Dockerfiles install
-  is now pinned: base images by digest, Python by exact version **and hash**
-  (`deploy/requirements.lock`, `pip install --require-hashes`), tools by version.
-- **A 14-day cool-down applies to individually maintained software.** Do not
-  adopt a release younger than 14 days: a hijacked maintainer account is caught
-  within days, not hours (the March 2026 Trivy compromise lasted about three
-  hours; its malicious container images about ten). Lock compilation enforces it
-  (`--exclude-newer`).
-- **...except for a published security fix, as a named, written exception.**
-  Taken so far: `certifi` and Pillow 13 (critical CA-trust and image-decoding
-  findings), on 2026-10-24 `brotli` 1.2.1 (critical), `filelock` 4.2.1 and
-  `pypdf` 6.21.2 (high), and on 2026-10-28 `dnspython` 2.9.0 in both locks
-  (high — DoS via DNS compression pointer traversal, CVE-2026-114605), on 2026-11-14
-  `soupsieve` 4.0.1 (high — polynomial-time DoS in selector parsing, fixed in 4.0, which
-  was 10 days old; bs4 CSS selection re-verified against it) in the application lock and, the same
-  day, in the tools lock (maigret declares `soupsieve<3.0`, which held it at 2.10 with two high
-  findings; maigret does not import soupsieve, it reaches it through beautifulsoup4, and both tools were run
-  against 4.0.1), plus the `cryptography` override in the tools lock, and on 2026-11-16 `dnspython` 2.9.2 in both locks (high, GHSA-vvf4-9x63-8xvv, found by the rc.38 scan gate in 2.9.0 and 2.9.1; 2.9.2 was 13 days old; the lock blocks were changed by hand, with PyPI's hashes, so no other pin moved). Each is an `--exclude-newer-package`
-  date in the compile command below, and must pass the scan gate. Move them back
-  under the 14-day rule at the next rebuild — **do a plain recompile without
-  reapplying every exception's date first** and only re-add the ones the gate
-  still reports; rc.8 lost `brotli`/`filelock`/`pypdf`/`certifi` back to vulnerable
-  pre-exception versions this way until the diff was checked against the prior
-  lock and the still-needed overrides were restored.
-- **...and official OS base images are exempt.** `node`, `nginx`, `python`,
-  `debian` are rebuilt every day or two as patches land, so an old build is a
-  *less* patched build. They are pinned by digest and refreshed deliberately; the
-  scan gate is their control.
-- **Nothing is pushed unless every image passes the scan gate**
-  (`deploy/scan-gate.sh`): no fixable critical/high vulnerability and no unallowed
-  secret, by Trivy; Grype cross-checks and is reported. Accepted findings live in
-  `deploy/trivyignore.txt`, each with a written justification. The scanners are
-  themselves pinned by digest.
-- **An unfixable CVE in an unused binary is removed, not waited on** (e.g. curl in
-  the frontend image).
-- **Images must be scannable.** Upstream's base deleted the package database, so
-  its OS packages were invisible to scanners and "0 findings" meant "can't see".
-  The fork-owned base keeps the read-only package list and removes the package
-  managers.
-- **Rebuild on a schedule, not only on commits.** Upstream has had no commit since
-  2026-06-02, yet OS packages and dependencies keep acquiring CVEs. A release
-  number (`-bd.N`) is a *build* number: cut a new one at least monthly.
-
-Known dependency overrides (`pip check` will say so; expected, and tested): Pillow 13
-although fastembed declares `<13` (`requirements-overrides.txt`), and `cryptography` 50
-for sslyze (`requirements-tools-overrides.txt`).
-
-### Active scanner
-
-`docker/Dockerfile.active-scanner` replaces upstream's. Everything is pinned
-and checksum-verified; Python tools live in their own hash-locked venv.
-
-- **Go tools** are built by `docker/go-build.sh` with their vulnerable
-  dependencies raised to the floor list in the Dockerfile (`GO_FLOORS`), and
-  nuclei is built from source on the current Go. The first scan found 2 critical /
-  112 high, all inside binaries' embedded dependencies. When the gate reports a new
-  one, raise the floor to the first fixed release (at least 14 days old, or a named
-  exception). gowitness is built from a checkout (its `go.mod` has `replace`
-  directives); gau is pinned to a commit.
-- **Identity tools** (Python, in the tools venv): `maigret` (username search on about 5,900 sites) and
-  `user-scanner` (email registrations on about 200 sites), added 2026-11-14 with 69 dependencies; the tools venv
-  grew from about 60 MB to about 310 MB. Both are pinned exactly (they release every one to two weeks). Their
-  modules run them with no update check (maigret `--no-autoupdate`, user-scanner's own settings file), no
-  recursion, no AI report, no cross-scan pivoting, and only in scans about a person. Before the build the lock was
-  installed with `--require-hashes` into a clean venv and scanned with the gate's own Trivy in `rootfs` mode
-  (`fs` mode does not read installed packages and reports nothing): clean after the soupsieve exception.
-- **Removed:** amass (own dependencies carry 2 critical / 48 high; v5 is a different
-  architecture; subfinder + dnsx cover it), gospider and hakrawler (katana),
-  waybackurls (gau), LinkFinder (katana `-jc`), CMSeeK (whatweb, httpx), retire.js
-  (never worked). **Replaced:** PyPI `trufflehog` (abandoned v2) by TruffleHog v3.
-  Their modules still exist and report "binary not found".
-- **Runtime needs** (set in the stacks): `HOME=/home/spiderfoot` (the stacks run it
-  as uid 1000, which has no passwd entry) and tmpfs over `.config`, `.cache` and
-  `.pdcp`, or katana and nuclei exit without scanning. `cap_add: NET_RAW` and
-  `no-new-privileges: false` for this worker only: nmap, naabu and masscan carry
-  `cap_net_raw` as a file capability, which the kernel ignores for a non-root
-  process while no-new-privileges is on (tested). massdns needs none.
-- **Module paths:** most tool modules default to blank and auto-search `PATH`.
-  Five don't - `gobuster`, `testssl.sh`, `whatweb`, `wafw00f`, `snallygaster`
-  require an explicit `*_path` with no fallback, and nothing anywhere had ever
-  set one (see the dated entry below); their defaults now point at the real
-  path baked into this image (e.g. `/tools/testssl.sh/testssl.sh`).
-- **Testing an image:** run each tool module against a local server with the
-  stack's exact container flags (`--read-only`, `--user 1000:1000`,
-  `--cap-drop ALL --cap-add NET_RAW`, the tmpfs mounts). That found a dozen
-  modules written for old command lines (dalfox, gowitness, gobuster, tlsx,
-  arjun, TruffleHog) and the HOME / capability problems above.
-- **Internal targets need their own DNS and port handling.** Found by a real
-  end-to-end scan against `sf-juiceshop` (below): `naabu` and `dnsx` ship their
-  own bundled resolvers and cannot see a Docker/Podman compose hostname at
-  all (`naabu`: `-system-resolver` added, a pure fallback; `dnsx`: pointed at
-  the container's own resolver via `-r`, since its flag replaces rather than
-  falls back). Separately, `httpx` and `sfp_spider` only ever probed/crawled
-  their fixed default ports (`80,443,8080,8443` for httpx; the implicit
-  default for the spider) and never acted on a port a scanner actually found
-  open, so a web app on anything else (Juice Shop: 3000) was invisible to
-  every tool downstream of them; both now also watch `TCP_PORT_OPEN` and act
-  on exactly that port (4 events on the first scan -> 9 with the tool fixes
-  alone -> full crawl with `sfp_spider` fixed too).
-- **Two core URL helpers were corrupting every link a crawl discovered**,
-  independent of port: `SpiderFootHelpers.urlBaseUrl()` dropped an explicit
-  port entirely (so a link resolved against it pointed at the wrong port),
-  and `urlRelativeToAbsolute()` split the *whole* URL - scheme included - on
-  `/` and dropped empty segments, which also dropped the empty segment
-  between the two slashes of `scheme://` (`"http://host/x"` ->
-  `"http:/host/x"`) and let a long enough run of `../` eat into the domain
-  itself once it ran out of path to pop. One test file had been updated to
-  assert the bug's own output as correct instead of the bug being fixed;
-  both are fixed now, with tests asserting the correct result. See
-  `spiderfoot/helpers.py`.
-- **A single-page app's catch-all 200 made every path-fuzzer wordlist entry a
-  false hit.** Juice Shop, like most Angular/React/Vue apps, serves its index
-  page with HTTP 200 for any path at all (client-side routing fallback) -
-  confirmed by requesting a random nonexistent path directly. `gobuster`'s and
-  `ffuf`'s own status-code filters can't tell that from a real hit, so nearly
-  every entry in a ~4,750-word wordlist "hit", each spawning its own
-  downstream crawl/probe - a scan that should take minutes ran for 16+ hours.
-  `ffuf` has auto-calibration built in (`-ac`, now on by default); `gobuster`
-  doesn't, so it gets a probe-one-random-path-first check instead
-  (`soft_404_detection`, default on), passed to its own `--exclude-length`.
-  Checked the same class of bug in every other wordlist-driven tool module:
-  `arjun` (parameter discovery) correctly found nothing on the same target,
-  by design - its own response-diffing isn't fooled by an identical response
-  regardless of parameter; `sfp_tool_massdns` has no wildcard-DNS defence of
-  its own, but nothing in the current `tools-only` profile feeds it a bulk
-  candidate list, so this is a flagged, currently-dormant risk, not fixed.
-- **`v6.1.0-bd.1-rc.5`: the first build that produces real, trustworthy results
-  end to end**, not just a clean scan gate. A full `tools-only` run against
-  Juice Shop went from never finishing (16+ hrs, aborted at 22,665 events, on
-  `rc.4`) to `FINISHED` in ~40 minutes with 839 varied, plausible events across
-  ten modules (`rc.5`) - the gobuster/ffuf fix above plus everything in the
-  commits before it, proven by actually running the thing, not just by the
-  gate passing.
-- **2026-10-25: five tool modules had no binary path configured, anywhere, ever.**
-  `gobuster`, `testssl.sh`, `whatweb`, `wafw00f`, `snallygaster` all errored
-  "did not set a path to the tool" during a live external scan. This looked
-  like a scan-profile artifact (the scan used a hand-built module list rather
-  than a named profile) but wasn't - traced `api/routers/scan.py` through
-  `scan/scanner.py` and confirmed a profile only ever selects *which* modules
-  run, never their options, so no profile choice could have fixed this.
-  These five modules, unlike most others here, ship with no `PATH` fallback
-  and require an explicit path; a direct query of `tbl_config` on Postgres
-  confirmed none had ever been set, in any profile, on any scan - including
-  `rc.5`'s own Juice Shop run, which hit the identical five errors unnoticed.
-  Fixed by baking the real, confirmed binary paths from this image into each
-  module's own default `opts` (`/tools/bin/gobuster`,
-  `/tools/testssl.sh/testssl.sh`, `/usr/bin/whatweb`,
-  `/opt/venv-tools/bin/wafw00f`, `/opt/venv-tools/bin/snallygaster`). Full
-  module suite (1387 passed) clean after. Not in any built image yet - lands
-  in the build after `rc.5`. `wappalyzer`'s gap is unrelated (needs an API
-  key, not a path) and is a user decision, not a code fix.
-- **2026-10-25: `rc.5` proven end to end against two real targets.** OWASP
-  Juice Shop (`rc5-juiceshop`): `FINISHED`, ~40 minutes, 839 events. Then a
-  live, authorised external target, `demo.testfire.net` (`rc5-demotestfire-pass1`,
-  the 27-module HTTP/DNS/TLS-only set, port-scanners deliberately excluded for
-  this first pass): `FINISHED`, ~2 hours, 5,324 events, with the UDM SE
-  gateway's IDS/IPS watched live throughout and clean the whole run. Both runs
-  surfaced the five-tool path-default gap above, now fixed. With the backend
-  now validated on real targets, work has moved to the GUI: a Settings/API-key
-  cleanup is underway (see "Frontend" below), and further validation passes
-  (a port-scanner pass against `demo.testfire.net`, more external targets) are
-  still to come.
-- **Accepted, not fixed:** gosu (Go 1.24.6) in every Postgres image and Node
-  packages in Qdrant's SBOM file: neither is ours to patch; revisit when the
-  maintainers ship. Grype's openssl findings are Debian-backport false positives.
-
-### AI providers (AI Connections)
-
-The provider behind AI reports and analysis is set in the GUI, under **AI Connections** (administrators only).
-How it behaves:
-
-- **One active provider.** Anthropic, OpenAI, DeepSeek, Ollama and Mock each keep their own key, model and base URL,
-  but a single setting chooses the active one. Every report and agent call uses it; there is no routing between them.
-- **No automatic fallback between providers.** A failed request fails; it is never retried on another provider, so
-  scan findings only go to the provider the administrator chose. (The server-side fallback described under "AI model"
-  is within Anthropic and is unrelated.)
-- **The key is not an environment variable.** This fork's stacks (`stack-podman.yml`, `stack-docker.yml`) no longer
-  pass `ANTHROPIC_API_KEY` to any service, the env templates no longer list it and the bootstrap script no longer
-  writes it. The provider and its key are entered only in the GUI. Until a provider and key are saved there, AI
-  reports fail with a message pointing at AI Connections. (Upstream's own compose layer under `docker/` keeps its
-  environment-based settings and is not changed by this.)
-- **Applied per request.** `sf-agents` and the Celery workers re-read the settings on each request (cached for a few
-  seconds), so a change takes effect without a redeploy. Requests already running finish on the old provider.
-- **Keys are write-only and encrypted.** They are stored in `tbl_config` under scope `LLM`, encrypted with Fernet using
-  a key derived (HKDF-SHA256) from the stack's `SF_JWT_SECRET_KEY`; the API only ever reports "key set". **Rotating
-  `SF_JWT_SECRET_KEY` makes stored keys undecryptable**; they then show as "No key" and must be entered again. The
-  API, `sf-agents` and both Celery workers all receive that secret (as `SF_JWT_SECRET`) for this reason.
-- **Ollama** needs a network route from `sf-api` and `sf-agents` to the Ollama server; see "Ollama and the LLM network" below.
-- **One model per provider**, chosen from what the provider offers: the page asks the provider for its model list using the stored key (Anthropic's models API, an OpenAI-compatible `/models` endpoint for OpenAI and DeepSeek, Ollama's `/api/tags`), through `GET /api/ai/providers/<id>/models`. The key never reaches the browser. If the provider cannot be reached the page falls back to typing a model name, and a blank model uses the provider's default.
-
-Code: `spiderfoot/ai/llm_settings.py` (storage, encryption, resolution), `spiderfoot/ai/provider_models.py` (model lists), `spiderfoot/api/routers/ai_providers.py`
-(admin-only API), `frontend/src/pages/AIConnections.tsx`.
-
-### Ollama and the LLM network (read this if you deploy the stack)
-
-`sf-api` (lists the models) and `sf-agents` (runs the chats) each join **a second network, `llm-net`, for one reason: so
-they can reach Ollama as `http://ollama:11434`.** Nothing else uses it, and the Celery workers do not join it. The cloud
-providers (Anthropic, OpenAI, DeepSeek) do not need it at all.
-
-**Why baden uses an existing network called `llm-net`.** On baden, Ollama is a separate Podman stack that owns a network
-named `llm-net` (shared only with Open WebUI). SpiderFoot cannot reach Ollama any other way there: baden's host firewall
-drops container-to-host traffic on port 11434, so the host's address times out, and the public address is behind a login
-page, which a server-side call cannot pass. So baden's stack joins the network Ollama already lives on by setting
-`SF_LLM_NETWORK=llm-net` and adding `deploy/stack-podman.llm-external.yml` as a second `-f` to every `podman-compose`
-invocation (see that file's header for why a templated `external:` in the base file is not used instead — it is a
-real podman-compose bug, not a style choice).
-
-**Everyone else: you need to add nothing.** With just `stack-podman.yml`, the stack creates its own empty network,
-`spiderfoot-llm-net`, which does no harm if you do not use Ollama. If you run Ollama in a container, either attach that
-container to `spiderfoot-llm-net`, or use `stack-podman.llm-external.yml` + `SF_LLM_NETWORK` to join the network your
-Ollama already uses (as baden does). Then, in **AI Connections**, set Ollama's API base URL to
-`http://<ollama container name>:11434`. If Ollama runs on another host, skip all of this and use an address the
-containers can reach.
-
-**Security: who can reach what.**
-- Every container on this network can reach `sf-api` (8001) and `sf-agents` (8100). Attach only the Ollama container, and
-  never anything untrusted or multi-user.
-- Reusing an existing network (as baden does) also lets `sf-api` and `sf-agents` reach everything else on it. On baden that
-  is Ollama and Open WebUI. Reuse a network only if its members are ones you trust.
-- If you do not use Ollama, remove the two `llm-net` attachments from your stack file, or leave the default empty network.
-- An external network must already exist, or the deploy fails.
-
-### AI model
-
-`sf-agents` uses `claude-sonnet-5-5` (`SF_LLM_MODEL`). Anthropic's safeguards on it can decline a request
-(HTTP 200, `stop_reason: refusal`, category `cyber`, `bio`, `frontier_llm`, `reasoning_extraction` or
-`general_harms`), and this tool feeds it exploit, vulnerability and leaked-secret text. **Tested live on 2026-10-24:**
-a realistic OSINT report prompt (open database port, `.git` exposure, an outdated plugin with a CVE id) was declined
-by 5.5 with `cyber`, answered by `claude-sonnet-5`, and a milder wording passed on 5.5.
-
-So refusals are handled by the API: `SF_LLM_FALLBACK=default` (the default) sends each request with the server-side
-fallback option, and a declined one is re-run on a fallback model inside the same call. It uses the beta endpoint and
-works on the Claude API only; set `SF_LLM_FALLBACK=` (empty) to turn it off, or set `SF_LLM_MODEL=claude-sonnet-5` to
-skip 5.5 altogether. If a request is declined and the fallback declines too, the call raises "Claude declined the
-request (category: ...)".
-
-### Bumping pins
-
-```bash
-cd deploy && uv pip compile requirements.in -o requirements.lock --generate-hashes \
-  --python-version 3.12 --no-header --exclude-newer <today-14d>T00:00:00Z \
-  --exclude-newer-package <pkg>=<day after its fixed release> \
-  --override requirements-overrides.txt --allow-unsafe
-```
-
-Delete the old lock first (otherwise uv keeps its pins). Re-compile the tools
-lock the same way from `requirements-tools.in`. Then `publish.sh` rebuilds and
-gates; nothing is pushed on a failure.
-
-## Frontend
-
-**2026-10-25, in progress:** with the backend proven end to end (see "Active
-scanner" above), attention has moved to the React GUI (`frontend/`). First
-problem: `Settings` mixed the ~124 third-party API keys scan modules need
-(Shodan, Censys, VirusTotal, etc.) into one long alphabetical list with every
-other module, including ones with nothing to configure at all — and that list
-sat right next to a nav item called "API Keys" that was actually something
-else entirely: SpiderFoot's own REST API bearer tokens, unrelated to any
-module. Two different things sharing one name, in adjacent nav slots.
-
-Fixed so far:
-- A new **Data Source Credentials** page (`/credentials`) lists just the
-  ~124 credential-bearing modules, searchable, with a configured/not-configured
-  status per module. `Settings` no longer shows a module whose only options
-  are credentials; a module with both credential and non-credential options
-  still shows the latter in Settings, with a link across to Credentials for
-  the former.
-- The old "API Keys" nav item is renamed **Access Tokens** (own REST API
-  tokens — unchanged functionality, just no longer competing for the same
-  name as the new page).
-- `Settings`'s ~130-entry flat Global Settings list is now grouped by
-  subsystem (AI Provider, Embeddings, Reranker, Vector Search, Network,
-  Database, Cache & Queue, Object Storage, Elasticsearch, Web & API, Core),
-  mirroring the grouping the backend (`spiderfoot/config/app_config.py`)
-  already carries internally but never exposed. The AI Provider group in
-  particular — `_llm_provider`/`_llm_model`/`_llm_api_key`/etc., the setting
-  that controls whether `sf-agents` calls Anthropic, OpenAI or Ollama — used
-  to sit anonymously among those 130 keys with no description at all; it now
-  has its own labelled, described section.
-- Sensitive-value masking (password input, reveal toggle) is now driven by
-  one shared classifier (`frontend/src/lib/settingsMeta.ts`) instead of a
-  narrower inline regex that missed at least one real case
-  (`_socks5pwd`, the SOCKS proxy password, was never masked before).
-
-Found and fixed along the way, unrelated to the rename itself: every
-`RequirePermission`-gated page (Access Tokens, SSO Settings) redirected a
-genuine admin straight back to the Dashboard on a fresh page load. Root
-cause in `frontend/src/lib/auth.ts` — two independent fetches on mount
-(`fetchAuthStatus`, `fetchCurrentUser`) each set the one shared `isLoading`
-flag to `false` on their own completion; whichever resolved first cleared
-it while `user` could still be `null`, so the permission check ran against
-no user and bounced. Fixed by tracking each fetch's completion separately
-and only clearing `isLoading` once both are done (`authStatusLoaded` /
-`userLoaded` in the store). Confirmed reproducible on `/sso-settings`
-(untouched by anything else this session) before fixing, and confirmed
-fixed on both routes after.
-
-Verified by running the actual dev build against the live local stack (not
-just `tsc`/`vitest`) and walking through the pages in the browser: the
-credentials module list, search, the configured/not-configured filter,
-editing and saving a credential against the real API, the grouped Settings
-sidebar, and a cold load of both previously-redirecting admin pages.
-
-**2026-10-25: same review on `Modules.tsx` and `NewScan.tsx`.** Found the
-Modules page's Enable/Disable toggle looked functional and wasn't: the
-backend keeps "disabled" state in a plain in-memory Python `set` local to
-one API worker process (this deployment runs 4), nothing in the scan
-execution path reads it, and `NewScan`'s own module picker ignores it
-completely — toggling it changed nothing about what a scan actually runs.
-Removed rather than wired up (backend work, not today's scope). Also fixed:
-a real data leak where the expanded module view fell back to showing an
-option's raw value when it had no description — for an undocumented
-credential field, that was the literal API key in plain text to any
-authenticated user; the three separate, inconsistent credential-detection
-regexes across `Modules.tsx`/`NewScan.tsx` are now the one shared classifier
-from the Data Source Credentials work; the "Categories" stat was reading
-`GET /api/data/module-categories`, which reliably returns an empty list live
-despite every module carrying real category data, now derived from the
-modules already being fetched instead. And `NewScan`'s hardcoded Quick Scan
-module list had 3 of 20 names (`sfp_dnstxt`, `sfp_httpheaders`,
-`sfp_geoinfo`) that no longer exist — renamed or merged upstream at some
-point, silently shrinking it to 17 modules with nobody noticing — replaced
-with their real successors or dropped where redundant. Verified live:
-19/19 resolve now, confirmed by actually selecting Quick Scan in the
-browser and watching the module count.
-
-**2026-10-25: user feedback after using the merged build — a real backend
-bug, not a UI quirk.** Reported as Data Source Credentials "flickering"
-between there/not-there after refresh, and Shodan/Censys keys "not
-accepting." Root cause: `get_app_config()` (`spiderfoot/api/dependencies.py`)
-is a per-process singleton. `SF_API_WORKERS=4` runs four separate
-`multiprocessing`-fork processes inside the one `sf-api` container
-(confirmed live via `/proc`), each with its own independent copy loaded
-from the database once at *that worker's own startup*. A save writes
-through to Postgres correctly, but a read served by a different worker
-still returns whatever was in memory at its own startup — invisible until
-that worker restarts. Which of the 4 serves any given request is
-effectively random, so a save looked like it "sometimes" worked, for any
-module, not specifically Shodan or Censys. Fixed by overlaying a fresh
-database read on top of the in-memory snapshot in `GET /api/data/modules`
-and `GET /api/config`, coercing types so a bool/int option doesn't turn
-into a string after the round trip through the database's string-only
-storage, and building a *new* opts dict per module rather than mutating in
-place — the in-memory dict is the same object a running scan reads its
-options from, so mutating it in a display-only GET would make that request
-a backdoor writer into live scan state. Verified live, not just unit
-tests: wrote a credential via the real PATCH endpoint, then read it back
-20 times immediately after across whichever of the 4 real worker
-processes answered each request — 100% consistent. Same for Censys's
-two-field credential.
-
-Also from that feedback: the AI provider setting moved out of Settings
-(a group nobody would think to look for) into its own **AI Connections**
-page, with one-click presets for Anthropic, OpenAI, Ollama, Mock, and
-DeepSeek — DeepSeek isn't a distinct backend provider type, its API is
-OpenAI-wire-compatible, so the preset is just `_llm_provider=openai` with
-DeepSeek's base URL pre-filled, no backend change needed. GitHub Copilot
-is explicitly called out as *not* available as a preset: its API needs
-GitHub's own OAuth device-flow sign-in, not a pasted API key, which
-nothing in this backend implements — deliberately not added as a dropdown
-entry that would just silently fail. Checked the fourth feedback item
-(missing geodata in the `rc5-demotestfire-pass1` AI report) against the
-scan's actual module list in Postgres: all 27 modules are HTTP/DNS/TLS
-tooling, no `sfp_ipinfo` or any geo-IP module was ever in scope for that
-deliberately narrow first pass — not a bug, the report is accurately
-reflecting what was actually collected.
-
-**2026-10-25, same feedback session — target-type-aware module selection.**
-The deeper question behind "the profile issue again": shouldn't the tools
-offered depend on what kind of target you're scanning (domain vs. phone
-number vs. IP, etc.)? They already structurally can't do anything irrelevant
-— every module only fires when it receives an event type it watches, so a
-web-crawling tool enabled against a bare phone number just never runs, it
-doesn't error — but New Scan's module picker had no way to show that, so it
-offered everything regardless of target type with no indication of what
-would actually do anything.
-
-Added `GET /api/data/modules/reachable?target=<value>`: detects the
-target's type with the same `SpiderFootHelpers.targetTypeFromString()` the
-scan engine itself uses, seeds the same root event(s) `scanner.py` would
-seed for a real scan, and walks forward through the watches/produces graph
-to the full transitive closure of modules that could ever receive a
-relevant event. The graph engine for this already existed
-(`spiderfoot/plugins/module_resolver.py`, tested, complete) but — like the
-cross-worker config bug and the module enable/disable toggle found earlier
-this session — was never wired to anything. New Scan's "By Module" tab now
-dims unreachable modules with a tooltip explaining why, while leaving them
-selectable rather than hard-filtering, since target-type detection can be
-ambiguous.
-
-Verified against the real module catalog: a domain target correctly
-excludes exactly the handle-based social-media and wallet-address modules
-(`sfp_reddit`, `sfp_etherscan`, `sfp_telegram`, etc. — 20 of 305).
-Also surfaced something worth knowing rather than quietly shipping around:
-the real module graph is far more interconnected than intuition suggests —
-`sfp_tool_phoneinfoga` produces `RAW_RIR_DATA`, a "hub" event type huge
-numbers of modules watch, so a phone-number target reaches the same 285
-modules a domain target does. That's a real, correct chain (phone → RIR
-text blob → whatever else parses RIR text), not a bug in the walk; it just
-means this mainly catches the clearly-isolated module categories rather
-than being a dramatic filter. Doesn't fully explain "why scans take so
-long" either, by the same logic — an irrelevant module that never receives
-a matching event costs almost nothing sitting idle in this architecture;
-scan duration is driven by the genuinely-relevant active/invasive tools
-actually running, not idle ones.
-
-**2026-10-28: `rc.7` confirmation run against `demo.testfire.net`** (PR #10
-merged, same 27-module scope as the original pass-1 run, for a fair
-comparison): `FINISHED`, 5,328 events in ~2h5m vs. pass-1's 5,324 in ~2h0m —
-consistent, no regression. Zero recurrence of the five-tool "did not set a
-path" errors; the credentials freshness fix held steady (10/10, then
-15/15 consistent reads live against the real deployment, not a hotfix
-mount this time). Found one more layer of the same bug class, fixed
-immediately: `gobuster` got past the path check this time and hit the
-*next* blank-with-no-default required option, `wordlist` — never
-surfaced before because the path check failed first in every earlier
-run, so this one was never reached. Same fix as before: default it to
-the same `/tools/wordlists/common.txt` `ffuf` already correctly uses.
-
-**Also found, not fixed — flagged for follow-up, confirmed unrelated to
-anything changed recently:** no scan since the original Oct 25 pair
-(`rc5-juiceshop`, `rc5-demotestfire-pass1`) has produced any correlation
-results, across three different worker container generations (`rc.5`,
-`rc.6`, this `rc.7` run) — `scanner.py`'s `runCorrelations()` checks
-`tbl_config`'s `__correlationrules__`, which is empty, despite the 97
-correlation rule YAML files being present on disk in every one of those
-images. Neither the API's `Config` class nor (as far as traced so far)
-anything else loads those files into that config key — unlike modules,
-which *do* get a filesystem-fallback load when the DB copy is empty.
-Likely explanation: whatever populated it for the original pair never
-persisted that to the database, so the moment that specific worker
-process was replaced the rules were gone for good, with nothing
-re-seeding them since. Not touched by anything in PR #9 or #10. Needs a
-proper trace of the scan worker's own startup config path (separate
-from the API's) to confirm and fix properly — didn't want to guess at
-a fix for something this is involved without being sure.
-
-**2026-10-28: correlation-rules gap above, traced and fixed.** The
-scanner never has its own config path — `scanner.py` just runs with
-whatever flat `global_opts` dict the API process handed it when the
-scan was created (`spiderfoot/api/routers/scan.py`'s
-`create_scan()` → `config.get_app_config().get_config()`), so the gap
-was entirely inside the API's `Config.__init__`
-(`spiderfoot/api/dependencies.py`). `__modules__` already had a
-filesystem-fallback load for exactly this situation — "DB copy is
-empty, so load it from disk instead" — but `__correlationrules__` had
-no equivalent, so it stayed permanently `[]` the moment the DB row
-(which is never written in the first place; nothing persists
-correlation rules to `tbl_config`) came back empty. Added the same
-fallback: when the merged config's `__correlationrules__` is falsy,
-load every YAML in `correlations/` (respecting
-`SF_CORRELATION_RULES_DIR` if set, same env var the existing manual
-`/scans/{id}/correlations/run` endpoint already honoured) via
-`SpiderFootHelpers.loadCorrelationRulesRaw()`, same pattern as the
-modules fallback. Verified live against the real `rc.7` image before
-baking it into a build: hotfix-mounted the fixed `dependencies.py`
-into `sf-api` only (scanner workers don't need it — they just receive
-whatever the API already resolved), confirmed 95 rules now load
-in-process, then ran the real `RuleExecutor` against the already-
-finished `rc.7` confirmation scan (`257F1C60`) exactly the way
-`scanner.py`'s `runCorrelations()` does — went from the 0 it had
-before to 38 correlation results (2 HIGH, 18 MEDIUM, 18 INFO), now
-persisted in `tbl_scan_correlation_results` for that scan. Hotfix
-mount reverted immediately after. 4 new unit tests added in
-`test/unit/test_config_api_modernization.py::TestCorrelationRulesFilesystemFallback`
-covering: the real directory loads non-empty rules, a DB-persisted
-value (if one ever exists) takes precedence over the filesystem, a
-missing/misconfigured rules directory degrades to an empty list
-instead of raising, and the loaded shape matches what
-`runCorrelations()` actually reads it as. Full targeted suite
-(`test_config_api_modernization.py`, `test_correlation_wiring.py`,
-`test_router_data_modules.py`, `test_scan_service_phase2.py`,
-`test_module_pipeline.py` — 232 tests total) passes clean.
-
-**2026-10-28: `rc.8` first build attempt failed the scan gate** — unrelated
-to the correlation fix itself. Two newly-published CVEs landed on pins that
-were fine as of `rc.7`: `dnspython` 2.8.0 (HIGH, CVE-2026-114605, fixed in
-2.9.0, affects `base`/`api`/`scanner`/`active-scanner`) and the `go-jose`
-dependency inside the from-source `nuclei` build (HIGH, CVE-2026-116587,
-fixed in 4.1.6, affects `active-scanner` only). Fixed both as named
-exceptions: `dnspython` via `--exclude-newer-package` in both
-`requirements.lock` and `requirements-tools.lock`, `go-jose` by adding
-`github.com/go-jose/go-jose/v4@v4.1.6` to `GO_FLOORS` in
-`Dockerfile.active-scanner`. Recompiling the lockfiles with only the new
-exception and the existing 14-day window silently **dropped** the
-`brotli`/`filelock`/`pypdf`/`certifi` exceptions taken on 2026-10-24 back
-to their pre-fix, vulnerable versions — caught by diffing the new lock
-against the previous one before committing, not by the scan gate (which
-hadn't run yet). All exceptions re-added; see "Supply-chain policy" above.
-
-**2026-10-28: `rc.9` built, deployed, and the correlation fix confirmed
-fully automatic.** All 5 images passed the scan gate clean and pushed
-(PR #11). Deployed to the local test stack (`SPIDERFOOT_TAG=v6.1.0-bd.1-rc.9`),
-confirmed the correlation rules load with no hotfix mount this time — the
-fix is in the shipped image, not a live patch. Ran a fresh scan
-(`rc9-correlation-pipeline-check`, `CDE7C865`, 3 modules against
-`demo.testfire.net`) straight through the normal `POST /scans` API, no
-manual correlation trigger: `tbl_scan_correlation_results` had 2 rows
-(1 INFO, 1 MEDIUM) once the scan reached `FINISHED` — `runCorrelations()`
-fired on its own as part of the standard scan-completion path, same as
-every scan from here on.
-
-**2026-10-29: `rc.9`'s scan gate result, and PR #11 merged.** Trivy (the
-actual gate) passed all 5 images with **zero fixable CRITICAL/HIGH
-findings** — `deploy/trivyignore.txt` is empty, nothing is waived, anything
-fixable gets fixed instead. Grype's cross-check (reported only, does not
-gate) flagged `base`/`api`/`scanner`: 13, `active-scanner`: 16, `frontend`: 0
-— per "Supply-chain policy" above, these are Debian-backport false
-positives (Grype matches the embedded OpenSSL version string and misses that
-Debian already backported the fix; Trivy reads the distro package version,
-which is the correct check). Remaining accepted-not-fixed residuals, both
-upstream and outside this fork's control: `gosu` in the official Postgres
-image, and Node packages in Qdrant's own SBOM — revisit when those
-maintainers ship. `active-scanner`'s Go-tool-bundled dependencies (the
-historically worst offender, 2 critical/112 high on the first scan) are
-engineered out via `GO_FLOORS` rather than left unfixed. PR #11 (correlation
-rules fix, gobuster wordlist fix, rc.8→rc.9 CVE pin bumps) merged into
-`master` (`86d3f7ad`).
-
-**2026-11-03: Dependabot enabled; frontend npm dependencies were an unscanned gap.**
-Trivy cannot see inside the frontend's minified JS bundle, so the `rc.9`
-"0 findings" on the frontend image said nothing about the npm packages compiled
-into it. Dependabot raised 233 alerts: 143 on `frontend/package-lock.json`, 86
-on upstream's stale `Pipfile.lock` (March 2025; no image installs from it, they
-use `deploy/requirements.lock`), 4 on `requirements.txt` / `test/requirements.txt`.
-Fixed: `npm audit fix --before=2026-10-20` (respects the 14-day cool-down) took
-49 vulnerable packages to 22; two named security exceptions, `follow-redirects`
-1.16.2 and `vite` 6.4.5, took it to 20. All runtime-scope alerts with a fix are
-now patched; `tsc`, the build and all 300 frontend tests pass. `Pipfile` and
-`Pipfile.lock` removed. `setuptools` floor raised to 84.1.0, `pytest` pinned to
-9.0.3. `publish.sh` now runs `npm audit --omit=dev --audit-level=high` against
-the lockfile and fails the build on a high/critical runtime finding (checked: it
-passes the new lockfile and fails the old one). Dependabot has a 14-day cooldown
-to match the policy above; security updates bypass it.
-
-Remaining, all accepted: dev-only tooling (`vitest`/`tinypool` critical, `eslint`
-chain, `@hey-api/openapi-ts` / `js-yaml`) needs major bumps (vitest 5 needs a
-newer vite) and never ships in the image; `katex`/`mermaid` low needs mermaid 12;
-`dompurify` low and `paramiko` low have no fix.
-
-**2026-11-03: `rc.10` failed its scan gate on four newly-published CVE sets** (nothing
-pushed). Python, all four Python images: `pyasn1` 0.6.4 -> 0.6.5 (4 high),
-`pypdf` 6.21.2 -> 6.21.4 (7 high) and `graphql-core` 3.3.0 -> 3.3.1 (1 high), each a
-named exception (all published after the cut-off). Frontend: `libexpat` 2.9.0-r0 in the
-nginx base (CVE-2026-117610, CVE-2026-118370), still unpatched in upstream's newest
-`nginx:1.30-alpine`, so it is upgraded from Alpine alongside `brotli-libs`. The locks were
-recompiled with last time's window (`--exclude-newer 2026-10-14`) plus the exceptions,
-so only those packages (and a `filelock` patch release) moved; a recompile at today's
-window would also have pulled in `pycryptodome` 4.x, `fastapi` and `anthropic` bumps.
-The `setuptools` floor raised in the previous entry was reverted: 84.x is outside the
-window and a two-major jump for build tooling isn't worth low/medium findings in a file
-no image uses. The new `npm audit` gate passed on this run.
-
-**2026-11-04: frontend test runner upgraded to vitest 5.1.0 (and `@types/node` 24).**
-Clears both critical `tinypool` alerts and the `vitest`/`@vitest/mocker` advisories. vitest 5.1.0
-(published 2026-11-02) is a named security exception to the 14-day cool-down; 5.0.x itself
-carries a moderate advisory fixed in 5.1.0. `@types/node` moves to 24 because vitest 5 needs 22 or
-newer and the build image is Node 24. `tsc`, the 300 frontend tests, the build and `npm ci` pass;
-the runtime `npm audit` gate still passes. Left alone on purpose: removing `@hey-api/openapi-ts`
-does not work, because it is a required peer of `@hey-api/client-axios`, whose generated client
-`src/api/client.ts` and `src/api/index.ts` import. Its fix (0.99) needs a regenerate-and-compare
-migration, and the inputs for that (`openapi.json`, `dump_openapi.py`) are not in the repository.
-
-**2026-11-04: `mermaid` upgraded to 12.2.0** (pulls `katex` 0.18.10), clearing the last runtime
-`katex` alert; 12.2.0 was published 2026-10-13, inside the normal cool-down. Checked in a real
-browser against the local stack, not just unit tests, and compared with master (mermaid 11): the
-workspace IaC Map diagram **rendered blank on master too**. `WorkspaceIaCTab` passed the SVG to
-`sanitizeHTML`, whose HTML-only allow-list stripped the whole `<svg>`. Added `sanitizeSVG`
-(DOMPurify SVG profile, `foreignObject` as an HTML integration point, scripts and handlers still
-stripped, data attributes off) with unit tests. After the change the diagram renders on mermaid 12
-(6 nodes, 12 edges, correct labels and colours, no script or handler attributes in the output).
-
-**2026-11-05: AI providers are managed in the GUI and override the environment.** The AI Connections page
-previously saved global `_llm_*` settings that nothing read: `sf-agents` used only its container environment, so a key
-typed in the GUI had no effect. Each provider now keeps its own encrypted key, model and base URL, one provider is
-active at a time, and `sf-agents` and the Celery workers read the active one on every request (see "AI providers
-(AI Connections)"). `ANTHROPIC_API_KEY` is gone from the stack files, the env templates and the bootstrap script:
-the key lives only in the GUI. For an existing deployment, save a provider key in AI Connections, confirm a report,
-update the stack file, then delete `ANTHROPIC_API_KEY` from the stack environment (the old stack file requires it, so
-update the file first).
-
-**2026-11-05: `rc.15`'s first run failed with `docker save failed`, not a vulnerability.** The build host was at
-93% disk (4.9 GB free): `publish.sh` only removed the images of a run that finished, so every run that stopped at
-the scan gate or the push (rc.1, rc.8, rc.10, rc.14 and the failed rc.15) left about 4 GB of local images, and
-saving the 3.2 GB `active-scanner` image for scanning ran out of space. The stale images were removed by hand
-(24 GB free afterwards) and `publish.sh` now removes this project's local images before a build and on any exit,
-and refuses to start with under 12 GB free (see "Prerequisites"). The same run also confirmed the build token
-now read from `/etc/davros/ghcr-token` works (GHCR login succeeded).
-
-**2026-11-14: rc.29 to rc.31, and why a stack-file change shipped with them.**
-- rc.28 built but failed the scan gate on `soupsieve` 3.0.4 (HIGH, fixed in 4.0); nothing was pushed. The lock was bumped
-  to 4.0.1 under a written exception and rc.29 passed.
-- The "sf-api worker crashes" overnight were uvicorn's supervisor SIGKILLing API workers that missed its 5 s health ping,
-  taking the scans running inside them. Scans now run outside the API workers, a Redis heartbeat plus a reaper marks dead
-  scans failed, and the health-check timeout is configurable (`SF_API_WORKER_HEALTHCHECK_TIMEOUT`, default 120 s).
-- Scans never reached the Celery workers because the external-DNS override (`dns.resolver.override_system_resolver`)
-  applied to every name, so `sf-redis` stopped resolving inside the API. Fixed in rc.30: internal names always use the
-  container network's DNS.
-- rc.31: grouped navigation, tabbed Settings, module options and API keys edited on the Modules page, `fastembed` as the
-  real default (the API and workers were indexing with fake `mock` vectors while `sf-agents` searched with `fastembed`),
-  an `llm` reranker, and stack files 2.15.0 (Podman) / 2.5.0 (Docker) that give the API and workers the embedding
-  settings and the shared model cache. **Breaking:** needs the new stack file and
-  `chown -R 1000:1000 /srv/spiderfoot/embeddings-cache`.
-- rc.32 and rc.33: settings and API keys saved through one API worker are no longer overwritten by another; gobuster and
-  katana floods, the accounts deadline and three noisy modules fixed. **Do not run these two builds:** the settings fix
-  opened a database connection on almost every request and never returned it, so the API ran out of connections after
-  about 15 minutes of use.
-- rc.34: that connection leak fixed (every settings read and write closes its handle, and a dropped handle returns its
-  connection by itself); database errors no longer contain the connection string. Validated live: the API held 12 to 13
-  database connections through a 30 minute soak with the dashboard open and six scans.
-- rc.35: Tor for the dark-web modules (`sf-tor` service, a Tor section in Settings, a Tor status on the dashboard), a
-  working outbound proxy, New Scan selections that run what the screen says, and the selection shown in Scan Settings.
-  Stack files 2.16.0 (Podman) / 2.6.0 (Docker). **Breaking:** needs the new stack file; Tor is on by default; the
-  proxy setting now takes effect; "All Modules" and "By Required Data" select different modules (see `UPGRADING.md`).
-- rc.49: found by rescanning on rc.48. sqlmap reports parameters its heuristic flags but cannot confirm as "Possible
-  SQL injection (unconfirmed)" (general finding, risk stays 1); arjun drops the noise parameter `GLOBALS` and parameter
-  sets repeated across 3 or more paths of one host (single-page apps answer every path alike). No stack file change.
-- rc.48: two fixes found by testing rc.47. arjun is pinned to fast mode with a 300 second limit in the Web Application
-  Test and External Tools Only profiles (older saved settings had forced stable mode and 180 seconds, so every run timed
-  out) and skips scripts, images and documents; sqlmap form-tests any page, including login pages reached as plain
-  links, with its own budget of 15 pages. No stack file change; set `SPIDERFOOT_TAG` and redeploy.
-- rc.47: all fixes since rc.45 in one build. sqlmap tests forms (POST and GET) as well as link parameters; katana runs
-  a headless-browser pass on single-page apps and crawls every new host; arjun works (stable mode off, arjun 2.x output
-  read); the network service test's nmap port range and nbtscan path are fixed; one slow RIPEstat answer no longer loses
-  an address's ownership data (retries); the frontend image upgrades libxml2 (CVE-2026-86144). rc.46 (tagged, with the
-  RIPE, nmap and nbtscan fixes) was never published: its scan gate rejected the frontend for libxml2 2.13.9-r2.
-- rc.45: sqlmap (detection only), authenticated test request headers, wider nuclei checks, the network service test
-  profile, frontend lint fixes. Deployed on baden.
-- rc.44: the frontend image moves to nginx 1.30.7 (digest-pinned). rc.43 (the unit-test fixes, 9,367 tests passing and
-  none failing) was never published: its scan gate rejected the frontend for six fixable critical/high nginx CVEs
-  (CVE-2026-121810, -123007, -123633, -113425, -118899, -123634) in 1.30.6, newer than rc.42's scan. The pin is
-  refreshed by the procedure in `docker/Dockerfile.frontend`. No stack file change; set `SPIDERFOOT_TAG` and redeploy.
-- rc.42: an IP address scan no longer stalls. `sfp_torexits` listed every address of an owned netblock (a /11, about two
-  million addresses) and re-parsed the multi-megabyte Tor relay list for each; it now parses the list once and checks a
-  netblock by looking for exit nodes inside it. `checknetblocks` is also switched off by the IP profile's "no expansion"
-  setting. Found with a py-spy dump of the stuck worker thread. The rc.42 IP scan finished in 7.5 minutes.
-- rc.41 (from the rc.40 test scans): an IP address scan no longer walks other people's networks (`sfp_ripe`
-  `expandasnetblocks`), the scan graph is no longer empty (15-column event rows), GeoMap has pins for IP addresses and a
-  country for phone numbers, correlation results are no longer stored twice, and IntelX accepts the address as its account
-  page shows it. No stack file change.
-- rc.40: web search for people through the owner's SearXNG server (`sfp_searxng`, Settings > Web Search), the
-  `web-app-test`, `ip-address` and `asn` profiles, an egress health monitor, cross-scan subject labels, the AI report written
-  from a digest of every event, and many accuracy fixes. **Breaking:** 13 dead modules are removed (see `UPGRADING.md`).
-- rc.39: `dnspython` 2.9.2 (rc.38 failed the scan gate on 2.9.0 and 2.9.1 and was never published; rc.39 carries
-  everything in rc.38, including nuclei finally running and three modules that crashed on their first event).
-- rc.37: the phone, email and person-name profiles follow the usernames and profiles they find and pick up keyed modules
-  once their key is saved; the spider no longer fetches a page twice under `:80` and bare spellings; Shodan's
-  "no information" answer is not an error; the dashboard Tor status is consistent across API processes and the
-  "vector: down" row is replaced by a real Qdrant check. No stack file change.
-- rc.36: httpx probes each site once instead of once per link; the file metadata module reads files (it never had);
-  ffuf ignores Windows device names; `sfp_webserver` reports each banner once per host.
-
-## Deploy
-
-Production (Podman, `stack-podman.yml`) and development (Docker,
-`stack-docker.yml`) are set up the same way; each file's header has the full
-sequence. In short:
-
-```bash
-mkdir -p /srv/spiderfoot/{postgres,redis,qdrant,embeddings-cache}
-chown -R 1000:1000 /srv/spiderfoot/embeddings-cache   # api and workers run non-root and share this model cache
-./deploy/bootstrap-spiderfoot-env.sh    # see "Generating the secrets" below
-# then set SPIDERFOOT_TAG in the file it wrote, deploy the stack, and set the AI provider and key in the GUI
-```
-
-`sf-tor` needs no directory and no setting. State is bind-mounted at an absolute `/srv/spiderfoot/<service>` path, not a
-relative one and not a named volume, so it is visible and backupable as plain
-files. Compose silently drops Podman-only mount flags such as `:U`, so
-directory ownership is set on the host (postgres data dir: uid 70).
-
-### Testing against a safe target
-
-`stack-docker.yml` (dev only) has an opt-in `sf-juiceshop` service (OWASP Juice
-Shop), a deliberately vulnerable app for exercising the scanner end-to-end
-without an authorisation question. `COMPOSE_PROFILES` must include `testing`
-to start it; it is never in `stack-podman.yml`. It publishes host port 5002 -
-on a host that is not itself sandboxed, bind it to `127.0.0.1` with a local
-compose override rather than editing the tracked file.
-
-### Generating the secrets
-
-```bash
-./deploy/bootstrap-spiderfoot-env.sh
-```
-
-Run it **on the host that runs the stack** (never the build host), once per
-deployment. Each deployment gets its own secrets: the development host must
-never hold production credentials. It writes
-`/srv/spiderfoot/stack-spiderfoot-env.env` (chmod 600) and prints the generated
-secrets **once** — copy them into your password manager then. Re-running it is
-always safe: it never overwrites or rotates an existing file. It leaves one
-thing for you: set `SPIDERFOOT_TAG` to an exact published tag. There is no API key
-to set: the AI provider and key are entered in the GUI. Rotating a generated secret later
-has consequences, listed in `stack-podman.env.example`.
-
-The script was recovered from this project's earlier history (it had been
-deleted and was referenced by documentation but existed nowhere); see its own
-changelog.
-
-## Syncing with upstream
-
-Fetch upstream **without tags**, and merge it on a branch:
-
-```bash
-git fetch --no-tags https://github.com/poppopjmp/spiderfoot.git master:refs/remotes/upstream-ref/master
-git checkout -b sync/upstream-YYYY-MM-DD && git merge upstream-ref/master
-```
-
-Expected conflicts are limited to the files this fork deliberately changes
-(`README.md`, `requirements.txt`, `docker/Dockerfile.base`, `docker/build.sh`,
-and the `docker/compose/*.yml` files); everything under `deploy/` is this
-fork's alone. Never `git push --tags` or `git fetch --tags` from upstream into
-this fork: upstream's tag names would collide with, and could overwrite, the
-fork's own.
-
-## What to keep in mind
-
-- The stacks apply `no-new-privileges`, `cap_drop`, `read_only` and tmpfs
-  where the services tolerate it (found by trial — see `stack-podman.yml`'s
-  Warnings). `pids_limit`/`mem_limit` are not set yet.
-- AI features call Anthropic directly (Claude Sonnet 5.5, see "AI model") (`sf-agents`; the provider and key are set in
-  the GUI, see "AI providers"). There is no LLM proxy: the LiteLLM gateway was removed
-  after its supply-chain breach, and it had only relayed to Anthropic anyway.
-- This runs 285 OSINT modules, including active recon tools that make
-  outbound requests to third parties. Only scan targets you are authorised to
-  investigate.
-- `sf-tor` connects to the Tor network from the moment the stack starts (see "Tor" above). It keeps no state on
-  disk: its circuit data lives in tmpfs and is rebuilt on every start.
-- Never commit an `*.env` file, the GHCR token, or any API key. `*.env` is
-  gitignored; keep it that way.
+Run it in a login shell on a dedicated build host. If the gate fails, nothing is pushed: fix the cause in a pull
+request and cut the **next** rc, never change a published tag. A brand-new image name is created private on GHCR; set it
+to public once. Keep the inherited GitHub Actions publish workflows disabled.
+
+## Release process
+
+1. Develop on a branch, open a pull request, merge to `main` when the tests pass.
+2. Tag `main` as a release candidate and build it (section 3).
+3. Deploy the candidate, test it with live scans and watch the database connection count stay flat.
+4. Fixes found go into the next candidate. **A public release takes no new fixes**: it is tagged on the commit of a
+   candidate that passed, as `v6.1.0-bd.1`, which also moves `:latest`.
+
+## Housekeeping
+
+- **Secrets:** `bootstrap-spiderfoot-env.sh` never overwrites an existing file. Use different secrets for each
+  deployment. Rotating one has consequences, listed in the env example file.
+- **Backups:** state is plain files under `/srv/spiderfoot/<service>`. Stop the stack and copy them.
+- **Test target:** `stack-docker.yml` has an opt-in OWASP Juice Shop (`COMPOSE_PROFILES=scan,testing`, port 5002).
+- **Upstream sync:** `git fetch --no-tags https://github.com/poppopjmp/spiderfoot.git master`, merge on a branch. Never
+  fetch or push upstream's tags.

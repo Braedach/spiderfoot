@@ -45,7 +45,7 @@ class ConfigManager:
         # entirely I/O-bound work (DNS/HTTP waits). Validated live
         # 2026-11-13 against braedach.com at 12: ~10x throughput (~40k
         # events/hour, sustained), zero rate-limit/429/connection-refused
-        # signals from any third party. See deploy/README.md for the full
+        # signals from any third party. See deploy/REFERENCE.md for the full
         # note.
         '_maxthreads': 24,
         '__logging': True,
