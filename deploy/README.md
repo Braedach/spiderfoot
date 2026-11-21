@@ -25,12 +25,12 @@ Needs Docker with the compose plugin, or Podman with `podman-compose`. About 2 G
 
 ```bash
 git clone https://github.com/Braedach/spiderfoot.git && cd spiderfoot
-git checkout v6.1.0-bd.1-rc.49                      # the stack file must come from the tag you deploy
+git checkout v6.1.0-bd.1-rc.50                      # the stack file must come from the tag you deploy
 
 sudo mkdir -p /srv/spiderfoot/{postgres,redis,qdrant,embeddings-cache}
 sudo chown -R 1000:1000 /srv/spiderfoot/embeddings-cache
 ./deploy/bootstrap-spiderfoot-env.sh                # prints the secrets once: save them in a password manager
-sudo nano /srv/spiderfoot/stack-spiderfoot-env.env  # set SPIDERFOOT_TAG=v6.1.0-bd.1-rc.49 (required, no default)
+sudo nano /srv/spiderfoot/stack-spiderfoot-env.env  # set SPIDERFOOT_TAG=v6.1.0-bd.1-rc.50 (required, no default)
 
 export COMPOSE_PROFILES=scan
 docker compose --env-file /srv/spiderfoot/stack-spiderfoot-env.env -f deploy/stack-docker.yml up -d
@@ -51,7 +51,7 @@ and the stack file runs it unchanged. Allow 30 GB of disk, 6 GB of RAM and 20 to
 compiles Go and C tools).
 
 ```bash
-TAG=v6.1.0-bd.1-rc.49
+TAG=v6.1.0-bd.1-rc.50
 R=ghcr.io/braedach/spiderfoot
 docker build -f deploy/docker/Dockerfile.base -t $R-base:$TAG .
 docker build -f docker/Dockerfile.api             --build-arg BASE_IMAGE=$R-base:$TAG -t $R-api:$TAG .
