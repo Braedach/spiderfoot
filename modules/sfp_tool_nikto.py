@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
 from spiderfoot import SpiderFootEvent
@@ -45,8 +46,10 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
     opts = {
         "nikto_path": "",
         "timeout": 300,
+        "request_timeout": 10,
+        "total_budget": 7200,
         "tuning": "",
-        "max_targets": 20,
+        "max_targets": 0,
         "port": "",
         "ssl": False,
         "no_ssl": False,
@@ -56,9 +59,14 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
 
     optdescs = {
         "nikto_path": "Path to nikto. Leave blank to use PATH.",
-        "timeout": "Scan timeout in seconds.",
+        "timeout": "Longest nikto may spend on one web server, in seconds (passed to nikto as -maxtime).",
+        "request_timeout": "How long nikto waits for one answer from a server, in seconds. Keep this short: a server that never "
+                           "answers should cost seconds, not the whole per-server allowance.",
+        "total_budget": "Most nikto time to spend on one scan, in seconds (0 = no limit). Servers are tested in the order the scan "
+                        "finds them; once the budget is used up the rest are skipped and the scan log lists them.",
         "tuning": "Nikto tuning options (e.g. '1234' for test types, blank=all).",
-        "max_targets": "Maximum number of targets to scan.",
+        "max_targets": "Most web servers to test in one scan (0 = every server the scan finds). Leave at 0: a count limit "
+                       "silently drops whichever servers the scan happens to find last, so a repeat scan tests different ones.",
         "port": "Specific port to scan (blank=default 80/443).",
         "ssl": "Force SSL mode.",
         "no_ssl": "Disable SSL.",
@@ -75,6 +83,8 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
         self.errorState = False
         self.results = self.tempStorage()
         self._runs = 0
+        self._spent = 0.0
+        self._skipped = []
         self._catchall = None
 
     def watchedEvents(self):
@@ -117,6 +127,20 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
         except Exception:
             return False
 
+    def _skip(self, target):
+        """Record a server that was not tested. Said once when it starts, and summed up when the scan ends."""
+        self._skipped.append(target)
+        if len(self._skipped) == 1:
+            self.error(f"nikto: not testing {target} or any server found after it: the run limit (max_targets "
+                       f"{self.opts['max_targets']}) or the time budget (total_budget {self.opts['total_budget']} s, "
+                       f"{int(self._spent)} s used) is spent. The full list is in the log when the scan ends.")
+
+    def finished(self):
+        if self._skipped:
+            self.error(f"nikto did not test {len(self._skipped)} web server(s): " + ", ".join(self._skipped[:50])
+                       + (" ..." if len(self._skipped) > 50 else ""))
+        super().finished()
+
     def handleEvent(self, event):
         data = event.data
         if self.errorState:
@@ -133,7 +157,10 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
         if key in self.results:
             return
         self.results[key] = True
-        if self._runs >= self.opts["max_targets"]:
+        limit = int(self.opts["max_targets"] or 0)
+        budget = float(self.opts["total_budget"] or 0)
+        if (limit and self._runs >= limit) or (budget and self._spent >= budget):
+            self._skip(target)
             return
         self._runs += 1
 
@@ -157,10 +184,11 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
             cmd.extend(["-Tuning", self.opts["tuning"]])
         if self.opts["plugins"]:
             cmd.extend(["-Plugins", self.opts["plugins"]])
-        cmd.extend(["-timeout", str(self.opts["timeout"])])
+        cmd.extend(["-timeout", str(self.opts["request_timeout"]), "-maxtime", f"{int(self.opts['timeout'])}s"])
 
         cve_re = re.compile(r'CVE-\d{4}-\d+', re.IGNORECASE)
 
+        started = time.monotonic()
         try:
             proc = subprocess.run(
                 cmd, capture_output=True, text=True,
@@ -238,6 +266,7 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
         except Exception as e:
             self.error(f"nikto error: {e}")
         finally:
+            self._spent += time.monotonic() - started
             try:
                 os.unlink(output_path)
             except OSError:

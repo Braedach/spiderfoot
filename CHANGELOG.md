@@ -3,6 +3,12 @@
 All notable changes to SpiderFoot are documented in this file.  
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased (rc.50: nikto tests every web server)
+
+### Fixed
+- **nikto tested only the first 20 web servers a scan found.** The limit (`max_targets` 20) was a count, so on a scan with 80+ servers the servers found last were silently skipped, and which 20 got tested depended on the order events arrived, so two scans of the same domain tested different servers (a rescan lost 24 nikto findings and gained 32 others for that reason). Saved global settings on the test host also held `max_targets=20`, so changing the default would not have helped. The limit is now off (0 = every server), nikto's time is bounded by a per-scan budget (`total_budget`, 7200 s) instead of a count, the Full Footprint, Tools Only, Web Application Test and IP Address profiles pin these values so a saved setting cannot override them, and any server not tested is named in the scan log (once when the first is skipped, and a full list when the scan ends).
+- **nikto waited up to 300 seconds for a single answer.** The per-request timeout was set to the whole-server timeout, so one unresponsive server held the module for minutes. nikto now waits `request_timeout` (10 s) per answer and is given the per-server allowance as `-maxtime`.
+
 ## Unreleased (rc.49: fixes found by rescanning on rc.48)
 
 ### Added
