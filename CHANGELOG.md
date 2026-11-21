@@ -3,7 +3,11 @@
 All notable changes to SpiderFoot are documented in this file.  
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased (rc.50: nikto tests every web server)
+## Unreleased (rc.50: nikto and naabu test every host, CVEs by software version)
+
+### Added
+- **New module `sfp_cve_by_version`: known CVEs for the software versions a scan finds or is told about.** A banner such as `nginx/1.18.0` or a technology string such as `jQuery 3.4.1` is looked up in the NVD, and open-source packages that NVD does not list yet can be looked up in OSV. The database does the version matching; a language model is not used for it. Findings are CVE events with the score, a "known to be exploited" mark from CISA's list when NVD carries one, the fixed-in version when OSV gives it, and a note that a listed version does not prove the flaw is exploitable here (fixes are often backported, and some need a setting). Highest score first, 25 per version by default.
+- **Declared software.** Some applications hide their version from outsiders (grimmory answers 401 on every version endpoint without a login). The `declared_software` option takes one line per application, `host | product | version | vendor | purl`, so the scan can still check it. It is in the Web Application Test profile. An optional free NVD API key raises the NVD rate limit from 5 to 50 requests per 30 seconds.
 
 ### Fixed
 - **nikto tested only the first 20 web servers a scan found.** The limit (`max_targets` 20) was a count, so on a scan with 80+ servers the servers found last were silently skipped, and which 20 got tested depended on the order events arrived, so two scans of the same domain tested different servers (a rescan lost 24 nikto findings and gained 32 others for that reason). Saved global settings on the test host also held `max_targets=20`, so changing the default would not have helped. The limit is now off (0 = every server), nikto's time is bounded by a per-scan budget (`total_budget`, 7200 s) instead of a count, the Full Footprint, Tools Only, Web Application Test and IP Address profiles pin these values so a saved setting cannot override them, and any server not tested is named in the scan log (once when the first is skipped, and a full list when the scan ends).
