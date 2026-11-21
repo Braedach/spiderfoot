@@ -833,6 +833,10 @@ now read from `/etc/davros/ghcr-token` works (GHCR login succeeded).
   working outbound proxy, New Scan selections that run what the screen says, and the selection shown in Scan Settings.
   Stack files 2.16.0 (Podman) / 2.6.0 (Docker). **Breaking:** needs the new stack file; Tor is on by default; the
   proxy setting now takes effect; "All Modules" and "By Required Data" select different modules (see `UPGRADING.md`).
+- rc.48: two fixes found by testing rc.47. arjun is pinned to fast mode with a 300 second limit in the Web Application
+  Test and External Tools Only profiles (older saved settings had forced stable mode and 180 seconds, so every run timed
+  out) and skips scripts, images and documents; sqlmap form-tests any page, including login pages reached as plain
+  links, with its own budget of 15 pages. No stack file change; set `SPIDERFOOT_TAG` and redeploy.
 - rc.47: all fixes since rc.45 in one build. sqlmap tests forms (POST and GET) as well as link parameters; katana runs
   a headless-browser pass on single-page apps and crawls every new host; arjun works (stable mode off, arjun 2.x output
   read); the network service test's nmap port range and nbtscan path are fixed; one slow RIPEstat answer no longer loses
