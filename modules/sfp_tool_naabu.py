@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
 import time
 
 from spiderfoot.plugins.async_plugin import SpiderFootAsyncPlugin
@@ -72,6 +73,8 @@ class sfp_tool_naabu(SpiderFootAsyncPlugin):
     _runs = 0
     _spent = 0.0  # seconds of naabu time used so far this scan (reset in setup)
     _skipped = ()  # hosts not scanned because the limit or budget was spent (a list, set in setup)
+    _reported = 0  # how many of _skipped finish() has already put in the log
+    _lock = threading.Lock()  # handleEvent runs in a thread pool: counters and the seen-set need it (replaced in setup)
 
     def setup(self, sfc, userOpts=None):
         super().setup(sfc, userOpts or {})
@@ -80,6 +83,8 @@ class sfp_tool_naabu(SpiderFootAsyncPlugin):
         self._runs = 0
         self._spent = 0.0
         self._skipped = []
+        self._reported = 0
+        self._lock = threading.Lock()
 
     def watchedEvents(self):
         return ["IP_ADDRESS", "INTERNET_NAME", "DOMAIN_NAME"]
@@ -101,33 +106,40 @@ class sfp_tool_naabu(SpiderFootAsyncPlugin):
         return None
 
     def _skip(self, target):
-        """Record a host that was not scanned. Said once when it starts, and summed up when the scan ends."""
+        """Record a host that was not scanned, and say so now (the first as an error, the rest as notes)."""
         self._skipped = [*self._skipped, target]
         if len(self._skipped) == 1:
             self.error(f"naabu: not scanning {target} or any host found after it: the run limit (max_targets "
                        f"{self.opts['max_targets']}) or the time budget (total_budget {self.opts['total_budget']} s, "
                        f"{int(self._spent)} s used) is spent. The full list is in the log when the scan ends.")
+        else:
+            self.info(f"naabu: not scanning {target} (limit or time budget spent)")
 
-    def finished(self):
-        if self._skipped:
-            self.error(f"naabu did not scan {len(self._skipped)} host(s): " + ", ".join(self._skipped[:50])
-                       + (" ..." if len(self._skipped) > 50 else ""))
-        super().finished()
+    def finish(self):
+        """Called by the scanner when the scan wraps up (possibly more than once; the hook is finish, not finished)."""
+        with self._lock:
+            new = list(self._skipped)[self._reported:]
+            self._reported = len(self._skipped)
+        if new:
+            self.error(f"naabu did not scan {len(new)} host(s): " + ", ".join(new[:50])
+                       + (" ..." if len(new) > 50 else ""))
+        super().finish()
 
     def handleEvent(self, event):
         data = event.data
         if self.errorState:
             return
-        if data in self.results:
-            return
-        self.results[data] = True
+        with self._lock:
+            if data in self.results:
+                return
+            self.results[data] = True
 
-        limit = int(self.opts["max_targets"] or 0)
-        budget = float(self.opts["total_budget"] or 0)
-        if (limit and self._runs >= limit) or (budget and self._spent >= budget):
-            self._skip(data)
-            return
-        self._runs += 1
+            limit = int(self.opts["max_targets"] or 0)
+            budget = float(self.opts["total_budget"] or 0)
+            if (limit and self._runs >= limit) or (budget and self._spent >= budget):
+                self._skip(data)
+                return
+            self._runs += 1
 
         binary = self._find_binary()
         if not binary:
@@ -220,7 +232,8 @@ class sfp_tool_naabu(SpiderFootAsyncPlugin):
         except Exception as e:
             self.error(f"naabu error: {e}")
         finally:
-            self._spent += time.monotonic() - started
+            with self._lock:
+                self._spent += time.monotonic() - started
             try:
                 os.unlink(output_path)
             except OSError:

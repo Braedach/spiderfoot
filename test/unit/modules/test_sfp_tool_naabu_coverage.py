@@ -1,6 +1,7 @@
 """sfp_tool_naabu: every host found is scanned; a spent time budget is reported, never silent."""
 from __future__ import annotations
 
+import threading
 from unittest.mock import MagicMock, patch
 
 from modules.sfp_tool_naabu import sfp_tool_naabu
@@ -15,6 +16,8 @@ def make(**opts):
     m._runs = 0
     m._spent = 0.0
     m._skipped = []
+    m._reported = 0
+    m._lock = threading.Lock()
     m.errorState = False
     m.notifyListeners = MagicMock()
     m._find_binary = MagicMock(return_value="/usr/bin/naabu")
@@ -55,7 +58,7 @@ def test_count_limit_still_works_when_set_and_skips_are_reported():
     run = run_hosts(m, [f"h{i}.example.org" for i in range(5)])
     assert run.call_count == 2 and len(m._skipped) == 3
     m.error.assert_called_once()
-    m.finished()
+    m.finish()
     assert "did not scan 3 host(s)" in m.error.call_args.args[0] and "h2.example.org" in m.error.call_args.args[0]
 
 
@@ -79,3 +82,39 @@ def test_every_profile_that_runs_naabu_pins_full_coverage():
     for name in ("full-footprint", "tools-only", "network-service-test", "ip-address"):
         opts = mgr.get(name).module_options.get("sfp_tool_naabu")
         assert opts == NAABU_COVERAGE and opts["max_targets"] == 0, name
+
+
+def test_summary_hook_is_the_one_the_framework_calls():
+    from spiderfoot.plugins.plugin import SpiderFootPlugin
+    assert sfp_tool_naabu.finish is not SpiderFootPlugin.finish
+    assert "finished" not in sfp_tool_naabu.__dict__
+
+
+def test_finish_can_be_called_again_and_lists_each_skip_once():
+    m = make(max_targets=1)
+    run_hosts(m, ["a.example.org", "b.example.org"])
+    m.finish()
+    n = m.error.call_count
+    m.finish()
+    assert m.error.call_count == n
+
+
+def test_every_skipped_host_is_logged_when_it_is_skipped():
+    m = make(max_targets=1)
+    run_hosts(m, [f"h{i}.example.org" for i in range(4)])
+    said = [c.args[0] for c in m.error.call_args_list + m.info.call_args_list]
+    for i in (1, 2, 3):
+        assert any(f"h{i}.example.org" in t for t in said), i
+
+
+def test_concurrent_events_scan_each_host_once():
+    import time
+    from unittest.mock import patch
+    m = make(total_budget=0)
+    hosts = [f"h{i % 20}.example.org" for i in range(200)]
+    done = MagicMock(returncode=0, stdout="", stderr="")
+    with patch("modules.sfp_tool_naabu.subprocess.run", return_value=done) as run:
+        ts = [threading.Thread(target=lambda hs=hosts[i::8]: [m.handleEvent(ev(h)) for h in hs]) for i in range(8)]
+        [t.start() for t in ts]
+        [t.join() for t in ts]
+    assert run.call_count == 20 and m._runs == 20
