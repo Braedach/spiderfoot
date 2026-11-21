@@ -3,6 +3,14 @@
 All notable changes to SpiderFoot are documented in this file.  
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased (rc.49: fixes found by rescanning on rc.48)
+
+### Added
+- **sqlmap reports unconfirmed leads.** On demo.testfire.net sqlmap's quick heuristic flagged the login form's `uid` and `passw` fields as "might be SQL injectable (possible DBMS: Apache Derby)", but its safe detection tests (risk 1) could not confirm an injection, so nothing was reported and the lead was lost. Such parameters are now reported as a general finding, "Possible SQL injection (unconfirmed)", with the parameter, the page and the likely database, so the pentester knows where to look by hand. A confirmed injection is still a critical finding and a parameter is never reported both ways. Risk stays at 1; nothing is extracted.
+
+### Fixed
+- **arjun reported a parameter that does not exist.** On grimmory (a single-page app that answers every path with its front page) arjun reported the same parameter, `GLOBALS`, on 23 different paths. `GLOBALS` (a PHP superglobal name in arjun's wordlist) is never reported, and a parameter set that arjun reports for 3 or more paths of one host is treated as a catch-all answer and dropped after the first two.
+
 ## Unreleased (rc.48: fixes found by testing rc.47)
 
 ### Fixed

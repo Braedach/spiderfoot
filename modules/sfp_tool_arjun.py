@@ -26,6 +26,13 @@ STATIC_SUFFIXES = (
 )
 
 
+# Names that arjun reports on almost any page of a catch-all server (a single-page app answers every path with its front
+# page, and the wordlist contains PHP's superglobal name): never a real parameter.
+NOISE_PARAMS = {"GLOBALS"}
+# The same parameter set reported for this many different paths of one host is a catch-all answer, not a finding.
+REPEAT_LIMIT = 3
+
+
 class sfp_tool_arjun(SpiderFootAsyncPlugin):
     """HTTP parameter discovery via Arjun."""
 
@@ -78,6 +85,7 @@ class sfp_tool_arjun(SpiderFootAsyncPlugin):
         self.errorState = False
         self.results = self.tempStorage()
         self._runs = 0
+        self._set_paths = {}
 
     def watchedEvents(self):
         return ["LINKED_URL_INTERNAL", "URL_FORM"]
@@ -159,7 +167,16 @@ class sfp_tool_arjun(SpiderFootAsyncPlugin):
                     # arjun 2.x writes {url: {"params": [...], "method": ..., "headers": ...}}; older versions {url: [...]}
                     if isinstance(params, dict):
                         params = params.get("params")
+                    if isinstance(params, list):
+                        params = [p for p in params if p not in NOISE_PARAMS]
                     if isinstance(params, list) and params:
+                        sig = (urlsplit(url).netloc, tuple(sorted(params)))
+                        paths = self._set_paths.setdefault(sig, set())
+                        paths.add(urlsplit(url).path)
+                        if len(paths) >= REPEAT_LIMIT:
+                            self.info(f"arjun: the same parameters {params} were reported for {len(paths)} paths of "
+                                      f"{sig[0]}; treating them as a catch-all answer and not reporting them")
+                            continue
                         param_str = "&".join(f"{p}=FUZZ" for p in params)
                         separator = "&" if "?" in url else "?"
                         fuzzed_url = f"{url}{separator}{param_str}"

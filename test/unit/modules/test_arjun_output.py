@@ -14,6 +14,7 @@ def make():
     m.opts = dict(sfp_tool_arjun.opts)
     m.results = {}
     m._runs = 0
+    m._set_paths = {}
     m.errorState = False
     m.notifyListeners = MagicMock()
     m.checkForStop = MagicMock(return_value=False)
@@ -64,3 +65,27 @@ def test_the_active_profiles_pin_arjun_to_fast_mode():
     pm = ProfileManager()
     for name in ("web-app-test", "tools-only"):
         assert pm.get(name).module_options["sfp_tool_arjun"] == {"stable": False, "run_timeout": 300}
+
+
+def test_the_globals_noise_parameter_is_never_reported():
+    m, _ = run_with_output({"http://h/search.jsp": {"params": ["GLOBALS"]}})
+    assert not any(c.args[0].eventType == "URL_FORM" for c in m.notifyListeners.call_args_list)
+
+
+def test_the_same_parameters_on_many_paths_of_one_host_are_treated_as_a_catch_all():
+    m = make()
+    done = MagicMock(returncode=0, stdout="", stderr="")
+    emitted = []
+    with patch.object(sfp_tool_arjun, "_find_binary", return_value="/bin/arjun"):
+        for path in ("a", "b", "c", "d"):
+            url = f"http://h/{path}"
+
+            def fake_run(cmd, url=url, **kw):
+                with open(cmd[cmd.index("-oJ") + 1], "w") as f:
+                    json.dump({url: {"params": ["token"]}}, f)
+                return done
+
+            with patch("modules.sfp_tool_arjun.subprocess.run", side_effect=fake_run):
+                m.handleEvent(SpiderFootEvent("LINKED_URL_INTERNAL", url, "sfp_spider", None))
+    forms = [c.args[0].data for c in m.notifyListeners.call_args_list if c.args[0].eventType == "URL_FORM"]
+    assert len(forms) == 2                      # the first two are kept, the third and later are dropped

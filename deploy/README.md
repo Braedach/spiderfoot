@@ -833,6 +833,9 @@ now read from `/etc/davros/ghcr-token` works (GHCR login succeeded).
   working outbound proxy, New Scan selections that run what the screen says, and the selection shown in Scan Settings.
   Stack files 2.16.0 (Podman) / 2.6.0 (Docker). **Breaking:** needs the new stack file; Tor is on by default; the
   proxy setting now takes effect; "All Modules" and "By Required Data" select different modules (see `UPGRADING.md`).
+- rc.49: found by rescanning on rc.48. sqlmap reports parameters its heuristic flags but cannot confirm as "Possible
+  SQL injection (unconfirmed)" (general finding, risk stays 1); arjun drops the noise parameter `GLOBALS` and parameter
+  sets repeated across 3 or more paths of one host (single-page apps answer every path alike). No stack file change.
 - rc.48: two fixes found by testing rc.47. arjun is pinned to fast mode with a 300 second limit in the Web Application
   Test and External Tools Only profiles (older saved settings had forced stable mode and 180 seconds, so every run timed
   out) and skips scripts, images and documents; sqlmap form-tests any page, including login pages reached as plain

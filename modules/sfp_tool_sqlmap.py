@@ -44,6 +44,9 @@ _PARAM_RE = re.compile(r"^Parameter: (?P<param>.+?) \((?P<place>[^)]+)\)\s*$")
 _TYPE_RE = re.compile(r"^\s+Type: (?P<v>.+)$")
 _TITLE_RE = re.compile(r"^\s+Title: (?P<v>.+)$")
 _TARGET_RE = re.compile(r"^#\d+/\d+ (?:GET|POST) (?P<url>\S+)")
+_HEURISTIC_RE = re.compile(
+    r"heuristic \(basic\) test shows that (?P<place>[A-Za-z()# ]+?) parameter '(?P<param>[^']+)' "
+    r"might be (?:SQL )?injectable(?: \(possible DBMS: '(?P<dbms>[^']+)'\))?")
 _DBMS_RE = re.compile(r"^back-end DBMS: (?P<v>.+)$", re.MULTILINE)
 
 
@@ -106,7 +109,7 @@ class sfp_tool_sqlmap(SpiderFootAsyncPlugin):
         return ["URL_FORM", "LINKED_URL_INTERNAL"]
 
     def producedEvents(self):
-        return ["VULNERABILITY_CVE_CRITICAL", "RAW_RIR_DATA"]
+        return ["VULNERABILITY_CVE_CRITICAL", "VULNERABILITY_GENERAL", "RAW_RIR_DATA"]
 
     # -- helpers ---------------------------------------------------------------------------------------------------
 
@@ -221,6 +224,20 @@ class sfp_tool_sqlmap(SpiderFootAsyncPlugin):
         dbms = _DBMS_RE.search(output)
         return findings, (dbms.group("v").strip() if dbms else None)
 
+    @staticmethod
+    def parse_leads(output):
+        """Parameters sqlmap's quick heuristic flagged as 'might be SQL injectable': [(place, param, dbms or None)].
+
+        A heuristic hit is an SQL error pattern in the response, not a proof; sqlmap's full tests may not confirm it.
+        """
+        seen, leads = set(), []
+        for m in _HEURISTIC_RE.finditer(output):
+            key = (m.group("place").strip(), m.group("param"))
+            if key not in seen:
+                seen.add(key)
+                leads.append((key[0], key[1], m.group("dbms")))
+        return leads
+
     # -- event handling --------------------------------------------------------------------------------------------
 
     def handleEvent(self, event):
@@ -279,8 +296,23 @@ class sfp_tool_sqlmap(SpiderFootAsyncPlugin):
 
         output = proc.stdout or ""
         findings, dbms = self.parse(output)
+        confirmed = {(f["place"], f["param"]) for f in findings}
+        leads = [x for x in self.parse_leads(output) if (x[0], x[1]) not in confirmed]
+        # An unconfirmed lead is worth a pentester's time: the response showed an SQL error pattern, but the safe
+        # detection settings (risk 1) could not prove an injection. Reported as a general finding, not a critical one.
+        for place, param, lead_dbms in leads:
+            if self.checkForStop():
+                return
+            text = (f"Possible SQL injection (unconfirmed): {place} parameter '{param}' at {url}\n"
+                    "sqlmap's quick heuristic test saw an SQL error pattern, but its detection tests at risk 1 "
+                    "could not confirm an injection. Check this parameter by hand."
+                    + (f"\nLikely back-end DBMS: {lead_dbms}" if lead_dbms else ""))
+            self.notifyListeners(SpiderFootEvent("VULNERABILITY_GENERAL", text, self.__name__, event))
+        if leads:
+            self.info(f"sqlmap flagged {len(leads)} possible (unconfirmed) injectable parameter(s) in {url}")
         if not findings:
-            self.info(f"sqlmap found no SQL injection in {url}")
+            if not leads:
+                self.info(f"sqlmap found no SQL injection in {url}")
             return
 
         for f in findings:
