@@ -42,6 +42,8 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
 
     _catchall = None   # per-scan baseline of how each server answers a path that cannot exist
     _runs = 0  # runs started so far this scan (reset in setup); the cap counts these, not URLs seen
+    _spent = 0.0  # seconds of nikto time used so far this scan (reset in setup)
+    _skipped = ()  # servers not tested because the limit or budget was spent (a list, set in setup)
 
     opts = {
         "nikto_path": "",
@@ -129,7 +131,7 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
 
     def _skip(self, target):
         """Record a server that was not tested. Said once when it starts, and summed up when the scan ends."""
-        self._skipped.append(target)
+        self._skipped = [*self._skipped, target]
         if len(self._skipped) == 1:
             self.error(f"nikto: not testing {target} or any server found after it: the run limit (max_targets "
                        f"{self.opts['max_targets']}) or the time budget (total_budget {self.opts['total_budget']} s, "

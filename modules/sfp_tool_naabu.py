@@ -69,6 +69,9 @@ class sfp_tool_naabu(SpiderFootAsyncPlugin):
     }
 
     results = None
+    _runs = 0
+    _spent = 0.0  # seconds of naabu time used so far this scan (reset in setup)
+    _skipped = ()  # hosts not scanned because the limit or budget was spent (a list, set in setup)
 
     def setup(self, sfc, userOpts=None):
         super().setup(sfc, userOpts or {})
@@ -99,7 +102,7 @@ class sfp_tool_naabu(SpiderFootAsyncPlugin):
 
     def _skip(self, target):
         """Record a host that was not scanned. Said once when it starts, and summed up when the scan ends."""
-        self._skipped.append(target)
+        self._skipped = [*self._skipped, target]
         if len(self._skipped) == 1:
             self.error(f"naabu: not scanning {target} or any host found after it: the run limit (max_targets "
                        f"{self.opts['max_targets']}) or the time budget (total_budget {self.opts['total_budget']} s, "
