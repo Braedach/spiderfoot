@@ -16,6 +16,7 @@ def make(**opts):
     m.sf = MagicMock()
     m.opts = dict(sfp_cve_by_version.opts, **opts)
     m.results = {}
+    m._warned = set()
     m._lookups = 0
     m._declared = None
     m.errorState = False
@@ -88,33 +89,47 @@ def test_declared_software_for_another_host_is_ignored():
     m.nvd_cves.assert_not_called()
 
 
-def test_banner_version_looked_up_once_and_vendors_come_from_nvd():
+def test_banner_version_looked_up_once_with_any_vendor():
     m = make()
-    m.nvd_vendors = MagicMock(return_value=["f5", "igor_sysoev"])
     m.nvd_cves = MagicMock(return_value=[read_nvd_cve(NVD_ITEM)])
     m.handleEvent(ev("WEBSERVER_BANNER", "nginx/1.18.0"))
     m.handleEvent(ev("WEBSERVER_BANNER", "nginx/1.18.0"))
-    assert m.nvd_cves.call_count == 2                      # two vendors, one lookup round
+    m.nvd_cves.assert_called_once_with("*", "nginx", "1.18.0")
     assert len([e for e in sent(m) if e.eventType == "VULNERABILITY_CVE_CRITICAL"]) == 1
+
+
+def test_banner_names_are_mapped_to_nvd_products():
+    m = make()
+    m.nvd_cves = MagicMock(return_value=[])
+    m.handleEvent(ev("WEBSERVER_BANNER", "Apache/2.4.49 (Unix)"))
+    m.nvd_cves.assert_called_once_with("apache", "http_server", "2.4.49")
+
+
+def test_rate_limit_is_reported_once_not_silently_swallowed():
+    m = make()
+    m.error = MagicMock()
+    m.sf.fetchUrl = MagicMock(return_value={"code": "403", "content": "rate limit"})
+    assert m.github_cves("o/r", "r", "1.0") == [] and m.github_cves("o/r", "r", "1.0") == []
+    m.error.assert_called_once()
+    assert "rate limited" in m.error.call_args.args[0]
 
 
 def test_lookup_budget_and_per_product_cap():
     m = make(max_lookups=1, max_per_product=2)
-    m.nvd_vendors = MagicMock(return_value=["v"])
     many = [{"id": f"CVE-2026-{i}", "score": float(i), "summary": "", "kev": False, "source": "NVD"} for i in range(1, 6)]
     m.nvd_cves = MagicMock(return_value=many)
     m.handleEvent(ev("WEBSERVER_BANNER", "nginx/1.18.0"))
     m.handleEvent(ev("WEBSERVER_BANNER", "apache/2.4.1"))
     cve_events = [e for e in sent(m) if e.eventType.startswith("VULNERABILITY_CVE_")]
     assert [e.data.split()[0] for e in cve_events] == ["CVE-2026-5", "CVE-2026-4"]   # highest score first; second product skipped
-    assert m.nvd_vendors.call_count == 1
+    assert m.nvd_cves.call_count == 1
 
 
 def test_unrecognised_event_data_does_nothing():
     m = make()
-    m.nvd_vendors = MagicMock()
+    m.nvd_cves = MagicMock()
     m.handleEvent(ev("WEBSERVER_TECHNOLOGY", "Angular"))
-    m.nvd_vendors.assert_not_called()
+    m.nvd_cves.assert_not_called()
 
 
 # advisories as GitHub publishes them for grimmory (trimmed)

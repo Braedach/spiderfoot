@@ -33,6 +33,15 @@ _NOT_PRODUCTS = {"http", "https", "tls", "ssl", "tlsv", "sslv", "version", "buil
                  "chrome", "safari", "khtml", "gecko", "like", "linux", "windows", "ubuntu", "debian", "centos", "unix"}
 
 
+# Names banners use that differ from NVD's product name (vendor, product)
+PRODUCT_ALIASES = {
+    "apache": ("apache", "http_server"), "httpd": ("apache", "http_server"),
+    "iis": ("microsoft", "internet_information_services"), "microsoft-iis": ("microsoft", "internet_information_services"),
+    "openssh": ("openbsd", "openssh"), "mysql": ("oracle", "mysql"), "tomcat": ("apache", "tomcat"),
+    "proftpd": ("proftpd", "proftpd"), "exim": ("exim", "exim"), "postfix": ("postfix", "postfix"),
+}
+
+
 def parse_software(text: str) -> list[tuple[str, str]]:
     """Return (product, version) pairs found in a banner or technology string."""
     found = []
@@ -203,6 +212,7 @@ class sfp_cve_by_version(SpiderFootPlugin):
         self.errorState = False
         self._lookups = 0
         self._last_nvd = 0.0
+        self._warned = set()
         self._declared = None
         for opt in list(userOpts or {}):
             self.opts[opt] = userOpts[opt]
@@ -220,6 +230,12 @@ class sfp_cve_by_version(SpiderFootPlugin):
         res = self.sf.fetchUrl(url, timeout=self.opts.get("_fetchtimeout", 30), useragent=self.opts.get("_useragent", "SpiderFoot"),
                                headers=headers, postData=json.dumps(post) if post is not None else None)
         if not res or res.get("code") != "200" or not res.get("content"):
+            code = (res or {}).get("code")
+            base = url.split("?")[0]
+            if code in ("403", "429") and base not in self._warned:
+                self._warned.add(base)
+                self.error(f"{base} refused the request (HTTP {code}): rate limited. Add the API key or token in this module's settings; "
+                           "findings from this source are missing from this scan.")
             return None
         try:
             return json.loads(res["content"]) if isinstance(res["content"], str) else res["content"]
@@ -234,17 +250,6 @@ class sfp_cve_by_version(SpiderFootPlugin):
             time.sleep(wait)
         self._last_nvd = time.monotonic()
         return self._get_json(f"{NVD}/{path}", headers={"apiKey": key} if key else None)
-
-    def nvd_vendors(self, product: str) -> list[str]:
-        """Vendors NVD lists for this product name (nginx is listed under f5 and igor_sysoev, for example)."""
-        data = self._nvd(f"cpes/2.0?keywordSearch={quote(product)}&resultsPerPage=100")
-        vendors = []
-        for row in (data or {}).get("products", []):
-            cpe = row.get("cpe", {})
-            parts = cpe.get("cpeName", "").split(":")
-            if len(parts) > 4 and parts[2] == "a" and parts[4] == product and not cpe.get("deprecated") and parts[3] not in vendors:
-                vendors.append(parts[3])
-        return vendors[:3]
 
     def nvd_cves(self, vendor: str, product: str, version: str) -> list[dict]:
         cpe = f"cpe:2.3:a:{vendor}:{product}:{version}:*:*:*:*:*:*:*"
@@ -287,9 +292,9 @@ class sfp_cve_by_version(SpiderFootPlugin):
 
         found = {}
         if self.opts["use_nvd"]:
-            for v in ([vendor] if vendor else self.nvd_vendors(product)):
-                for cve in self.nvd_cves(v, product, version):
-                    found.setdefault(cve["id"], cve)
+            v, prod = (vendor, product) if vendor else PRODUCT_ALIASES.get(product, ("*", product))
+            for cve in self.nvd_cves(v, prod, version):     # vendor "*": NVD files nginx under igor_sysoev and f5, so any vendor
+                found.setdefault(cve["id"], cve)
         if purl.startswith("github:"):
             if self.opts["use_github"]:
                 for cve in self.github_cves(purl[7:], product, version):
