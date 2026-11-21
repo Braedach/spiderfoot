@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 from spiderfoot import SpiderFootEvent
 from modules.sfp_cve_by_version import (
-    parse_software, parse_declared, read_nvd_cve, read_osv, cvss_rating, sfp_cve_by_version,
+    parse_software, parse_declared, version_matches, read_github_advisories, read_nvd_cve, read_osv, cvss_rating, sfp_cve_by_version,
 )
 
 NVD_ITEM = {"cve": {"id": "CVE-2026-114938", "cisaExploitAdd": "2026-11-01",
@@ -115,3 +115,39 @@ def test_unrecognised_event_data_does_nothing():
     m.nvd_vendors = MagicMock()
     m.handleEvent(ev("WEBSERVER_TECHNOLOGY", "Angular"))
     m.nvd_vendors.assert_not_called()
+
+
+# advisories as GitHub publishes them for grimmory (trimmed)
+GRIMMORY = [
+    {"ghsa_id": "GHSA-mx77", "cve_id": None, "severity": "low", "summary": "ReDoS in epub parsing", "vulnerabilities": [
+        {"package": {"ecosystem": "maven", "name": "org.grimmory:epub4j-core"}, "vulnerable_version_range": ">= 1.0.0", "patched_versions": "2.1.0"},
+        {"package": {"ecosystem": "other", "name": "grimmory"}, "vulnerable_version_range": "<= 3.4.1", "patched_versions": "3.5.0"}]},
+    {"ghsa_id": "GHSA-7f4w", "cve_id": None, "severity": "medium", "summary": "IDOR upload", "vulnerabilities": [
+        {"package": {"ecosystem": "docker", "name": "ghcr.io/grimmory-tools/grimmory"}, "vulnerable_version_range": "<=3.4.1", "patched_versions": "3.5.0"}]},
+    {"ghsa_id": "GHSA-frv6", "cve_id": "CVE-2026-42451", "severity": "medium", "summary": "Stored XSS", "vulnerabilities": [
+        {"package": {"ecosystem": "docker", "name": "ghcr.io/grimmory-tools/grimmory"}, "vulnerable_version_range": "<=2.3.0", "patched_versions": "2.3.1"}]},
+]
+
+
+def test_version_ranges():
+    assert version_matches("3.4.1", "<= 3.4.1") and not version_matches("3.5.0", "<= 3.4.1")
+    assert version_matches("1.5", ">= 1.0.0, < 2.1.0") and not version_matches("2.1.0", ">= 1.0.0, < 2.1.0")
+    assert version_matches("3.4", "= 3.4.0") and version_matches("3.5.0", "<=3.5.0")
+    assert not version_matches("3.5.0", "garbled") and not version_matches("", "<= 1") and not version_matches("x", "<= 1")
+
+
+def test_github_advisories_match_the_product_not_its_libraries():
+    got = read_github_advisories(GRIMMORY, "grimmory", "3.4.1")
+    assert [c["id"] for c in got] == ["GHSA-mx77", "GHSA-7f4w"]                 # the epub library range alone would match 3.4.1 too
+    assert got[0]["fixed"] == ["3.5.0"] and got[0]["source"] == "GitHub advisories"
+    assert read_github_advisories(GRIMMORY, "grimmory", "3.5.0") == []           # 3.5.0 is outside every published range
+    assert [c["id"] for c in read_github_advisories(GRIMMORY, "grimmory", "2.0.0")] == ["GHSA-mx77", "GHSA-7f4w", "CVE-2026-42451"]
+
+
+def test_declared_github_source_is_used_for_the_declared_version():
+    m = make(declared_software="g.example.org | grimmory | 3.4.1 | | github:grimmory-tools/grimmory", use_nvd=False)
+    m.github_cves = MagicMock(return_value=read_github_advisories(GRIMMORY, "grimmory", "3.4.1"))
+    m.handleEvent(ev("INTERNET_NAME", "g.example.org"))
+    m.github_cves.assert_called_once_with("grimmory-tools/grimmory", "grimmory", "3.4.1")
+    assert len(sent(m)) == 3          # two advisories plus the summary record
+    assert "Fixed in: 3.5.0" in sent(m)[0].data

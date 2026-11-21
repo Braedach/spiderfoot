@@ -106,6 +106,48 @@ def read_osv(vuln: dict) -> dict:
             "fixed": sorted(set(fixed)), "kev": False, "source": "OSV"}
 
 
+def _version_key(version: str) -> tuple:
+    return tuple(int(n) for n in re.findall(r"\d+", version.split("-")[0])[:6])
+
+
+def version_matches(version: str, spec: str) -> bool:
+    """True when the version satisfies a GitHub advisory range such as '>= 1.0.0, < 2.1.0' or '<= 3.4.1'."""
+    have = _version_key(version)
+    if not have or not spec:
+        return False
+    for clause in spec.split(","):
+        m = re.match(r"\s*(<=|>=|<|>|=)?\s*v?(\d[\w.]*)\s*$", clause)
+        if not m:
+            return False
+        op, want = m.group(1) or "=", _version_key(m.group(2))
+        width = max(len(have), len(want))
+        a, b = have + (0,) * (width - len(have)), want + (0,) * (width - len(want))
+        if not {"<": a < b, "<=": a <= b, ">": a > b, ">=": a >= b, "=": a == b}[op]:
+            return False
+    return True
+
+
+def read_github_advisories(rows: list, product: str, version: str) -> list[dict]:
+    """Advisories from a project's own GitHub security page that list this product and version as affected.
+
+    Only entries for the product itself count (a project's advisories also name its libraries and its container image).
+    """
+    out = []
+    for adv in rows or []:
+        for vuln in adv.get("vulnerabilities") or []:
+            name = ((vuln.get("package") or {}).get("name") or "").lower()
+            if name != product and not name.endswith("/" + product):
+                continue
+            if version_matches(version, vuln.get("vulnerable_version_range") or ""):
+                out.append({"id": adv.get("cve_id") or adv.get("ghsa_id", ""), "score": (adv.get("cvss") or {}).get("score"),
+                            "rating": (adv.get("severity") or "").upper() or None,
+                            "summary": " ".join((adv.get("summary") or "").split())[:300],
+                            "fixed": [vuln["patched_versions"]] if vuln.get("patched_versions") else [],
+                            "kev": False, "source": "GitHub advisories"})
+                break
+    return out
+
+
 class sfp_cve_by_version(SpiderFootPlugin):
     """Known CVEs for the software versions a scan finds or is told about."""
 
@@ -119,7 +161,7 @@ class sfp_cve_by_version(SpiderFootPlugin):
             "website": "https://nvd.nist.gov/",
             "model": "FREE_NOAUTH_LIMITED",
             "references": ["https://nvd.nist.gov/developers/vulnerabilities", "https://google.github.io/osv.dev/api/"],
-            "description": "NIST National Vulnerability Database and OSV, queried by software version.",
+            "description": "NIST National Vulnerability Database, OSV and projects' own GitHub security advisories, queried by software version.",
             "apiKeyInstructions": [
                 "The key is optional: without it NVD allows 5 requests per 30 seconds",
                 "Visit https://nvd.nist.gov/developers/request-an-api-key",
@@ -134,16 +176,21 @@ class sfp_cve_by_version(SpiderFootPlugin):
         "nvd_api_key": "",
         "use_nvd": True,
         "use_osv": True,
+        "use_github": True,
+        "github_token": "",
         "max_lookups": 40,
         "max_per_product": 25,
     }
     optdescs = {
         "declared_software": "Software the scan cannot see from outside, one per line: host | product | version | vendor (optional) | purl (optional). "
-                             "Example: grimmory.example.org | grimmory | 3.5.0 | | pkg:maven/org.grimmory/grimmory. "
-                             "Use the host the scan targets. The purl lets OSV match open-source packages that NVD does not list yet.",
+                             "Example: grimmory.example.org | grimmory | 3.5.0 | | github:grimmory-tools/grimmory. "
+                             "Use the host the scan targets. The last column is either a purl (pkg:maven/...) for OSV, or github:owner/repo to read the project's own published advisories, for open-source apps that NVD does not list.",
         "nvd_api_key": "Free NVD API key (nvd.nist.gov/developers/request-an-api-key). Without one NVD allows 5 requests per 30 seconds.",
         "use_nvd": "Query NVD.",
         "use_osv": "Query OSV (needs a purl in declared_software).",
+        "use_github": "Query the project's own GitHub security advisories (needs github:owner/repo in declared_software). "
+                      "Many projects publish an advisory there before NVD or OSV list it.",
+        "github_token": "Optional GitHub token (no scopes needed). Without one GitHub allows 60 requests per hour per address.",
         "max_lookups": "Most software versions looked up in one scan.",
         "max_per_product": "Most CVEs reported per software version (highest score first).",
     }
@@ -208,6 +255,12 @@ class sfp_cve_by_version(SpiderFootPlugin):
         data = self._get_json(OSV, post={"version": version, "package": {"purl": purl.split("@")[0]}})
         return [read_osv(v) for v in (data or {}).get("vulns", [])]
 
+    def github_cves(self, repo: str, product: str, version: str) -> list[dict]:
+        key = self.opts.get("github_token", "")
+        rows = self._get_json(f"https://api.github.com/repos/{repo}/security-advisories?per_page=100",
+                              headers={"Accept": "application/vnd.github+json", **({"Authorization": f"Bearer {key}"} if key else {})})
+        return read_github_advisories(rows if isinstance(rows, list) else [], product, version)
+
     # -- events ----------------------------------------------------------------------------------------------------
 
     def handleEvent(self, event):
@@ -237,7 +290,11 @@ class sfp_cve_by_version(SpiderFootPlugin):
             for v in ([vendor] if vendor else self.nvd_vendors(product)):
                 for cve in self.nvd_cves(v, product, version):
                     found.setdefault(cve["id"], cve)
-        if self.opts["use_osv"] and purl:
+        if purl.startswith("github:"):
+            if self.opts["use_github"]:
+                for cve in self.github_cves(purl[7:], product, version):
+                    found.setdefault(cve["id"], cve)
+        elif self.opts["use_osv"] and purl:
             for cve in self.osv_cves(purl, version):
                 found.setdefault(cve["id"], cve)
         if not found:
