@@ -22,6 +22,8 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
+import time
 import urllib.parse
 from pathlib import Path
 
@@ -75,7 +77,8 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
         'concurrency': 10,
         'timeout': 10,
         'max_scan_duration': 600,
-        'max_targets': 20,
+        'max_targets': 0,
+        'total_budget': 0,
         'auto_update_templates': False,
         'scan_urls': True,
         'scan_ips': True,
@@ -97,7 +100,11 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
         'concurrency': "Number of templates to run concurrently.",
         'timeout': "HTTP timeout per request in seconds.",
         'max_scan_duration': "Max total time in seconds for a single Nuclei invocation. Findings found before the limit are kept.",
-        'max_targets': "Maximum number of separate nuclei runs (hosts, addresses and web origins) per scan.",
+        'max_targets': "Most separate nuclei runs (hosts, addresses and web origins) per scan (0 = every one the scan finds, the default). "
+                       "A count limit silently drops whichever targets the scan finds last: the old limit of 20 left out everything found "
+                       "after the first few minutes, though a run takes about 10 seconds.",
+        'total_budget': "Nuclei time to spend on one scan, in seconds (0 = no limit, the default: each run is already bounded by "
+                        "max_scan_duration). Past 70% of it each run is cut to 120 s; past 150% nothing new starts and the log lists the rest.",
         'auto_update_templates': "Download newer templates when the scan starts. Off by default: the image carries a pinned, reviewed copy.",
         'scan_urls': "Scan the web origins (scheme, host, port) of discovered URLs that are not already covered. Each origin once, not each URL.",
         'scan_ips': "Scan discovered IP addresses.",
@@ -108,6 +115,14 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
     errorState = False
     _nuclei_checked = False
     _nuclei_available = False
+    _runs = 0
+    _spent = 0.0       # seconds of nuclei time used so far this scan
+    _skipped = ()      # targets not tested because the limit or budget was spent
+    _reported = 0      # how many of _skipped finish() has already put in the log
+    _lock = threading.Lock()   # handleEvent runs in a thread pool; replaced per scan in setup
+    SOFT_BUDGET = 0.7  # past this share of total_budget each run is cut to SHORT_RUN seconds
+    HARD_BUDGET = 1.5  # past this share nothing new starts and the targets left are listed
+    SHORT_RUN = 120
 
     def setup(self, sfc, userOpts=None):
         """Set up the module."""
@@ -117,7 +132,10 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
         self._nuclei_checked = False
         self._nuclei_available = False
         self._runs = 0
-        self._cap_reported = False
+        self._spent = 0.0
+        self._skipped = []
+        self._reported = 0
+        self._lock = threading.Lock()
 
     def watchedEvents(self):
         """Events consumed by this module."""
@@ -141,7 +159,12 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
         ]
 
     def _check_nuclei(self) -> bool:
-        """Verify that nuclei is installed and accessible."""
+        """Verify that nuclei is installed and accessible (once; events arrive on several threads, and a second
+        thread that saw the check half done used to read "unavailable" and switch the module off for the scan)."""
+        with self._lock:
+            return self._check_nuclei_locked()
+
+    def _check_nuclei_locked(self) -> bool:
         if self._nuclei_checked:
             return self._nuclei_available
 
@@ -281,7 +304,7 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
                 return line[:300]
         return None
 
-    def _run_nuclei(self, targets: list[str]) -> list[dict]:
+    def _run_nuclei(self, targets: list[str], max_duration: float | None = None) -> list[dict]:
         """Run Nuclei against a list of targets.
 
         Args:
@@ -300,7 +323,7 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
 
         findings: list[dict] = []
         seen: set[tuple] = set()
-        max_duration = self.opts.get('max_scan_duration', 600)
+        max_duration = max_duration or self.opts.get('max_scan_duration', 600)
 
         try:
             for selection in self._selections():
@@ -454,6 +477,41 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
 
         return techs
 
+    def _allowance(self):
+        """Longest the next run may take in seconds, or None when nothing more may start (call with the lock held)."""
+        full = float(self.opts.get('max_scan_duration', 600))
+        limit = int(self.opts.get('max_targets', 0) or 0)
+        if limit and self._runs >= limit:
+            return None
+        budget = float(self.opts.get('total_budget', 0) or 0)
+        if not budget:
+            return full
+        if self._spent >= budget * self.HARD_BUDGET:
+            return None
+        if self._spent >= budget * self.SOFT_BUDGET:
+            return min(full, float(self.SHORT_RUN))
+        return full
+
+    def _skip(self, target):
+        """Record a target that was not tested, and say so now (the first as an error, the rest as notes)."""
+        self._skipped = [*self._skipped, target]
+        if len(self._skipped) == 1:
+            self.error(f"nuclei: not testing {target} or any target found after it: the run limit (max_targets "
+                       f"{self.opts.get('max_targets')}) or the time budget (total_budget {self.opts.get('total_budget')} s, "
+                       f"{int(self._spent)} s used) is spent. The full list is in the log when the scan ends.")
+        else:
+            self.info(f"nuclei: not testing {target} (limit or time budget spent)")
+
+    def finish(self):
+        """Called when the scan wraps up (possibly more than once): list the targets that were left untested."""
+        with self._lock:
+            new = list(self._skipped)[self._reported:]
+            self._reported = len(self._skipped)
+        if new:
+            self.error(f"nuclei did not test {len(new)} target(s): " + ", ".join(new[:50])
+                       + (" ..." if len(new) > 50 else ""))
+        super().finish()
+
     def handleEvent(self, event):
         """Handle an incoming event by running Nuclei scans."""
         eventName = event.eventType
@@ -472,16 +530,11 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
         target, key = self._target_for(eventName, eventData)
         if not target:
             return
-        if key in self.results:
+        with self._lock:
+            seen = key in self.results
+            self.results[key] = True
+        if seen:
             self.debug(f"Skipping {eventData}, already covered by an earlier run.")
-            return
-        self.results[key] = True
-
-        max_targets = int(self.opts.get('max_targets', 20) or 0)
-        if max_targets and self._runs >= max_targets:
-            if not self._cap_reported:
-                self._cap_reported = True
-                self.info(f"Reached the limit of {max_targets} nuclei runs for this scan; not scanning more targets.")
             return
 
         if eventName == "IP_ADDRESS" and not self.opts.get('scan_ips', True):
@@ -492,9 +545,18 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
         if self.checkForStop():
             return
 
-        self._runs += 1
-        # Run Nuclei
-        findings = self._run_nuclei([target])
+        with self._lock:
+            allowance = self._allowance()
+            if allowance is None:
+                self._skip(target)
+                return
+            self._runs += 1
+        started = time.monotonic()
+        try:
+            findings = self._run_nuclei([target], allowance)
+        finally:
+            with self._lock:
+                self._spent += time.monotonic() - started
 
         for finding in findings:
             if self.checkForStop():
