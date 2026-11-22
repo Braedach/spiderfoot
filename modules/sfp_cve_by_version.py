@@ -187,6 +187,7 @@ class sfp_cve_by_version(SpiderFootPlugin):
         "use_osv": True,
         "use_github": True,
         "github_token": "",
+        "github_cache_hours": 12,
         "max_lookups": 40,
         "max_per_product": 25,
     }
@@ -200,6 +201,9 @@ class sfp_cve_by_version(SpiderFootPlugin):
         "use_github": "Query the project's own GitHub security advisories (needs github:owner/repo in declared_software). "
                       "Many projects publish an advisory there before NVD or OSV list it.",
         "github_token": "Optional GitHub token (no scopes needed). Without one GitHub allows 60 requests per hour per address.",
+        "github_cache_hours": "Keep each project's advisories this many hours and reuse them for every scan, so one fetch serves many "
+                              "scans (0 = always ask GitHub). After this long the list is re-checked with a conditional request. "
+                              "If GitHub refuses (rate limit), the last copy is used and the log says so.",
         "max_lookups": "Most software versions looked up in one scan.",
         "max_per_product": "Most CVEs reported per software version (highest score first).",
     }
@@ -260,11 +264,65 @@ class sfp_cve_by_version(SpiderFootPlugin):
         data = self._get_json(OSV, post={"version": version, "package": {"purl": purl.split("@")[0]}})
         return [read_osv(v) for v in (data or {}).get("vulns", [])]
 
-    def github_cves(self, repo: str, product: str, version: str) -> list[dict]:
+    def github_advisories(self, repo: str) -> list:
+        """The project's published advisories: from the local copy while it is fresh, else asked for again.
+
+        One fetch serves every scan for ``github_cache_hours``. After that the list is re-checked with the ETag from the last
+        fetch (a 304 reply keeps the copy). If GitHub refuses, the last copy is used rather than losing the findings.
+        """
+        label = f"sf_cve_by_version_github:{repo}"
+        hours = float(self.opts.get("github_cache_hours", 12) or 0)
+        saved = None
+        if hours:
+            try:
+                saved = json.loads(self.sf.cacheGet(label, 0) or "null")
+            except (ValueError, TypeError):
+                saved = None
+            if not (isinstance(saved, dict) and isinstance(saved.get("rows"), list)):
+                saved = None
+            if saved and time.time() - float(saved.get("fetched", 0)) < hours * 3600:
+                return saved["rows"]
         key = self.opts.get("github_token", "")
-        rows = self._get_json(f"https://api.github.com/repos/{repo}/security-advisories?per_page=100",
-                              headers={"Accept": "application/vnd.github+json", **({"Authorization": f"Bearer {key}"} if key else {})})
-        return read_github_advisories(rows if isinstance(rows, list) else [], product, version)
+        headers = {"Accept": "application/vnd.github+json", **({"Authorization": f"Bearer {key}"} if key else {})}
+        if saved and saved.get("etag"):
+            headers["If-None-Match"] = saved["etag"]
+        url = f"https://api.github.com/repos/{repo}/security-advisories?per_page=100"
+        res = self.sf.fetchUrl(url, timeout=self.opts.get("_fetchtimeout", 30), useragent=self.opts.get("_useragent", "SpiderFoot"),
+                               headers=headers)
+        code = (res or {}).get("code")
+        rows = None
+        etag = ""
+        if code == "304" and saved:
+            rows, etag = saved["rows"], saved.get("etag", "")
+        elif code == "200" and (res or {}).get("content"):
+            try:
+                body = json.loads(res["content"]) if isinstance(res["content"], str) else res["content"]
+            except ValueError:
+                body = None
+            if isinstance(body, list):
+                rows = body
+                etag = next((v for k, v in (res.get("headers") or {}).items() if str(k).lower() == "etag"), "") or ""
+        if rows is None:
+            if saved:
+                if url not in self._warned:
+                    self._warned.add(url)
+                    self.error(f"GitHub did not answer for {repo} (HTTP {code}); using the copy of its advisories fetched "
+                               f"{int((time.time() - float(saved.get('fetched', 0))) / 3600)} hours ago.")
+                return saved["rows"]
+            if code in ("403", "429") and url.split("?")[0] not in self._warned:
+                self._warned.add(url.split("?")[0])
+                self.error(f"{url.split('?')[0]} refused the request (HTTP {code}): rate limited. Add the API key or token in this "
+                           "module's settings; findings from this source are missing from this scan.")
+            return []
+        if hours:
+            try:
+                self.sf.cachePut(label, json.dumps({"fetched": time.time(), "etag": etag, "rows": rows}))
+            except (OSError, TypeError, ValueError):
+                pass
+        return rows
+
+    def github_cves(self, repo: str, product: str, version: str) -> list[dict]:
+        return read_github_advisories(self.github_advisories(repo), product, version)
 
     # -- events ----------------------------------------------------------------------------------------------------
 

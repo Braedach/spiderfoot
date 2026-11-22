@@ -5,11 +5,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased (rc.51: nikto and nuclei coverage)
 
+### Added
+- **GitHub advisories are kept between scans.** `sfp_cve_by_version` keeps each project's advisories for `github_cache_hours` (default 12; 0 = always ask), so one request serves many scans and a shared, rate-limited address keeps its findings. After that the list is re-checked with the ETag from the last fetch. If GitHub refuses, the last copy is used and the log says how old it is.
+
 ### Fixed
 - **nuclei tested only the first 20 targets of a scan.** The limit (`max_targets`, default 20) was reached in the first few minutes, so later hosts were never tested, though a run takes about 10 seconds. The default is now no limit, and the three profiles that run nuclei pin it so an older saved value cannot bring the cap back.
 - **nikto spent its time on addresses that cannot answer.** A plain-http address on a TLS port (`http://host:443`) waited out the full 300 seconds. It is now treated as the https server and tested once, with the default ports left out so one server is one test. A non-http URL is no longer passed to nikto as a host name.
 - **Time limits that cut a scan short.** The default total budgets for nikto and nuclei are now off (each run is already bounded by its own timeout; set a budget to opt in). When a budget is set, runs are shortened past 70% of it and nothing new starts past 150%, instead of stopping at 100%. The long profiles (tools-only, web-app-test, network-service-test) had a 120-minute limit that ended a scan of a 50-server site while nikto was still working; it is now 240.
 - **Skipped servers are named when they are skipped.** The end-of-scan summary never ran in rc.50 because the module used the wrong hook name (`finished`, which the scanner does not call; the hook is `finish`). It now uses `finish`, and each skip is also logged as it happens.
+- **A changed code default now beats an old saved value.** The Settings screen saves every option it shows, so a value that was only a default stayed in force after a release changed it (nikto and nuclei `max_targets` 20, naabu 50, nikto `total_budget` 7200, the old arjun settings). Saved values equal to a retired default are now ignored, for every scan including one with your own module list, and Settings no longer shows them as in force. A value you chose on purpose is kept, unless it is exactly a retired one. nuclei's excluded template tags are also pinned in the profiles that run it.
+- **A setting saved a moment ago now reaches the next scan.** Each API worker kept its own copy of the settings for up to two seconds, so a scan created through another worker straight after a save could run with the old value. Scan creation now reads the settings fresh.
 - **Two races when events arrive on several threads.** nuclei could switch itself off at the start of a scan (a second thread saw its availability check half done), and both modules could count a server twice or lose time from the budget. Counters and the seen-set are now locked.
 
 ## Unreleased (rc.50: nikto and naabu test every host, CVEs by software version)

@@ -1,4 +1,6 @@
 """sfp_cve_by_version: versions from banners or the owner's declared list, matched by the databases, reported with caveats."""
+import json
+import time
 from unittest.mock import MagicMock
 
 from spiderfoot import SpiderFootEvent
@@ -166,3 +168,96 @@ def test_declared_github_source_is_used_for_the_declared_version():
     m.github_cves.assert_called_once_with("grimmory-tools/grimmory", "grimmory", "3.4.1")
     assert len(sent(m)) == 3          # two advisories plus the summary record
     assert "Fixed in: 3.5.0" in sent(m)[0].data
+
+
+# ---- GitHub advisories are kept between scans (a shared address allows only 60 requests an hour)
+def cached(m, answers):
+    """A dict-backed cache on the module's sf, and fetchUrl answering from ``answers`` in turn."""
+    store = {}
+    m.sf.cacheGet = lambda label, hrs: store.get(label)
+    m.sf.cachePut = lambda label, data: store.__setitem__(label, data)
+    m.sf.fetchUrl = MagicMock(side_effect=list(answers))
+    m.error = MagicMock()
+    return store
+
+
+ROWS = json.dumps(GRIMMORY)
+
+
+def test_second_scan_within_the_cache_time_makes_no_request():
+    m = make()
+    cached(m, [{"code": "200", "content": ROWS, "headers": {"ETag": 'W/"a"'}}])
+    first = m.github_cves("o/r", "grimmory", "3.4.1")
+    second = m.github_cves("o/r", "grimmory", "3.4.1")
+    assert first and first == second
+    assert m.sf.fetchUrl.call_count == 1
+
+
+def test_many_scans_make_one_request():
+    m = make()
+    cached(m, [{"code": "200", "content": ROWS, "headers": {}}])
+    for _ in range(20):
+        m.github_cves("o/r", "grimmory", "3.4.1")
+    assert m.sf.fetchUrl.call_count == 1
+
+
+def test_after_the_cache_time_the_list_is_rechecked_with_its_etag_and_a_304_keeps_it(monkeypatch):
+    m = make(github_cache_hours=12)
+    store = cached(m, [{"code": "200", "content": ROWS, "headers": {"ETag": 'W/"a"'}},
+                       {"code": "304", "content": "", "headers": {}}])
+    m.github_cves("o/r", "grimmory", "3.4.1")
+    now = time.time()
+    monkeypatch.setattr("modules.sfp_cve_by_version.time.time", lambda: now + 13 * 3600)
+    got = m.github_cves("o/r", "grimmory", "3.4.1")
+    assert got == read_github_advisories(GRIMMORY, "grimmory", "3.4.1")
+    assert m.sf.fetchUrl.call_args.kwargs["headers"]["If-None-Match"] == 'W/"a"'
+    assert abs(json.loads(next(iter(store.values())))["fetched"] - (now + 13 * 3600)) < 5     # the clock restarts
+
+
+def test_a_changed_list_replaces_the_copy(monkeypatch):
+    m = make(github_cache_hours=12)
+    cached(m, [{"code": "200", "content": ROWS, "headers": {"etag": "a"}}, {"code": "200", "content": "[]", "headers": {"etag": "b"}}])
+    m.github_cves("o/r", "grimmory", "3.4.1")
+    now = time.time()
+    monkeypatch.setattr("modules.sfp_cve_by_version.time.time", lambda: now + 13 * 3600)
+    assert m.github_cves("o/r", "grimmory", "3.4.1") == []
+
+
+def test_when_github_refuses_the_last_copy_is_used_and_the_log_says_so(monkeypatch):
+    m = make(github_cache_hours=12)
+    cached(m, [{"code": "200", "content": ROWS, "headers": {}}, {"code": "403", "content": "rate limit"}])
+    first = m.github_cves("o/r", "grimmory", "3.4.1")
+    later = time.time() + 13 * 3600
+    monkeypatch.setattr("modules.sfp_cve_by_version.time.time", lambda: later)
+    assert m.github_cves("o/r", "grimmory", "3.4.1") == first and first
+    assert "using the copy" in m.error.call_args.args[0]
+
+
+def test_each_project_has_its_own_copy():
+    m = make()
+    cached(m, [{"code": "200", "content": ROWS, "headers": {}}, {"code": "200", "content": "[]", "headers": {}}])
+    assert m.github_cves("o/one", "grimmory", "3.4.1")
+    assert m.github_cves("o/two", "grimmory", "3.4.1") == []
+    assert m.sf.fetchUrl.call_count == 2
+
+
+def test_cache_time_zero_always_asks():
+    m = make(github_cache_hours=0)
+    cached(m, [{"code": "200", "content": ROWS, "headers": {}}, {"code": "200", "content": ROWS, "headers": {}}])
+    m.github_cves("o/r", "grimmory", "3.4.1")
+    m.github_cves("o/r", "grimmory", "3.4.1")
+    assert m.sf.fetchUrl.call_count == 2
+
+
+def test_a_damaged_cache_entry_is_ignored():
+    m = make()
+    store = cached(m, [{"code": "200", "content": ROWS, "headers": {}}])
+    store["sf_cve_by_version_github:o/r"] = "{not json"
+    assert m.github_cves("o/r", "grimmory", "3.4.1")
+
+
+def test_a_refused_first_request_still_reports_and_returns_nothing():
+    m = make()
+    cached(m, [{"code": "403", "content": "x"}])
+    assert m.github_cves("o/r", "grimmory", "3.4.1") == []
+    assert "rate limited" in m.error.call_args.args[0]

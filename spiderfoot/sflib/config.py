@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from .superseded_defaults import drop_superseded
+
 def configSerialize(opts: dict, filterSystem: bool = True) -> dict:
     """Serialize a configuration dictionary for storage."""
     if not isinstance(opts, dict):
@@ -66,6 +68,8 @@ def configUnserialize(opts: dict, referencePoint: dict, filterSystem: bool = Tru
         raise TypeError(f"opts is {type(opts)}; expected dict()")
     if not isinstance(referencePoint, dict):
         raise TypeError(f"referencePoint is {type(referencePoint)}; expected dict()")
+    # a saved module value that is only an old default must not beat the current one (see superseded_defaults)
+    opts = drop_superseded(opts)
     returnOpts = deepcopy(referencePoint)
     for opt in list(referencePoint.keys()):
         if opt.startswith('__') and filterSystem:

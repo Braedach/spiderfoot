@@ -146,3 +146,34 @@ def test_config_code_closes_every_db_handle():
     b.refresh_if_stale(max_age=0)
     assert dependencies.get_fresh_config_values().get("sfp_virustotal:api_key") == "vt-key"
     assert FakeDb.open_handles == 0
+
+
+def test_a_scan_created_a_moment_after_a_save_on_another_worker_sees_the_saved_value(monkeypatch):
+    """The bug: a setting saved through one API worker missed a scan created through another within about two seconds."""
+    a, b = worker(), worker()
+    monkeypatch.setattr(dependencies, "app_config", b)
+    a.set_module_options("sfp_virustotal", {"api_key": "vt-key"})
+    # b's copy is only a moment old, so the ordinary accessor is allowed to keep it ...
+    assert dependencies.get_app_config().get_config()["__modules__"]["sfp_virustotal"]["opts"]["api_key"] == ""
+    # ... but creating a scan takes a fresh read
+    fresh = dependencies.get_fresh_app_config()
+    assert fresh.get_config()["__modules__"]["sfp_virustotal"]["opts"]["api_key"] == "vt-key"
+
+
+def test_creating_a_scan_uses_the_fresh_read():
+    import inspect
+    from spiderfoot.api.routers import scan
+    src = inspect.getsource(scan.create_scan)
+    assert "with_fresh_settings(get_app_config())" in src
+
+
+def test_a_fresh_read_closes_its_db_handle(monkeypatch):
+    FakeDb.open_handles = 0
+    monkeypatch.setattr(dependencies, "app_config", worker())
+    dependencies.get_fresh_app_config()
+    assert FakeDb.open_handles == 0
+
+
+def test_a_config_without_reload_is_returned_as_it_is():
+    fake = object()
+    assert dependencies.with_fresh_settings(fake) is fake

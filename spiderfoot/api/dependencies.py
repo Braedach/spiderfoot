@@ -16,6 +16,7 @@ from spiderfoot.db import SpiderFootDb
 from spiderfoot.sflib.core import SpiderFoot
 from spiderfoot.helpers import SpiderFootHelpers
 from spiderfoot.config.app_config import AppConfig
+from spiderfoot.sflib.superseded_defaults import drop_superseded
 import multiprocessing as mp
 import logging
 import threading
@@ -414,6 +415,24 @@ def get_app_config() -> Config:
     return app_config
 
 
+def with_fresh_settings(cfg):
+    """``cfg`` after re-reading the settings from the database right now (a config object without ``reload`` is returned as is).
+
+    ``get_app_config()`` accepts a copy up to two seconds old, and the API runs several workers, so a setting saved through one
+    worker could miss a scan created through another a moment later (the scan then ran with the old value). A scan reads its
+    settings once, when it starts, so it takes the fresh read: one small query per scan.
+    """
+    reload = getattr(cfg, "reload", None)
+    if callable(reload):
+        reload()
+    return cfg
+
+
+def get_fresh_app_config() -> Config:
+    """The config singleton, re-read from the database right now."""
+    return with_fresh_settings(get_app_config())
+
+
 def reset_app_config() -> None:
     """Reset the singleton — for testing."""
     global app_config
@@ -455,7 +474,8 @@ def get_fresh_config_values() -> dict[str, str]:
     try:
         dbh = SpiderFootDb(get_app_config().get_config())
         try:
-            return dbh.configGet()
+            # an old default that is still saved must not show in Settings as if it were in force (see superseded_defaults)
+            return drop_superseded(dbh.configGet())
         finally:
             dbh.close()
     except Exception:
