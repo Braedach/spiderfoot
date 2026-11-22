@@ -3,6 +3,11 @@
 All notable changes to SpiderFoot are documented in this file.  
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased (rc.52: AI report on large scans)
+
+### Fixed
+- **The first AI report of a large scan timed out.** Before writing, the report agent indexed every event of the scan into the vector store by embedding it on the CPU (about 50 events a second: a 42,000-event scan took 16 minutes), and the agent gives up after 600 seconds, so the model was never called. The index was kept, so a second try worked. The scan digest now carries the report and the vector context is a few hundred characters, so the indexing is skipped when a digest is present. `SF_REPORT_BACKFILL` can set it to `always` (the old behaviour) or `never`.
+
 ## Unreleased (rc.51: nikto and nuclei coverage)
 
 ### Added

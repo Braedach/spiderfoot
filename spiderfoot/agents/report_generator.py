@@ -468,10 +468,27 @@ def _load_digest(scan_ids: List[str], target: str) -> dict:
 # Qdrant Context Retrieval (supports multiple scan IDs for workspace reports)
 # ---------------------------------------------------------------------------
 
+def _backfill_wanted(has_digest: bool) -> bool:
+    """Whether to index a scan's events into Qdrant now, inside the report request.
+
+    Indexing embeds every event on the CPU (about 50 a second: 42,000 events took 16 minutes) and the agent gives up after
+    600 s, so a big scan's first report timed out before the model was even called. When the scan digest is present it
+    carries the report and the vector context is a few hundred characters, so the indexing is skipped. SF_REPORT_BACKFILL:
+    ``auto`` (default: skip when there is a digest), ``always`` (the old behaviour) or ``never``.
+    """
+    mode = os.environ.get("SF_REPORT_BACKFILL", "auto").strip().lower()
+    if mode == "always":
+        return True
+    if mode == "never":
+        return False
+    return not has_digest
+
+
 def _get_qdrant_context(
     scan_ids: List[str],
     target: str,
     max_events_per_scan: int | None = None,
+    backfill: bool = True,
 ) -> dict:
     """Retrieve enriched context from Qdrant vector DB for one or more scans.
 
@@ -542,6 +559,10 @@ def _get_qdrant_context(
                     filter_=Filter(must=[Filter.match("scan_id", sid)]),
                 )
                 if existing:
+                    continue
+                if not backfill:
+                    logger.info("Scan %s is not indexed in Qdrant; not indexing it inside the report request "
+                                "(the scan digest carries the report; SF_REPORT_BACKFILL=always to index)", sid)
                     continue
                 backfilled = _backfill_scan_into_qdrant(sid, engine)
                 logger.info(
@@ -756,12 +777,12 @@ class ReportGeneratorAgent(BaseAgent):
         if not scan_ids and scan_id:
             scan_ids = [scan_id]
 
-        # ── Retrieve rich context from Qdrant ──
-        qdrant_ctx = _get_qdrant_context(scan_ids, target)
-
-        # ── The scan digest: built from every event, added to (not replacing) the context above ──
+        # ── The scan digest: built from every event, and the main input of the report ──
         digest = _load_digest(scan_ids, target)
         digest_section = digest["text"]
+
+        # ── Retrieve rich context from Qdrant (indexing the scan first only when there is no digest to rely on) ──
+        qdrant_ctx = _get_qdrant_context(scan_ids, target, backfill=_backfill_wanted(bool(digest_section)))
 
         # ── Build the comprehensive user prompt ──
         qdrant_section = self._format_qdrant_context(qdrant_ctx, compact=bool(digest_section))

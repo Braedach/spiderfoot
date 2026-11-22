@@ -36,7 +36,7 @@ def run(agent, **event):
 
 @pytest.fixture
 def patched(monkeypatch):
-    monkeypatch.setattr(rg, "_get_qdrant_context", lambda scan_ids, target: dict(QDRANT))
+    monkeypatch.setattr(rg, "_get_qdrant_context", lambda scan_ids, target, **kw: dict(QDRANT))
     monkeypatch.setattr(rg, "_load_digest", lambda scan_ids, target: dict(DIGEST))
 
 
@@ -70,7 +70,7 @@ def test_the_appendix_is_appended_after_the_report_by_code(patched):
 
 
 def test_without_a_digest_the_report_is_produced_as_before(monkeypatch):
-    monkeypatch.setattr(rg, "_get_qdrant_context", lambda scan_ids, target: dict(QDRANT))
+    monkeypatch.setattr(rg, "_get_qdrant_context", lambda scan_ids, target, **kw: dict(QDRANT))
     monkeypatch.setattr(rg, "_load_digest", lambda scan_ids, target: {"text": "", "appendix": "", "digests": []})
     agent = FakeAgent()
     result = run(agent)
@@ -127,7 +127,7 @@ def test_the_vector_section_drops_its_sampled_counts_and_listing_when_a_digest_e
 
 def test_the_prompt_uses_the_compact_vector_section_only_when_there_is_a_digest(monkeypatch):
     seen = []
-    monkeypatch.setattr(rg, "_get_qdrant_context", lambda scan_ids, target: dict(QDRANT))
+    monkeypatch.setattr(rg, "_get_qdrant_context", lambda scan_ids, target, **kw: dict(QDRANT))
     monkeypatch.setattr(rg.ReportGeneratorAgent, "_format_qdrant_context",
                         lambda self, ctx, compact=False: seen.append(compact) or "VEC")
     monkeypatch.setattr(rg, "_load_digest", lambda scan_ids, target: dict(DIGEST))
@@ -164,3 +164,48 @@ def test_prompt_caching_marks_the_system_prompt_and_the_last_user_message_and_is
     assert cached["messages"][-1]["content"] == [{"type": "text", "text": "LAST", "cache_control": {"type": "ephemeral"}}]
     assert cached["messages"][0]["content"] == "first"                                        # only the last user turn
     assert messages[-1]["content"] == "LAST"                                                  # the caller's list is untouched
+
+
+# ---- a big scan's first report used to time out while every event was embedded (42,000 events took 16 minutes)
+def test_with_a_digest_the_report_does_not_index_the_scan_first(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(rg, "_get_qdrant_context", lambda scan_ids, target, **kw: seen.update(kw) or dict(QDRANT))
+    monkeypatch.setattr(rg, "_load_digest", lambda scan_ids, target: dict(DIGEST))
+    monkeypatch.delenv("SF_REPORT_BACKFILL", raising=False)
+    run(FakeAgent())
+    assert seen == {"backfill": False}
+
+
+def test_without_a_digest_the_scan_is_still_indexed_as_before(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(rg, "_get_qdrant_context", lambda scan_ids, target, **kw: seen.update(kw) or dict(QDRANT))
+    monkeypatch.setattr(rg, "_load_digest", lambda scan_ids, target: {"text": "", "appendix": "", "digests": []})
+    monkeypatch.delenv("SF_REPORT_BACKFILL", raising=False)
+    run(FakeAgent())
+    assert seen == {"backfill": True}
+
+
+@pytest.mark.parametrize("mode,has_digest,expected", [
+    ("auto", True, False), ("auto", False, True), ("", True, False), ("AUTO", False, True),
+    ("always", True, True), ("always", False, True), ("never", True, False), ("never", False, False),
+])
+def test_backfill_modes(monkeypatch, mode, has_digest, expected):
+    monkeypatch.setenv("SF_REPORT_BACKFILL", mode)
+    assert rg._backfill_wanted(has_digest) is expected
+
+
+def test_a_scan_not_in_qdrant_is_not_embedded_when_backfill_is_off(monkeypatch):
+    """The real function, with only the Qdrant client faked: nothing is indexed when backfill is off."""
+    calls = []
+
+    class Q:
+        def ensure_collection(self, *a, **k): pass
+        def scroll(self, *a, **k): return [], None
+
+    monkeypatch.setattr("spiderfoot.ai.qdrant_client.get_qdrant_client", lambda: Q())
+    monkeypatch.setattr("spiderfoot.services.embedding_service.get_embedding_service", lambda: object())
+    monkeypatch.setattr(rg, "_backfill_scan_into_qdrant", lambda *a, **k: calls.append(a) or 0)
+    rg._get_qdrant_context(["S1"], "example.com", backfill=False)
+    assert calls == []
+    rg._get_qdrant_context(["S1"], "example.com", backfill=True)
+    assert len(calls) == 1
