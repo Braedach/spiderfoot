@@ -429,12 +429,12 @@ def _load_digest(scan_ids: List[str], target: str) -> dict:
     try:
         from spiderfoot import SpiderFootHelpers
         from spiderfoot.db import SpiderFootDb
-        from spiderfoot.agents.report_digest import build_digest, render_appendix, render_digest
+        from spiderfoot.agents.report_digest import DEFAULT_BUDGET_CHARS, build_digest, render_appendix, render_digest
 
         dsn = os.environ.get("SF_POSTGRES_DSN")
         if not dsn or not scan_ids:
             return empty
-        budget = int(os.environ.get("SF_REPORT_DIGEST_MAX_CHARS", "300000"))
+        budget = int(os.environ.get("SF_REPORT_DIGEST_MAX_CHARS", str(DEFAULT_BUDGET_CHARS)))
         dbh = SpiderFootDb({"__database": dsn, "__dbtype": "postgresql"})
         texts, appendices, digests = [], [], []
         try:

@@ -478,3 +478,28 @@ def test_a_huge_account_list_cannot_crowd_the_other_sections_out_of_the_digest()
     assert "ACCOUNT CONFIDENCE" in text and "RELATED CONTEXT" in text         # both present: related context was starved before
     assert "lines of account confidence did not fit" in text                  # and the cut is stated, with its count
     assert text.count("  [Unconfirmed]") < 5000
+
+
+def test_the_default_digest_budget_is_900000_characters_and_the_loader_uses_it(monkeypatch):
+    import spiderfoot.agents.report_digest as rd
+    import spiderfoot.agents.report_generator as rg
+    assert rd.DEFAULT_BUDGET_CHARS == 900000
+    seen = {}
+    monkeypatch.setenv("SF_POSTGRES_DSN", "postgresql://x")
+    monkeypatch.delenv("SF_REPORT_DIGEST_MAX_CHARS", raising=False)
+
+    class Db:
+        def __init__(self, *a, **k): pass
+        def scanResultEvent(self, sid): return []
+        def scanLogs(self, sid, limit=0): return []
+        def scanConfigGet(self, sid): return {}
+        def close(self): pass
+
+    monkeypatch.setattr("spiderfoot.db.SpiderFootDb", Db)
+    monkeypatch.setattr(rd, "render_digest", lambda d, max_chars=None: seen.update(max=max_chars) or "text")
+    monkeypatch.setattr(rg, "_subject_links_text", lambda *a, **k: "")
+    rg._load_digest(["S1"], "example.org")
+    assert seen["max"] == 900000
+    monkeypatch.setenv("SF_REPORT_DIGEST_MAX_CHARS", "450000")                 # still settable
+    rg._load_digest(["S1"], "example.org")
+    assert seen["max"] == 450000

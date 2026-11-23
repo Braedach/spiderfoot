@@ -98,7 +98,10 @@ MAX_HOSTS_ROLLUP = 40           # hosts named, with their counts, for a type tha
 MAX_OTHER_EXAMPLES = 15         # examples shown for each remaining event type (exact counts are always given)
 NO_EXAMPLE_TYPES = frozenset({"HASH"})          # a hash tells the reader nothing; the count is enough
 SECTION_SHARE = {"account confidence": 0.20}   # largest share of the budget one open-ended section may take
-DEFAULT_BUDGET_CHARS = 300000   # size of the digest text; what does not fit is counted, never silently dropped
+# size of the digest text (about 225,000 tokens; the model's context window is 1,000,000); what does not fit is counted, never silently
+# dropped. Raised from 300,000 on 2026-11-23: a 42,000-event scan filled that budget exactly. The account-confidence list is limited to
+# a fifth of it (SECTION_SHARE), so the rest is for the target's own findings and context.
+DEFAULT_BUDGET_CHARS = 900000
 MAX_DATA_CHARS = 280
 
 # Modules that test a web application's behaviour (injection, scripting flaws, parameters). If none ran, the report says
