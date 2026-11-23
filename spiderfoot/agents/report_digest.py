@@ -94,8 +94,10 @@ HEURISTIC_MODULES = frozenset({"sfp_tool_nikto", "sfp_junkfiles", "sfp_intfiles"
 MAX_EXAMPLES_PER_TYPE = 200      # in-scope items listed per type (the appendix lists them all)
 MAX_CONTEXT_EXAMPLES = 100      # related hosts listed per type, as context the report may mention but must not assess
 MAX_THIRD_PARTY = 150           # third-party personal details listed per type, labelled, for the model to judge
+MAX_HOSTS_ROLLUP = 40           # hosts named, with their counts, for a type that has more items than are listed
 MAX_OTHER_EXAMPLES = 15         # examples shown for each remaining event type (exact counts are always given)
 NO_EXAMPLE_TYPES = frozenset({"HASH"})          # a hash tells the reader nothing; the count is enough
+SECTION_SHARE = {"account confidence": 0.20}   # largest share of the budget one open-ended section may take
 DEFAULT_BUDGET_CHARS = 300000   # size of the digest text; what does not fit is counted, never silently dropped
 MAX_DATA_CHARS = 280
 
@@ -395,11 +397,11 @@ def build_digest(rows: list, *, target: str, target_type: str, log_entries: Iter
     for etype, per in findings.items():
         items = list(per.values())
         shown = []
-        for it in items[:MAX_EXAMPLES_PER_TYPE]:
-            mods = sorted(it["modules"])
-            heuristic_only = len(mods) == 1 and mods[0] in HEURISTIC_MODULES
-            shown.append({"data": it["data"], "modules": mods, "verified": not heuristic_only})
-        finding_list.append({"type": etype, "total": len(items), "shown": shown})
+        for it in _spread(items, MAX_EXAMPLES_PER_TYPE):
+            shown.append({"data": it["data"], "modules": sorted(it["modules"]), "verified": not _unverified(it)})
+        hosts = Counter(h for h in (_host_of(it["data"]) for it in items) if h)
+        finding_list.append({"type": etype, "total": len(items), "shown": shown,
+                             "by_host": hosts.most_common(MAX_HOSTS_ROLLUP) if len(hosts) > 1 else []})
 
     account_scores = (score_accounts(all_rows, target=target, target_type=target_type, context=subject_context)
                       if by_type.get("ACCOUNT_EXTERNAL_OWNED") else [])
@@ -428,6 +430,32 @@ def build_digest(rows: list, *, target: str, target_type: str, log_entries: Iter
         "limitations": summarise_log(log_entries),
         "not_tested": not_tested(modules_seen, target_type),
     }
+
+
+def _unverified(item: dict) -> bool:
+    """True when one heuristic scanner alone reported the item and nothing else confirmed it."""
+    mods = sorted(item["modules"])
+    return len(mods) == 1 and mods[0] in HEURISTIC_MODULES
+
+
+def _spread(items: list[dict], cap: int) -> list[dict]:
+    """The items to list for one type when there are more than ``cap``: confirmed findings before unconfirmed ones, and spread
+    round-robin across hosts so every host is represented (the first ``cap`` in discovery order were all from the hosts the scan
+    happened to reach first). Within a host, discovery order. At or under the cap nothing is reordered."""
+    if len(items) <= cap:
+        return items
+    queues: OrderedDict = OrderedDict()
+    for it in sorted(items, key=_unverified):          # stable: confirmed first, discovery order kept within each group
+        queues.setdefault(_host_of(it["data"]) or "", []).append(it)
+    picked: list[dict] = []
+    while len(picked) < cap and queues:
+        for host in list(queues):
+            picked.append(queues[host].pop(0))
+            if not queues[host]:
+                del queues[host]
+            if len(picked) >= cap:
+                break
+    return picked
 
 
 def _take(lines: list[str], budget: int) -> tuple[list[str], int, int]:
@@ -481,6 +509,9 @@ def render_digest(d: dict, max_chars: int | None = None) -> str:
             flag = "" if it["verified"] else "  [UNVERIFIED: one heuristic scanner only]"
             findings.append(f"  - {it['data']}  (source: {', '.join(it['modules'])}){flag}")
         if group["total"] > len(group["shown"]):
+            if group.get("by_host"):
+                findings.append("  per host (all items of this type, not only those listed): "
+                                + ", ".join(f"{h} {n}" for h, n in group["by_host"]))
             findings.append(f"  … and {group['total'] - len(group['shown'])} more of this type (see Appendix A)")
 
     own: list[str] = []
@@ -552,7 +583,11 @@ def render_digest(d: dict, max_chars: int | None = None) -> str:
                         ("structured records", records),
                         ("related context", ctx), ("other event types", others),
                         ("third-party personal data", third)):
-        taken, room, left = _take(block, room)
+        # one section may not crowd the others out: the account list was 1.4 million characters on a 42,000-event scan and
+        # took everything left, so related context, other types and third-party data never reached the model
+        allowed = min(room, int(budget * SECTION_SHARE[name])) if name in SECTION_SHARE else room
+        taken, left_over, left = _take(block, allowed)
+        room -= allowed - left_over
         body += taken
         if left:
             omitted_notes.append(f"{left} lines of {name} did not fit in this digest (all are in Appendix A and the scan results)")

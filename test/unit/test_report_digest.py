@@ -421,3 +421,60 @@ def test_a_scan_with_no_accounts_has_no_confidence_section():
 def test_the_accounting_still_reconciles_with_scoring_added():
     d = build_digest(person_scan_with_accounts(), target="Leon Scott", target_type="HUMAN_NAME")
     assert sum(d["accounting"].values()) == d["total_events"]
+
+
+# ------------------------------------------------------------------------------- large scans: which findings the model sees
+def _nikto_scan(hosts=10, per_host=30):
+    rows = [row("ROOT", "example.org")]
+    for h in range(hosts):
+        for i in range(per_host):
+            rows.append(row("VULNERABILITY_GENERAL", f"https://h{h}.example.org/p{i}: finding {i}", "sfp_tool_nikto"))
+    return rows
+
+
+def test_over_the_cap_the_listed_findings_cover_every_host_not_just_the_first_reached():
+    d = digest(_nikto_scan(), "example.org", "INTERNET_NAME")
+    group = types_of(d)["VULNERABILITY_GENERAL"]
+    assert group["total"] == 300 and len(group["shown"]) == 200
+    hosts = {s["data"].split("/")[2] for s in group["shown"]}
+    assert hosts == {f"h{h}.example.org" for h in range(10)}                  # all ten hosts appear (was: the first ~7)
+    per_host = {h: sum(1 for s in group["shown"] if s["data"].split("/")[2] == h) for h in hosts}
+    assert max(per_host.values()) - min(per_host.values()) <= 1               # and evenly
+
+
+def test_over_the_cap_a_confirmed_finding_listed_late_still_beats_unconfirmed_ones():
+    rows = _nikto_scan(hosts=4, per_host=60)                                  # 240 findings from the heuristic scanner alone
+    late = row("VULNERABILITY_GENERAL", "https://h3.example.org/confirmed: expired", "sfp_tool_nikto")
+    rows += [late, row("VULNERABILITY_GENERAL", "https://h3.example.org/confirmed: expired", "sfp_nuclei")]
+    group = types_of(digest(rows, "example.org", "INTERNET_NAME"))["VULNERABILITY_GENERAL"]
+    confirmed = [s for s in group["shown"] if "confirmed" in s["data"]]
+    assert confirmed and confirmed[0]["verified"] is True
+    assert group["shown"][0]["verified"] is True                              # confirmed items come first
+
+
+def test_at_or_under_the_cap_nothing_is_reordered():
+    rows = _nikto_scan(hosts=3, per_host=10)
+    shown = types_of(digest(rows, "example.org", "INTERNET_NAME"))["VULNERABILITY_GENERAL"]["shown"]
+    assert [s["data"] for s in shown] == [f"https://h{h}.example.org/p{i}: finding {i}" for h in range(3) for i in range(10)]
+
+
+def test_a_truncated_type_says_how_many_findings_each_host_has():
+    d = digest(_nikto_scan(), "example.org", "INTERNET_NAME")
+    text = render_digest(d)
+    assert "per host (all items of this type, not only those listed): " in text
+    assert "h0.example.org 30" in text and "h9.example.org 30" in text
+    small = render_digest(digest(_nikto_scan(hosts=2, per_host=5), "example.org", "INTERNET_NAME"))
+    assert "per host (all items" not in small                                 # nothing was cut, so no rollup
+
+
+def test_a_huge_account_list_cannot_crowd_the_other_sections_out_of_the_digest():
+    d = digest(_nikto_scan(hosts=3, per_host=5) + [row("INTERNET_NAME", "www.example.org", "sfp_dnsresolve")],
+               "example.org", "INTERNET_NAME")
+    d["account_scores"] = [{"label": "Unconfirmed", "site": f"Site{i}", "url": f"https://s{i}.example.net/u", "modules": ["sfp_accounts"],
+                            "reasons": ["a username match and nothing else"]} for i in range(5000)]
+    d["account_score_summary"] = {"Unconfirmed": 5000}
+    text = render_digest(d, max_chars=100000)
+    assert len(text) <= 100000 + 200
+    assert "ACCOUNT CONFIDENCE" in text and "RELATED CONTEXT" in text         # both present: related context was starved before
+    assert "lines of account confidence did not fit" in text                  # and the cut is stated, with its count
+    assert text.count("  [Unconfirmed]") < 5000
