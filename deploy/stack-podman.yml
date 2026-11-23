@@ -176,6 +176,13 @@ services:
       - SF_EMBEDDING_PROVIDER=fastembed
       - SF_EMBEDDING_MODEL=all-MiniLM-L6-v2
       - SF_EMBEDDING_DIMENSIONS=384
+      # search reads the real vector store and asks the agents service to index a scan that is not indexed yet
+      - SF_QDRANT_BACKEND=http
+      - SF_QDRANT_HOST=qdrant
+      - SF_QDRANT_PORT=6333
+      - SF_QDRANT_GRPC_PORT=6334
+      - SF_QDRANT_PREFIX=sf_
+      - SF_AGENTS_URL=http://sf-agents:8100
       - FASTEMBED_CACHE_PATH=/home/spiderfoot/.cache/huggingface/fastembed
       - HF_HOME=/home/spiderfoot/.cache/huggingface
       - SF_LOG_FORMAT=${SF_LOG_FORMAT}

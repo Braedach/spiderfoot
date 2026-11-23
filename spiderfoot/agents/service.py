@@ -239,6 +239,66 @@ def _matches_event_type(event_type: str, patterns: List[str]) -> bool:
     return False
 
 
+# ── Indexing finished scans into the vector store (see spiderfoot/agents/indexer.py) ────────────────────────────
+_indexer = None
+_index_poller_task: "asyncio.Task | None" = None
+
+
+def _build_indexer():
+    """The real indexer: Postgres for events, Qdrant and the embedding model for storing them. None when not available."""
+    from spiderfoot.agents.indexer import ScanIndexer
+    from spiderfoot.agents.report_generator import _load_scan_events
+    from spiderfoot.ai.qdrant_client import get_qdrant_client
+    from spiderfoot.correlation.vector import VectorCorrelationConfig, VectorCorrelationEngine
+    from spiderfoot.services.embedding_service import get_embedding_service
+
+    qdrant = get_qdrant_client()
+    config = VectorCorrelationConfig()
+    qdrant.ensure_collection(config.collection_name, vector_size=int(os.environ.get("SF_EMBEDDING_DIMENSIONS", "384")))
+    engine = VectorCorrelationEngine(qdrant=qdrant, embeddings=get_embedding_service(), config=config)
+    days = _positive_int_env("SF_INDEX_RECENT_DAYS", 14)
+
+    def candidates() -> list:
+        from spiderfoot.db import SpiderFootDb
+        dsn = os.environ.get("SF_POSTGRES_DSN")
+        if not dsn:
+            return []
+        dbh = SpiderFootDb({"__database": dsn, "__dbtype": "postgresql"})
+        try:
+            rows = dbh.scanInstanceList() or []
+        finally:
+            dbh.close()
+        cutoff = time.time() - days * 86400
+        # (guid, name, target, created, started, ended, status, result_count), newest first
+        return [r[0] for r in rows if r[6] == "FINISHED" and int(r[7] or 0) > 0 and float(r[5] or 0) >= cutoff]
+
+    return ScanIndexer(_load_scan_events, engine, qdrant, candidates=candidates)
+
+
+def _get_indexer():
+    global _indexer
+    if _indexer is None:
+        _indexer = _build_indexer()
+    return _indexer
+
+
+async def _index_poller() -> None:
+    """Every few minutes, queue the recently finished scans that are not indexed yet."""
+    await asyncio.sleep(_positive_int_env("SF_INDEX_FIRST_DELAY_S", 60))
+    interval = _positive_int_env("SF_INDEX_POLL_S", 120)
+    while True:
+        try:
+            indexer = await asyncio.to_thread(_get_indexer)
+            queued = await asyncio.to_thread(indexer.enqueue_candidates)
+            if queued:
+                logger.info("Queued %d finished scan(s) for indexing", queued)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:                                    # keep polling: Qdrant or Postgres may be briefly away
+            logger.warning("Index poll failed: %s", exc)
+        await asyncio.sleep(interval)
+
+
 @asynccontextmanager
 async def lifespan(app):
     """Application lifespan — init agents, start listener, and drain on shutdown."""
@@ -250,8 +310,18 @@ async def lifespan(app):
     _dispatch_semaphore = asyncio.Semaphore(max_inflight)
 
     _event_listener_task = asyncio.create_task(_start_event_listener())
+    global _index_poller_task
+    if os.environ.get("SF_INDEX_AUTO", "true").strip().lower() not in ("0", "false", "no", "off"):
+        _index_poller_task = asyncio.create_task(_index_poller())
 
     yield
+
+    if _index_poller_task:
+        _index_poller_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await _index_poller_task
+    if _indexer is not None:
+        _indexer.stop()
 
     if _event_listener_task:
         _event_listener_task.cancel()
@@ -363,6 +433,31 @@ async def analyze_document(request: DocumentRequest):
         raise HTTPException(status_code=500, detail="Agent returned no result")
 
     return result.to_dict()
+
+
+@app.post("/index/{scan_id}")
+async def index_scan(scan_id: str):
+    """Index one scan now (ahead of the queue) and return how far it has got. Poll GET /index/{scan_id} for progress."""
+    try:
+        return await asyncio.to_thread(lambda: _get_indexer().request(scan_id, front=True))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Indexing is not available: {exc}") from exc
+
+
+@app.get("/index/{scan_id}")
+async def index_status(scan_id: str):
+    try:
+        return await asyncio.to_thread(lambda: _get_indexer().status(scan_id))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Indexing is not available: {exc}") from exc
+
+
+@app.get("/index")
+async def index_overview():
+    try:
+        return await asyncio.to_thread(lambda: _get_indexer().overview())
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Indexing is not available: {exc}") from exc
 
 
 # ── Reports as background jobs, so the page can show real progress ─────────────────────────────────────────────

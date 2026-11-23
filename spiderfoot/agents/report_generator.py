@@ -323,64 +323,53 @@ SYSTEM_PROMPT = SYSTEM_PROMPT + EVIDENCE_RULES
 # Celery-based scan path — see the FIX note in _get_qdrant_context below)
 # ---------------------------------------------------------------------------
 
+def _load_scan_events(scan_id: str) -> List[Any]:
+    """A scan's events as OSINTEvent objects, read straight from Postgres (ROOT left out). Raises on any failure.
+
+    Row schema, confirmed from the SQL in spiderfoot/db/db_event.py's scanResultEvent() (its own comment: "Legacy tuple order:
+    generated, data, module, hash, type, source_event_hash, confidence, visibility, risk"): 0=generated, 1=data, 2=module, 3=hash,
+    4=type, 5=source_event_hash, 6=confidence, 7=visibility, 8=risk. No separate "source_data" column exists.
+    """
+    from spiderfoot.db import SpiderFootDb
+    from spiderfoot.correlation.vector import OSINTEvent
+
+    dsn = os.environ.get("SF_POSTGRES_DSN")
+    if not dsn:
+        raise RuntimeError("SF_POSTGRES_DSN is not set: cannot read the scan's events")
+    dbh = SpiderFootDb({"__database": dsn, "__dbtype": "postgresql"})
+    try:
+        raw = dbh.scanResultEvent(scan_id) or []
+    finally:
+        dbh.close()
+
+    events: List[Any] = []
+    for row in raw:
+        if not isinstance(row, (list, tuple)) or len(row) < 9:
+            continue
+        event_type = row[4]
+        if event_type == "ROOT":
+            continue
+        events.append(OSINTEvent(
+            event_id=str(row[3]) if row[3] else f"{scan_id}-{len(events)}",
+            event_type=str(event_type),
+            data=str(row[1]) if row[1] is not None else "",
+            source_module=str(row[2]) if row[2] is not None else "",
+            scan_id=scan_id,
+            confidence=float(row[6]) if row[6] is not None else 100.0,
+            risk=int(row[8]) if row[8] is not None else 0,
+            timestamp=float(row[0]) if row[0] else 0.0,
+        ))
+    return events
+
+
 def _backfill_scan_into_qdrant(scan_id: str, engine: "VectorCorrelationEngine") -> int:  # noqa: F821
-    """Read a scan's events straight from Postgres and index them into Qdrant.
+    """Read a scan's events straight from Postgres and index them into Qdrant (the old, in-request path: see _backfill_wanted).
 
-    EventIndexer is meant to do this in real time via EventBus subscription,
-    but spiderfoot.tasks.scan.run_scan (the task this fork's celery-worker
-    actually runs) never publishes to the EventBus and nothing ever starts
-    that indexer — confirmed by grep, zero call sites outside its own
-    definition. Reads via the same direct-SpiderFootDb pattern used to fix
-    the export endpoint (spiderfoot/api/routers/export.py's _get_dbh), since
-    ServiceRegistry's DataService factory is equally unavailable here.
-
-    Returns the number of events actually indexed (0 on any failure — never
-    raises, so a Qdrant/Postgres hiccup degrades the report rather than
-    failing report generation outright).
+    Returns the number of events actually indexed (0 on any failure, never raises), so a Qdrant or Postgres hiccup degrades the
+    report instead of failing it. The background indexer (spiderfoot/agents/indexer.py) is the normal way a scan gets indexed.
     """
     try:
-        from spiderfoot.db import SpiderFootDb
-        from spiderfoot.correlation.vector import OSINTEvent
-
-        dsn = os.environ.get("SF_POSTGRES_DSN")
-        if not dsn:
-            logger.warning("SF_POSTGRES_DSN not set — cannot backfill scan %s", scan_id)
-            return 0
-
-        dbh = SpiderFootDb({"__database": dsn, "__dbtype": "postgresql"})
-        try:
-            raw = dbh.scanResultEvent(scan_id) or []
-        finally:
-            dbh.close()
-
-        # Row schema, confirmed straight from the actual SQL in
-        # spiderfoot/db/db_event.py's scanResultEvent() (its own comment:
-        # "Legacy tuple order: generated, data, module, hash, type,
-        # source_event_hash, confidence, visibility, risk") — NOT the
-        # ordering assumed from export.py's SSE/streaming handlers, which
-        # turned out to be independently wrong too (they were trusted as a
-        # reference without ever being checked against the real query).
-        # 0=generated, 1=data, 2=module, 3=hash, 4=type, 5=source_event_hash,
-        # 6=confidence, 7=visibility, 8=risk. No separate "source_data"
-        # column exists at all.
-        events: List[Any] = []
-        for row in raw:
-            if not isinstance(row, (list, tuple)) or len(row) < 9:
-                continue
-            event_type = row[4]
-            if event_type == "ROOT":
-                continue
-            events.append(OSINTEvent(
-                event_id=str(row[3]) if row[3] else f"{scan_id}-{len(events)}",
-                event_type=str(event_type),
-                data=str(row[1]) if row[1] is not None else "",
-                source_module=str(row[2]) if row[2] is not None else "",
-                scan_id=scan_id,
-                confidence=float(row[6]) if row[6] is not None else 100.0,
-                risk=int(row[8]) if row[8] is not None else 0,
-                timestamp=float(row[0]) if row[0] else 0.0,
-            ))
-
+        events = _load_scan_events(scan_id)
         if not events:
             return 0
         return engine.index_events(events)
