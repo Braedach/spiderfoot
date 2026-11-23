@@ -3,6 +3,11 @@
 All notable changes to SpiderFoot are documented in this file.  
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased (rc.53: AI report page fix)
+
+### Fixed
+- **A finished AI report was thrown away, and the page said "No report generated".** When the job finished, the page changed its state to "done" before it had fetched the result, and that change cancelled the fetch, so the finished report never reached the screen (it was saved on the server, and showed after leaving the tab and coming back). The result is now fetched and shown first. The "No report generated" message also no longer appears under the progress steps while a report is being written. The job-following logic is its own hook with tests, including one that fails on the old behaviour.
+
 ## Unreleased (rc.52: AI report on large scans, and honest scan progress)
 
 ### Added
