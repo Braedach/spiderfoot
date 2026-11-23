@@ -372,3 +372,20 @@ class ScanProgressTracker:
                 ],
                 "milestones_reached": sorted(self._milestones_reached),
             }
+
+
+def update_running_since(since: dict, running_names: list, now: float) -> dict:
+    """``since`` kept in step with the modules running now: a module seen for the first time starts its clock, one that stopped
+    loses it (so a module that runs again later starts again from zero)."""
+    return {name: since.get(name, now) for name in running_names}
+
+
+def enrich_running(running: list, results_by_module: dict, now: float) -> list:
+    """The running modules as the progress panel shows them: how long each has been running and how many results it has stored."""
+    out = []
+    for m in running or []:
+        since = m.get("since")
+        out.append({"name": m.get("name", ""), "progress": m.get("progress", ""),
+                    "running_for_s": round(max(0.0, now - since), 1) if since else 0.0,
+                    "results": int(results_by_module.get(m.get("name", ""), 0))})
+    return out

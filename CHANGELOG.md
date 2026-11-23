@@ -3,6 +3,12 @@
 All notable changes to SpiderFoot are documented in this file.  
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased (rc.53: scan progress panel, per-module detail)
+
+### Added
+- **Each module in the scan progress panel shows how long it has been working and how many results it has stored** (for example "nikto: 55 of 118 servers tested so far, 1h 12m, 1,235 results"). A module's clock starts when it is first seen working and starts again if it runs again later.
+- **A plain "slow tail" note.** When most of the scan's modules have produced results and only a few are still working, the panel says so and names them, and that the scan ends when they do. It does not appear early in a scan, or while many modules are still working.
+
 ## Unreleased (rc.52: AI report on large scans, and honest scan progress)
 
 ### Added

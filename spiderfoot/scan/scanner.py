@@ -66,6 +66,11 @@ def get_scan_activity(scan_id: str) -> dict:
     return _scan_activity.get(scan_id, {})
 
 
+from spiderfoot.scan.scan_progress import update_running_since  # noqa: E402  (kept importable from here)
+
+_running_since: dict[str, dict[str, float]] = {}      # scan id -> module name -> when it was first seen running (this run of it)
+
+
 def module_progress_text(module: Any) -> str:
     """The progress line a module offers ("55 of 118 servers tested"), or "". Never raises: a module's own bug must not
     reach the scan."""
@@ -794,6 +799,7 @@ class SpiderFootScanner():
             self.__sharedThreadPool.shutdown(wait=True)
             _running_module_counts.pop(self.__scanId, None)
             _scan_activity.pop(self.__scanId, None)
+            _running_since.pop(self.__scanId, None)
 
     @staticmethod
     def _extractIPForSharedCheck(data: str) -> str | None:
@@ -1005,8 +1011,11 @@ class SpiderFootScanner():
 
         with suppress(Exception):
             _running_module_counts[self.__scanId] = len(modules_running)
+            _running_since[self.__scanId] = update_running_since(
+                _running_since.get(self.__scanId, {}), list(modules_running), time.time())
             _scan_activity[self.__scanId] = {
-                "running": [{"name": m.__name__, "progress": module_progress_text(m)}
+                "running": [{"name": m.__name__, "progress": module_progress_text(m),
+                             "since": _running_since[self.__scanId].get(m.__name__)}
                             for m in self.__moduleInstances.values() if getattr(m, "running", False)],
                 "queued_events": sum(q for _, q in modules_waiting),
             }

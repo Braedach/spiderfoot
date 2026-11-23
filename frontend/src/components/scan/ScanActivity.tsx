@@ -13,6 +13,15 @@ export function formatQuiet(seconds: number): string {
 }
 
 const QUIET_WARNING_S = 600;   // ten minutes without a new result is worth saying
+const TAIL_MAX_MODULES = 5;    // this few modules left, with most of the scan done, is a slow tail
+const TAIL_MIN_DONE = 0.8;     // share of modules that have produced results before it counts as a tail
+
+/** "45 seconds", "12 minutes", "1h 12m": how long a module has been working. */
+export function formatElapsed(seconds: number): string {
+  if (seconds < 90) return `${Math.round(seconds)}s`;
+  const minutes = Math.round(seconds / 60);
+  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
 
 /**
  * What a running scan is doing right now. The percentage bar only counts modules that have produced a result, so it sits near
@@ -23,6 +32,8 @@ export function ScanActivity({ progress }: { progress: ScanProgressSnapshot }) {
   const running = progress.running ?? [];
   const quiet = progress.quiet_for_s ?? 0;
   const stalled = quiet >= QUIET_WARNING_S && running.length > 0;
+  const done = progress.modules_total > 0 ? progress.modules_finished / progress.modules_total : 0;
+  const tail = running.length > 0 && running.length <= TAIL_MAX_MODULES && done >= TAIL_MIN_DONE;
 
   return (
     <div role="status" aria-live="polite" className="w-full max-w-xl rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-sm space-y-2">
@@ -39,6 +50,9 @@ export function ScanActivity({ progress }: { progress: ScanProgressSnapshot }) {
                 <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
                 <span className="font-mono">{friendlyModuleName(m.name)}</span>
                 {m.progress && <span className="opacity-70">: {m.progress}</span>}
+                <span className="opacity-60 text-xs ml-auto whitespace-nowrap">
+                  {m.running_for_s > 0 ? `${formatElapsed(m.running_for_s)} · ` : ''}{m.results.toLocaleString()} results
+                </span>
               </li>
             ))}
           </ul>
@@ -51,6 +65,12 @@ export function ScanActivity({ progress }: { progress: ScanProgressSnapshot }) {
         <span>{progress.events_per_min > 0 ? `${progress.events_per_min.toLocaleString()} results a minute` : 'no new results in the last few minutes'}</span>
         <span>last result {formatQuiet(quiet)} ago</span>
       </div>
+      {tail && (
+        <div className="text-xs opacity-80">
+          Slow tail: only {running.length === 1 ? 'this module is' : `these ${running.length} modules are`} still working. Everything
+          else has finished its work, and the scan ends when {running.length === 1 ? 'it does' : 'they do'}.
+        </div>
+      )}
       {stalled && (
         <div className="text-xs text-amber-300">
           No new results for {formatQuiet(quiet)}. The modules above are still working; a long tail of account checks or slow

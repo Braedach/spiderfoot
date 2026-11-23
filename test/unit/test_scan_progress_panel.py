@@ -81,3 +81,21 @@ def test_the_stream_sends_an_update_when_anything_changes_not_only_the_percentag
     chunks = asyncio.run(collect())
     kinds = [c.split("\n", 1)[0] for c in chunks]
     assert kinds[:2] == ["event: progress", "event: progress"]               # the percentage did not change; the text did
+
+
+def test_a_module_clock_starts_when_it_is_first_seen_and_stops_when_it_stops():
+    from spiderfoot.scan.scan_progress import update_running_since
+    t = update_running_since({}, ["a", "b"], 100.0)
+    assert t == {"a": 100.0, "b": 100.0}
+    t = update_running_since(t, ["a", "c"], 160.0)
+    assert t == {"a": 100.0, "c": 160.0}                    # a keeps its start, b is gone, c starts now
+    assert update_running_since(t, ["b"], 200.0) == {"b": 200.0}     # b ran again later: it starts from zero
+
+
+def test_the_panel_gets_elapsed_time_and_result_count_for_each_running_module():
+    from spiderfoot.scan.scan_progress import enrich_running
+    out = enrich_running([{"name": "sfp_tool_nikto", "progress": "55 of 118", "since": 100.0},
+                          {"name": "sfp_accounts", "progress": "", "since": None}], {"sfp_tool_nikto": 1235}, 4420.0)
+    assert out[0] == {"name": "sfp_tool_nikto", "progress": "55 of 118", "running_for_s": 4320.0, "results": 1235}
+    assert out[1]["running_for_s"] == 0.0 and out[1]["results"] == 0                 # unknown start, no results yet
+    assert enrich_running([], {}, 1.0) == [] and enrich_running(None, {}, 1.0) == []
