@@ -16,7 +16,7 @@ interface Options {
   /** Where the job id is kept (one per scan). */
   storageKey: string;
   /** Called once with the finished report. */
-  onDone: (result: unknown) => void;
+  onDone: (result: Record<string, unknown>) => void;
 }
 
 export function useReportJob({ storageKey, onDone }: Options) {
