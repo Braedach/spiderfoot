@@ -444,6 +444,29 @@ containers can reach.
 - If you do not use Ollama, remove the two `llm-net` attachments from your stack file, or leave the default empty network.
 - An external network must already exist, or the deploy fails.
 
+### AI report and search indexing
+
+`sf-agents` writes the AI report and indexes finished scans for search. All of these settings are optional; the value in the
+stack file is the default, so set one in the env file only to change it.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `SF_REPORT_DIGEST_MAX_CHARS` | `900000` | Size of the scan digest the report model reads, in characters (about 4 per token, so 900,000 is about 225,000 tokens; Sonnet 5's context window is 1,000,000). What does not fit is counted in the report, never dropped silently. |
+| `SF_REPORT_MAX_EVENTS_PER_SCAN` | `2000` | Most events the report reads from the vector store for one scan (only the small vector part of the report). |
+| `SF_REPORT_BACKFILL` | `auto` | Whether the report indexes the scan itself before writing. `auto` skips it when the digest is present (always, for stored scans); `always` is the old behaviour (16 minutes for 42,000 events, longer than the report's 10-minute limit); `never` skips it. |
+| `SF_INDEX_AUTO` | `true` | `false` stops the background indexing of finished scans. A scan is then indexed only when it is searched. |
+| `SF_INDEX_RECENT_DAYS` | `14` | How far back the background indexing looks for finished scans that are not indexed. Older scans are indexed the first time they are searched. |
+| `SF_INDEX_POLL_S` | `120` | Seconds between looks for finished scans that need indexing. |
+| `SF_INDEX_FIRST_DELAY_S` | `60` | Seconds after `sf-agents` starts before the first look. |
+| `SF_INDEX_PAUSE_S` | `0.05` | Pause between batches of 500 events, so indexing leaves CPU for running scans. Raise it to slow indexing down. |
+
+`sf-api` needs `SF_QDRANT_BACKEND=http`, `SF_QDRANT_HOST`, `SF_QDRANT_PORT`, `SF_QDRANT_GRPC_PORT`, `SF_QDRANT_PREFIX` and
+`SF_AGENTS_URL` (set in the stack files from rc.52). Without them its search uses an in-memory store and finds nothing. The scan
+workers need none of these: with no Qdrant server configured they skip indexing.
+
+Each scan is indexed once; a marker stored in Qdrant records that it is complete, so the work survives a restart and is not repeated.
+Indexing a large scan runs at about 45 events a second and uses several CPU cores of `sf-agents` at low priority.
+
 ### AI model
 
 `sf-agents` uses `claude-sonnet-5-5` (`SF_LLM_MODEL`). Anthropic's safeguards on it can decline a request
