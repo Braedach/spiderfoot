@@ -306,24 +306,16 @@ function ReportTab({ scanId, scan }: { scanId: string; scan?: Scan }) {
 
   const generateMut = useMutation({
     mutationFn: async () => {
+      // The server builds the report from the scan's own events and correlations in the database, so the page sends only
+      // what the server cannot know: which scan, its name, how long it ran, and the map data. (It used to send the top 20
+      // finding types and 30 correlations; the server dropped their counts and risk, and the report then varied with the page.)
       const details = summaryData?.details ?? [];
-      const correlations = corrData?.correlations ?? [];
-      const findings = details.slice(0, 20).map((d: EventSummaryDetail) => ({
-        type: d.key, description: d.description, total: d.total, unique: d.unique_total,
-      }));
-
       return agentsApi.report({
         scan_id: scanId,
         target: scan?.target ?? '',
         scan_name: scan?.name ?? '',
-        findings,
-        correlations: correlations.map((c: ScanCorrelation) => ({
-          rule_id: c.rule_id, rule_name: c.rule_name, risk: c.rule_risk,
-          description: c.rule_descr, event_count: c.event_count,
-        })),
         stats: {
           total_events: details.reduce((s: number, d: EventSummaryDetail) => s + d.total, 0),
-          total_types: summaryData?.total_types ?? 0,
           scan_status: scan?.status,
           duration: formatDuration(scan?.started ?? 0, scan?.ended ?? 0),
         },

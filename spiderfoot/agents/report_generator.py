@@ -484,6 +484,38 @@ def _backfill_wanted(has_digest: bool) -> bool:
     return not has_digest
 
 
+_RISK_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+MAX_CORRELATIONS = 100
+
+
+def _load_correlations(scan_ids: List[str]) -> List[Dict[str, Any]]:
+    """The correlation results of the scans, read from the database (highest risk first). Never raises: [] on any failure.
+
+    The report used to depend on the browser sending these (and only the first 30, without their risk or event count), so the
+    same scan could give a different report depending on what the page held.
+    """
+    try:
+        from spiderfoot.db import SpiderFootDb
+        dsn = os.environ.get("SF_POSTGRES_DSN")
+        if not dsn or not scan_ids:
+            return []
+        dbh = SpiderFootDb({"__database": dsn, "__dbtype": "postgresql"})
+        out: List[Dict[str, Any]] = []
+        try:
+            for sid in scan_ids:
+                for r in dbh.scanCorrelationList(sid) or []:
+                    # id, title, rule_id, rule_risk, rule_name, rule_descr, rule_logic, event_count
+                    out.append({"rule_id": r[2], "rule_name": r[4] or r[1], "risk": str(r[3] or "").upper(),
+                                "description": r[5] or "", "event_count": int(r[7] or 0), "scan_id": sid})
+        finally:
+            dbh.close()
+        out.sort(key=lambda c: (_RISK_ORDER.get(c["risk"], 5), -c["event_count"]))
+        return out[:MAX_CORRELATIONS]
+    except Exception as e:
+        logger.warning("Correlations unavailable from the database, using what the caller sent: %s", e)
+        return []
+
+
 def _get_qdrant_context(
     scan_ids: List[str],
     target: str,
@@ -787,7 +819,8 @@ class ReportGeneratorAgent(BaseAgent):
         # ── Build the comprehensive user prompt ──
         qdrant_section = self._format_qdrant_context(qdrant_ctx, compact=bool(digest_section))
         findings_text = self._format_findings(findings[:100])
-        correlations_text = self._format_correlations(correlations[:30])
+        correlations = _load_correlations(scan_ids) or correlations       # from the database; the caller's list is the fallback
+        correlations_text = self._format_correlations(correlations[:MAX_CORRELATIONS])
         geo_section = self._format_geo_data(geo_data)
 
         title_hint = scan_name or target or "Target"
@@ -1059,8 +1092,11 @@ following the exact structure specified in your system instructions.
             return "No correlations found."
         lines = []
         for c in correlations:
+            risk = str(c.get("risk") or c.get("rule_risk") or "").upper()
+            count = c.get("event_count")
             lines.append(
-                f"- {c.get('type', c.get('rule_name', '?'))}: "
+                f"- {'[' + risk + '] ' if risk else ''}{c.get('type', c.get('rule_name', '?'))}"
+                f"{f' ({count} events)' if count else ''}: "
                 f"{c.get('description', c.get('rule_descr', ''))[:300]}"
             )
         return "\n".join(lines)
