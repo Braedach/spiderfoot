@@ -84,16 +84,3 @@ class TestDelete:
     def test_delete_unknown_404(self, client):
         assert client.delete("/reports/nope").status_code == 404
 
-
-class TestGenerate:
-    def test_generate_returns_202_and_seeds_store(self, client):
-        with patch.object(rep, "_generate_report_background"), \
-                patch.object(rep, "_get_scan_events",
-                             return_value=([], {"target": "example.com"})):
-            resp = client.post("/reports/generate",
-                              json={"scan_id": "scan-1", "report_type": "full"})
-        assert resp.status_code == 202
-        body = resp.json()
-        assert body["status"] == "pending"
-        # The new report is now retrievable from the store.
-        assert client.get(f"/reports/{body['report_id']}/status").status_code == 200

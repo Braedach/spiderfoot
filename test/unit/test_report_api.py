@@ -14,13 +14,10 @@ import pytest
 
 from spiderfoot.api.routers.reports import (
     ReportFormatEnum,
-    ReportGenerateRequest,
     ReportListItem,
-    ReportPreviewRequest,
     ReportResponse,
     ReportStatusResponse,
     ReportTypeEnum,
-    _generate_report_background,
     clear_store,
     delete_stored_report,
     get_stored_report,
@@ -104,30 +101,6 @@ class TestPydanticModels:
         assert ReportFormatEnum.HTML == "html"
         assert ReportFormatEnum.CSV == "csv"
 
-    def test_generate_request_defaults(self):
-        req = ReportGenerateRequest(scan_id="SCAN-001")
-        assert req.scan_id == "SCAN-001"
-        assert req.report_type == ReportTypeEnum.FULL
-        assert req.language == "English"
-        assert req.title is None
-        assert req.custom_instructions is None
-
-    def test_generate_request_custom(self):
-        req = ReportGenerateRequest(
-            scan_id="S-1",
-            report_type=ReportTypeEnum.EXECUTIVE,
-            title="My Report",
-            language="French",
-            custom_instructions="Focus on APT.",
-        )
-        assert req.report_type == ReportTypeEnum.EXECUTIVE
-        assert req.title == "My Report"
-
-    def test_preview_request(self):
-        req = ReportPreviewRequest(scan_id="SCAN-001")
-        assert req.scan_id == "SCAN-001"
-        assert req.custom_instructions is None
-
     def test_status_response(self):
         resp = ReportStatusResponse(
             report_id="R-1", scan_id="S-1", status="pending"
@@ -205,115 +178,6 @@ def _make_mock_report(executive_summary="No findings to report."):
     return mock_report
 
 
-class TestBackgroundGeneration:
-    @pytest.fixture(autouse=True)
-    def mock_llm(self):
-        """Prevent real LLM/network calls during background generation tests."""
-        with patch(
-            "spiderfoot.reporting.report_generator.ReportGenerator",
-        ) as mock_cls:
-            mock_cls.return_value.generate.side_effect = (
-                lambda events, metadata: _make_mock_report(
-                    "No findings to report." if not events else "Mock executive summary."
-                )
-            )
-            yield mock_cls
-
-    def test_generate_report_background_completes(self):
-        report_id = "RPT-BG-1"
-        store_report(report_id, _sample_stored_report(report_id, status="pending"))
-
-        _generate_report_background(
-            report_id=report_id,
-            scan_id="SCAN-001",
-            report_type="full",
-            title="BG Test Report",
-            language="English",
-            custom_instructions=None,
-            events=_sample_events(10),
-            scan_metadata={"scan_id": "SCAN-001", "target": "example.com"},
-        )
-
-        stored = get_stored_report(report_id)
-        assert stored["status"] == "completed"
-        assert stored["progress_pct"] == 100.0
-        assert stored["executive_summary"] is not None
-        assert len(stored["executive_summary"]) > 0
-        assert stored["generation_time_ms"] > 0
-
-    def test_generate_with_empty_events(self):
-        report_id = "RPT-BG-2"
-        store_report(report_id, _sample_stored_report(report_id, status="pending"))
-
-        _generate_report_background(
-            report_id=report_id,
-            scan_id="SCAN-002",
-            report_type="executive",
-            title=None,
-            language="English",
-            custom_instructions=None,
-            events=[],
-            scan_metadata={"scan_id": "SCAN-002", "target": "empty.com"},
-        )
-
-        stored = get_stored_report(report_id)
-        assert stored["status"] == "completed"
-        assert stored["executive_summary"] == "No findings to report."
-
-    def test_generate_nonexistent_report_id(self):
-        # Should not raise when report_id not in store
-        _generate_report_background(
-            report_id="NOPE",
-            scan_id="S-1",
-            report_type="full",
-            title=None,
-            language="English",
-            custom_instructions=None,
-            events=[],
-            scan_metadata={},
-        )
-        assert get_stored_report("NOPE") is None
-
-    def test_generate_recommendations_type(self):
-        report_id = "RPT-BG-3"
-        store_report(report_id, _sample_stored_report(report_id, status="pending"))
-
-        _generate_report_background(
-            report_id=report_id,
-            scan_id="SCAN-003",
-            report_type="recommendations",
-            title="Recs Only",
-            language="English",
-            custom_instructions="Focus on critical items",
-            events=_sample_events(5),
-            scan_metadata={"scan_id": "SCAN-003", "target": "test.com"},
-        )
-
-        stored = get_stored_report(report_id)
-        assert stored["status"] == "completed"
-
-    def test_generate_progress_tracking(self):
-        report_id = "RPT-BG-4"
-        stored = _sample_stored_report(report_id, status="pending")
-        stored["progress_pct"] = 0.0
-        store_report(report_id, stored)
-
-        _generate_report_background(
-            report_id=report_id,
-            scan_id="SCAN-004",
-            report_type="full",
-            title=None,
-            language="English",
-            custom_instructions=None,
-            events=_sample_events(15),
-            scan_metadata={"scan_id": "SCAN-004", "target": "test.com"},
-        )
-
-        result = get_stored_report(report_id)
-        assert result["progress_pct"] == 100.0
-        assert result["message"] == "Report generation completed"
-
-
 # ---------------------------------------------------------------------------
 # FastAPI endpoint tests (using TestClient)
 # ---------------------------------------------------------------------------
@@ -350,21 +214,6 @@ class TestAPIEndpoints:
             )
             yield mock_cls
 
-    def test_generate_report_endpoint(self, client):
-        with patch(
-            "spiderfoot.api.routers.reports._get_scan_events",
-            return_value=(_sample_events(5), {"scan_id": "S-1", "target": "t.com"}),
-        ):
-            resp = client.post("/api/reports/generate", json={
-                "scan_id": "S-1",
-                "report_type": "full",
-            })
-        assert resp.status_code == 202
-        data = resp.json()
-        assert data["scan_id"] == "S-1"
-        assert data["status"] == "pending"
-        assert "report_id" in data
-
     def test_get_report_completed(self, client):
         report_id = "RPT-TEST-1"
         store_report(report_id, _sample_stored_report(report_id))
@@ -393,17 +242,6 @@ class TestAPIEndpoints:
     def test_get_report_status_not_found(self, client):
         resp = client.get("/api/reports/NOPE/status")
         assert resp.status_code == 404
-
-    def test_preview_report(self, client):
-        with patch(
-            "spiderfoot.api.routers.reports._get_scan_events",
-            return_value=(_sample_events(5), {"scan_id": "S-1", "target": "t.com"}),
-        ):
-            resp = client.post("/api/reports/preview", json={"scan_id": "S-1"})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["scan_id"] == "S-1"
-        assert "executive_summary" in data
 
     def test_export_markdown(self, client):
         report_id = "RPT-EXP-1"

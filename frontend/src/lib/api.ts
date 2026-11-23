@@ -1015,9 +1015,6 @@ export interface Report {
 }
 
 export const reportApi = {
-  generate: (data: { scan_id: string; format?: string; template_id?: string; include_raw?: boolean }, signal?: AbortSignal) =>
-    api.post<{ report_id: string; status: string }>('/api/reports/generate', data, { signal }).then((r) => r.data),
-
   get: (id: string, signal?: AbortSignal) =>
     api.get<Report>(`/api/reports/${id}`, { signal }).then((r) => r.data),
 
