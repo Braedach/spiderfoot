@@ -365,6 +365,93 @@ async def analyze_document(request: DocumentRequest):
     return result.to_dict()
 
 
+# ── Reports as background jobs, so the page can show real progress ─────────────────────────────────────────────
+# POST /report/start returns at once with a job id; GET /report/status/{id} says which step the report is on and for how long;
+# GET /report/result/{id} returns what POST /report returns. (POST /report still works as before.) Jobs live in this process:
+# a restart of the agents service loses them, and a status call then answers 404.
+_report_jobs: Dict[str, Dict[str, Any]] = {}
+_MAX_REPORT_JOBS = 50
+
+
+def _job_view(job: Dict[str, Any]) -> Dict[str, Any]:
+    from spiderfoot.agents.report_generator import REPORT_PHASES
+    now = time.time()
+    keys = [k for k, _ in REPORT_PHASES]
+    current = job.get("phase")
+    index = keys.index(current) if current in keys else -1
+    steps = []
+    for i, (key, label) in enumerate(REPORT_PHASES):
+        state = "done" if job["status"] == "done" or i < index else "running" if (i == index and job["status"] == "running") else "waiting"
+        steps.append({"key": key, "label": label, "state": state})
+    return {"job_id": job["id"], "status": job["status"], "phase": current, "steps": steps,
+            "elapsed_s": round((job.get("ended") or now) - job["started"], 1),
+            "phase_elapsed_s": round((job.get("ended") or now) - job.get("phase_started", job["started"]), 1),
+            "error": job.get("error")}
+
+
+async def _run_report_job(job: Dict[str, Any], request: "ReportRequest") -> None:
+    def progress(key: str) -> None:
+        job["phase"], job["phase_started"] = key, time.time()
+
+    try:
+        agent = _agents["report_generator"]
+        event = {
+            "event_type": "REPORT_REQUEST", "scan_id": request.scan_id, "scan_ids": request.scan_ids, "target": request.target,
+            "scan_name": request.scan_name, "findings": request.findings, "correlations": request.correlations,
+            "stats": request.stats, "agent_results": request.agent_results, "geo_data": request.geo_data,
+            "id": f"report-{int(time.time())}", "_progress": progress,
+        }
+        start = time.perf_counter()
+        result = await agent.handle_event(event)
+        if result is None:
+            raise RuntimeError("The report agent returned no result (it may have timed out)")
+        result_dict = result.to_dict()
+        if result_dict.get("result_type") == "error":
+            raise RuntimeError(str(result_dict.get("data", {}).get("error") or "The report could not be generated"))
+        await asyncio.to_thread(_persist_report, request, result_dict, (time.perf_counter() - start) * 1000)
+        job["result"], job["status"] = result_dict, "done"
+    except Exception as exc:                                  # the page shows this message; it must say what happened
+        logger.warning("Report job %s failed: %s", job["id"], exc)
+        job["error"], job["status"] = str(exc)[:500] or exc.__class__.__name__, "error"
+    finally:
+        job["ended"] = time.time()
+
+
+@app.post("/report/start")
+async def start_report(request: ReportRequest):
+    """Start a report as a background job and return its id at once."""
+    if "report_generator" not in _agents:
+        raise HTTPException(status_code=503, detail="Report generator agent not available")
+    while len(_report_jobs) >= _MAX_REPORT_JOBS:                # drop the oldest finished job (or the oldest job)
+        done = [k for k, j in _report_jobs.items() if j["status"] != "running"]
+        _report_jobs.pop(done[0] if done else next(iter(_report_jobs)))
+    job = {"id": uuid.uuid4().hex, "status": "running", "phase": None, "started": time.time(), "result": None}
+    job["phase_started"] = job["started"]
+    _report_jobs[job["id"]] = job
+    job["task"] = asyncio.create_task(_run_report_job(job, request))
+    return _job_view(job)
+
+
+@app.get("/report/status/{job_id}")
+async def report_status(job_id: str):
+    job = _report_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="No such report job (the agents service may have restarted)")
+    return _job_view(job)
+
+
+@app.get("/report/result/{job_id}")
+async def report_result(job_id: str):
+    job = _report_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="No such report job (the agents service may have restarted)")
+    if job["status"] == "running":
+        raise HTTPException(status_code=409, detail="The report is still being written")
+    if job["status"] == "error":
+        raise HTTPException(status_code=500, detail=job.get("error") or "The report failed")
+    return job["result"]
+
+
 @app.post("/report")
 async def generate_report(request: ReportRequest):
     """Generate a scan report."""

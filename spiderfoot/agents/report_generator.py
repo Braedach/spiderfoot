@@ -787,6 +787,24 @@ def _get_qdrant_context(
 # Report Generator Agent
 # ---------------------------------------------------------------------------
 
+REPORT_PHASES = (
+    ("digest", "Reading the scan's events"),
+    ("context", "Preparing the context"),
+    ("model", "Writing the report (the model is working; this takes a few minutes)"),
+    ("finish", "Formatting the report"),
+)
+
+
+def _phase(event: Dict[str, Any], key: str) -> None:
+    """Tell a caller that asked for progress (event['_progress']) which step the report has reached. Never raises."""
+    callback = event.get("_progress")
+    if callable(callback):
+        try:
+            callback(key)
+        except Exception:                                   # a progress report must never stop the report
+            logger.debug("progress callback failed", exc_info=True)
+
+
 class ReportGeneratorAgent(BaseAgent):
     """Generates structured CTI reports using Qdrant vector context + LLM."""
 
@@ -810,7 +828,9 @@ class ReportGeneratorAgent(BaseAgent):
             scan_ids = [scan_id]
 
         # ── The scan digest: built from every event, and the main input of the report ──
+        _phase(event, "digest")
         digest = _load_digest(scan_ids, target)
+        _phase(event, "context")
         digest_section = digest["text"]
 
         # ── Retrieve rich context from Qdrant (indexing the scan first only when there is no digest to rely on) ──
@@ -892,6 +912,7 @@ following the exact structure specified in your system instructions.
                     scan_id or ",".join(scan_ids), prompt_chars, prompt_chars // 4, len(digest_section), len(qdrant_section))
 
         # ── Call LLM with retries ──
+        _phase(event, "model")
         last_error = None
         for attempt in range(3):
             try:
@@ -909,6 +930,7 @@ following the exact structure specified in your system instructions.
                 )
 
                 # Strip markdown fences if the model wraps output
+                _phase(event, "finish")
                 report_md = self._clean_markdown(response)
                 if digest["appendix"]:
                     report_md = report_md.rstrip() + "\n\n---\n\n" + digest["appendix"] + "\n"
