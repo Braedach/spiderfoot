@@ -1,8 +1,8 @@
 # =============================================================================
 # deploy/stack-docker.yml
-# Version: 2.6.5
+# Version: 2.7.0
 # Created: 2026-10-23
-# Updated: 2026-11-14
+# Updated: 2026-11-24
 #
 # Summary:
 #   Purpose:
@@ -106,6 +106,8 @@
 #       isolated for testing. IDS/IPS systems may react, to the scans and to Tor.
 #
 # Changelog:
+#   2.7.0 (2026-11-24) - Mirrors stack-podman.yml 2.17.0: sf-api gets the Qdrant and sf-agents URL settings; sf-agents gets the optional
+#     AI report and indexing settings (rc.52).
 #   2.6.5 (2026-11-14) - Mirrors stack-podman.yml 2.16.4: sf-tor accepts its own loopback address (stops the healthcheck log noise).
 #   2.6.4 (2026-11-14) - Mirrors stack-podman.yml 2.16.3: sf-tor healthcheck written without spaces. Also includes the 2.6.3 Summary rewrite.
 #   2.6.3 (2026-11-14) - Comments only: the Summary now mirrors stack-podman.yml 2.16.2 section for section (services, AI, Tor, modules,
@@ -442,6 +444,14 @@ services:
       # 500 events regardless. 2000 comfortably covers the 687-event scan
       # that originally exposed the cap.
       - SF_REPORT_MAX_EVENTS_PER_SCAN=${SF_REPORT_MAX_EVENTS_PER_SCAN:-2000}
+      # AI report and search indexing. All optional: the values shown are the defaults. See deploy/REFERENCE.md ("AI report and search indexing").
+      - SF_REPORT_DIGEST_MAX_CHARS=${SF_REPORT_DIGEST_MAX_CHARS:-900000}
+      - SF_REPORT_BACKFILL=${SF_REPORT_BACKFILL:-auto}
+      - SF_INDEX_AUTO=${SF_INDEX_AUTO:-true}
+      - SF_INDEX_RECENT_DAYS=${SF_INDEX_RECENT_DAYS:-14}
+      - SF_INDEX_POLL_S=${SF_INDEX_POLL_S:-120}
+      - SF_INDEX_FIRST_DELAY_S=${SF_INDEX_FIRST_DELAY_S:-60}
+      - SF_INDEX_PAUSE_S=${SF_INDEX_PAUSE_S:-0.05}
       # Real-time Qdrant indexing via EventBus - CURRENTLY INERT, same as
       # sf-celery-worker above (reverted 2026-09-11, kept for later). This
       # is also where the indexer itself would run once re-enabled.

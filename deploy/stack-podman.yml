@@ -1,8 +1,8 @@
 # =============================================================================
 # deploy/stack-podman.yml  (was stack-spiderfoot-podman.yml in the repo root until 2.8.0)
-# Version: 2.16.4
+# Version: 2.17.0
 # Created: 2026-08-06
-# Updated: 2026-11-14
+# Updated: 2026-11-24
 #
 # Summary:
 #   Purpose:
@@ -99,6 +99,11 @@
 #       to investigate. IDS/IPS systems may react, to the scans and to Tor.
 #
 # Changelog:
+#   2.17.0 (2026-11-24) - sf-api gets SF_QDRANT_BACKEND/HOST/PORT/GRPC_PORT/PREFIX and SF_AGENTS_URL. It had no Qdrant settings, so it used an
+#     in-memory store and its search could never see the real vector store; it now reads it and asks sf-agents to index a scan that is not
+#     indexed yet (rc.52). sf-agents gets the optional AI report and indexing settings (SF_REPORT_DIGEST_MAX_CHARS, SF_REPORT_BACKFILL,
+#     SF_INDEX_AUTO, SF_INDEX_RECENT_DAYS, SF_INDEX_POLL_S, SF_INDEX_FIRST_DELAY_S, SF_INDEX_PAUSE_S), all with the defaults shown.
+#     Needs images v6.1.0-bd.1-rc.52 or later. The scan workers need no change (they skip indexing when they have no Qdrant server).
 #   2.16.4 (2026-11-14) - sf-tor: the SOCKS access rule now accepts the container's own loopback address, so the healthcheck no longer
 #     produces a "Denying socks connection from untrusted address 127.0.0.1" log line every 30 seconds. No other change.
 #   2.16.3 (2026-11-14) - sf-tor healthcheck fixed: podman-compose re-splits the command on spaces, so the 2.16.0 check failed with a
@@ -443,6 +448,14 @@ services:
       # 500 events regardless. 2000 comfortably covers the 687-event scan
       # that originally exposed the cap.
       - SF_REPORT_MAX_EVENTS_PER_SCAN=${SF_REPORT_MAX_EVENTS_PER_SCAN:-2000}
+      # AI report and search indexing. All optional: the values shown are the defaults. See deploy/REFERENCE.md ("AI report and search indexing").
+      - SF_REPORT_DIGEST_MAX_CHARS=${SF_REPORT_DIGEST_MAX_CHARS:-900000}
+      - SF_REPORT_BACKFILL=${SF_REPORT_BACKFILL:-auto}
+      - SF_INDEX_AUTO=${SF_INDEX_AUTO:-true}
+      - SF_INDEX_RECENT_DAYS=${SF_INDEX_RECENT_DAYS:-14}
+      - SF_INDEX_POLL_S=${SF_INDEX_POLL_S:-120}
+      - SF_INDEX_FIRST_DELAY_S=${SF_INDEX_FIRST_DELAY_S:-60}
+      - SF_INDEX_PAUSE_S=${SF_INDEX_PAUSE_S:-0.05}
       # Real-time Qdrant indexing via EventBus - CURRENTLY INERT, same as
       # sf-celery-worker above (reverted 2026-09-11, kept for later). This
       # is also where the indexer itself would run once re-enabled.
