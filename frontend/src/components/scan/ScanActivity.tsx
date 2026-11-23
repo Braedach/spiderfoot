@@ -13,6 +13,7 @@ export function formatQuiet(seconds: number): string {
 }
 
 const QUIET_WARNING_S = 600;   // ten minutes without a new result is worth saying
+const MAX_LISTED = 8;          // modules named in the list; early in a scan dozens work at once
 const TAIL_MAX_MODULES = 5;    // this few modules left, with most of the scan done, is a slow tail
 const TAIL_MIN_DONE = 0.8;     // share of modules that have produced results before it counts as a tail
 
@@ -29,7 +30,13 @@ export function formatElapsed(seconds: number): string {
  * arriving.
  */
 export function ScanActivity({ progress }: { progress: ScanProgressSnapshot }) {
-  const running = progress.running ?? [];
+  // the storage module is always busy and is not something a person is waiting for
+  const running = (progress.running ?? []).filter((m) => !m.name.startsWith('sfp__stor_'));
+  // the ones that matter first: those with a progress line of their own, then the longest running
+  const listed = [...running]
+    .sort((a, b) => Number(!!b.progress) - Number(!!a.progress) || b.running_for_s - a.running_for_s)
+    .slice(0, MAX_LISTED);
+  const hidden = running.length - listed.length;
   const quiet = progress.quiet_for_s ?? 0;
   const stalled = quiet >= QUIET_WARNING_S && running.length > 0;
   const done = progress.modules_total > 0 ? progress.modules_finished / progress.modules_total : 0;
@@ -45,7 +52,7 @@ export function ScanActivity({ progress }: { progress: ScanProgressSnapshot }) {
         <>
           <div className="font-medium">Working now ({running.length})</div>
           <ul className="space-y-1">
-            {running.map((m) => (
+            {listed.map((m) => (
               <li key={m.name} className="flex items-center gap-2">
                 <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
                 <span className="font-mono">{friendlyModuleName(m.name)}</span>
@@ -56,6 +63,7 @@ export function ScanActivity({ progress }: { progress: ScanProgressSnapshot }) {
               </li>
             ))}
           </ul>
+          {hidden > 0 && <div className="text-xs opacity-70">and {hidden} more working</div>}
         </>
       ) : (
         <div className="font-medium">No module is working: the scan is finishing up.</div>

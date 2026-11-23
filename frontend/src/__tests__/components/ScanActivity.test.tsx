@@ -53,6 +53,19 @@ describe('ScanActivity', () => {
     expect(screen.queryByText(/Slow tail/)).toBeNull();                                  // too many still working to call it a tail
   });
 
+  it('lists the most relevant modules first, leaves out the storage module, and counts the rest', () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({ name: `sfp_m${i}`, progress: '', running_for_s: i, results: 0 }));
+    const running = [{ name: 'sfp__stor_db', progress: '', running_for_s: 9999, results: 0 },
+      { name: 'sfp_tool_nikto', progress: '3 of 9 servers tested so far', running_for_s: 5, results: 1 }, ...many];
+    render(<ScanActivity progress={{ ...base, running }} />);
+    expect(screen.getByText('Working now (31)')).toBeTruthy();                           // the storage module is not counted
+    expect(screen.queryByText('stor_db')).toBeNull();
+    expect(screen.getByText('nikto')).toBeTruthy();                                      // has a progress line, so it is listed first
+    expect(screen.getByText('m29')).toBeTruthy();                                        // then the longest running
+    expect(screen.queryByText('m0')).toBeNull();
+    expect(screen.getByText('and 23 more working')).toBeTruthy();                        // 31 working, 8 listed
+  });
+
   it('formats names and quiet times for people', () => {
     expect(formatElapsed(40)).toBe('40s');
     expect(formatElapsed(600)).toBe('10m');
