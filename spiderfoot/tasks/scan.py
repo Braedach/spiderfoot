@@ -43,6 +43,7 @@ logger = logging.getLogger("sf.tasks.scan")
 # function on this same worker, not via .delay() — no need to round-trip
 # through the Celery broker for a task already running in-process.
 _PROGRESS_POLL_INTERVAL = 3.0  # seconds
+_RATE_WINDOW_S = 300.0         # results per minute is measured over the last five minutes
 
 
 def _poll_scan_progress(
@@ -60,6 +61,9 @@ def _poll_scan_progress(
     scanner without instrumenting it directly).
     """
     modules_total = len(module_list) or 1
+    history: list[tuple[float, int]] = []          # (time, events stored): the rate is over the last few minutes
+    last_change = time.time()
+    last_total = -1
     while not stop_event.wait(_PROGRESS_POLL_INTERVAL):
         try:
             from spiderfoot.db import SpiderFootDb
@@ -75,11 +79,22 @@ def _poll_scan_progress(
             # the scanner keeps updated on its own wait loop - safe to read
             # from here since the poller runs as a separate thread in the
             # same worker process as the scanner, not a separate process.
-            from spiderfoot.scan.scanner import get_running_module_count
+            from spiderfoot.scan.scanner import get_running_module_count, get_scan_activity
             modules_running = get_running_module_count(scan_id)
+            now = time.time()
+            if events_produced != last_total:
+                last_total, last_change = events_produced, now
+            history.append((now, events_produced))
+            while len(history) > 1 and now - history[0][0] > _RATE_WINDOW_S:
+                history.pop(0)
+            span = history[-1][0] - history[0][0]
+            per_min = (history[-1][1] - history[0][1]) / span * 60 if span >= 30 else 0.0
+            activity = get_scan_activity(scan_id)
             update_scan_progress(
                 scan_id, progress, modules_with_events, modules_total, events_produced,
                 modules_running=modules_running,
+                running_modules=activity.get("running", []), queued_events=activity.get("queued_events", 0),
+                events_per_min=round(per_min, 1), quiet_for_s=round(now - last_change, 1),
             )
         except Exception as poll_err:
             logger.debug("scan.progress_poll_failed scan_id=%s: %s", scan_id, poll_err)
@@ -561,6 +576,10 @@ def update_scan_progress(
     modules_total: int,
     events_produced: int,
     modules_running: int = 0,
+    running_modules: list | None = None,
+    queued_events: int = 0,
+    events_per_min: float = 0.0,
+    quiet_for_s: float = 0.0,
 ) -> None:
     """Lightweight task to update scan progress in Redis.
 
@@ -581,6 +600,10 @@ def update_scan_progress(
         "modules_total": modules_total,
         "modules_running": modules_running,
         "events_produced": events_produced,
+        "running_modules": running_modules or [],
+        "queued_events": queued_events,
+        "events_per_min": events_per_min,
+        "quiet_for_s": quiet_for_s,
         "updated_at": time.time(),
     }
 

@@ -74,6 +74,7 @@ class sfp_tool_naabu(SpiderFootAsyncPlugin):
     _spent = 0.0  # seconds of naabu time used so far this scan (reset in setup)
     _skipped = ()  # hosts not scanned because the limit or budget was spent (a list, set in setup)
     _reported = 0  # how many of _skipped finish() has already put in the log
+    _done = 0  # hosts finished this scan (for the progress line)
     _lock = threading.Lock()  # handleEvent runs in a thread pool: counters and the seen-set need it (replaced in setup)
 
     def setup(self, sfc, userOpts=None):
@@ -84,6 +85,7 @@ class sfp_tool_naabu(SpiderFootAsyncPlugin):
         self._spent = 0.0
         self._skipped = []
         self._reported = 0
+        self._done = 0
         self._lock = threading.Lock()
 
     def watchedEvents(self):
@@ -114,6 +116,11 @@ class sfp_tool_naabu(SpiderFootAsyncPlugin):
                        f"{int(self._spent)} s used) is spent. The full list is in the log when the scan ends.")
         else:
             self.info(f"naabu: not scanning {target} (limit or time budget spent)")
+
+    def progress_text(self):
+        """One line for the scan's progress panel."""
+        seen = len(self.results or {})
+        return f"{self._done} of {seen} hosts scanned so far" if seen else ""
 
     def finish(self):
         """Called by the scanner when the scan wraps up (possibly more than once; the hook is finish, not finished)."""
@@ -234,6 +241,7 @@ class sfp_tool_naabu(SpiderFootAsyncPlugin):
         finally:
             with self._lock:
                 self._spent += time.monotonic() - started
+                self._done += 1
             try:
                 os.unlink(output_path)
             except OSError:

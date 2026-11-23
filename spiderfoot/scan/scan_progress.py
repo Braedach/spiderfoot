@@ -77,6 +77,11 @@ class ProgressSnapshot:
     throughput_eps: float  # events per second
     eta_seconds: float | None
     modules_running: int = 0
+    # What the scan is doing right now (filled from the worker; empty when unknown):
+    running: list = field(default_factory=list)   # [{"name": "sfp_tool_nikto", "progress": "55 of 118 servers tested"}]
+    queued_events: int = 0                        # events waiting for a module to take them
+    events_per_min: float = 0.0                   # results stored per minute over the last few minutes
+    quiet_for_s: float = 0.0                      # seconds since the last result was stored
 
     def to_dict(self) -> dict:
         """Return a dictionary representation."""
@@ -89,6 +94,13 @@ class ProgressSnapshot:
             "events_total": self.events_total,
             "throughput_eps": round(self.throughput_eps, 2),
             "eta_seconds": round(self.eta_seconds, 1) if self.eta_seconds is not None else None,
+            # the names the web page reads (it looked for these and found nothing, so it showed 0%)
+            "overall_percent": round(self.overall_pct, 2),
+            "modules_finished": self.modules_completed,
+            "running": self.running,
+            "queued_events": self.queued_events,
+            "events_per_min": round(self.events_per_min, 1),
+            "quiet_for_s": round(self.quiet_for_s, 1),
         }
 
 

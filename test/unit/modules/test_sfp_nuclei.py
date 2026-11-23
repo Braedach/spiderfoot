@@ -276,3 +276,11 @@ class TestNucleiModule(TestModuleBase):
         for name in ("tools-only", "web-app-test", "ip-address"):
             opts = mgr.get(name).module_options.get("sfp_nuclei")
             self.assertTrue(opts and all(opts[k] == v for k, v in NUCLEI_COVERAGE.items()), name)
+
+    def test_progress_line_counts_targets_done_of_targets_found(self):
+        m = self._module()
+        self._stub_run()
+        self.assertEqual(m.progress_text(), "")
+        for i in range(3):
+            m.handleEvent(self._ev("IP_ADDRESS", f"198.51.100.{i}"))
+        self.assertEqual(m.progress_text(), "3 of 3 targets scanned so far")
