@@ -118,3 +118,10 @@ def test_concurrent_events_scan_each_host_once():
         [t.start() for t in ts]
         [t.join() for t in ts]
     assert run.call_count == 20 and m._runs == 20
+
+
+def test_progress_line_counts_hosts_done_of_hosts_found():
+    m = make()
+    assert m.progress_text() == ""
+    run_hosts(m, ["a.example.org", "b.example.org"])
+    assert m.progress_text() == "2 of 2 hosts scanned so far"

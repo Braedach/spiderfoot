@@ -119,6 +119,7 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
     _spent = 0.0       # seconds of nuclei time used so far this scan
     _skipped = ()      # targets not tested because the limit or budget was spent
     _reported = 0      # how many of _skipped finish() has already put in the log
+    _done = 0          # runs finished this scan (for the progress line)
     _lock = threading.Lock()   # handleEvent runs in a thread pool; replaced per scan in setup
     SOFT_BUDGET = 0.7  # past this share of total_budget each run is cut to SHORT_RUN seconds
     HARD_BUDGET = 1.5  # past this share nothing new starts and the targets left are listed
@@ -135,6 +136,7 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
         self._spent = 0.0
         self._skipped = []
         self._reported = 0
+        self._done = 0
         self._lock = threading.Lock()
 
     def watchedEvents(self):
@@ -502,6 +504,11 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
         else:
             self.info(f"nuclei: not testing {target} (limit or time budget spent)")
 
+    def progress_text(self):
+        """One line for the scan's progress panel."""
+        found = self._runs + len(self._skipped)          # not len(results): that holds several keys for one target
+        return f"{self._done} of {found} targets scanned so far" if found else ""
+
     def finish(self):
         """Called when the scan wraps up (possibly more than once): list the targets that were left untested."""
         with self._lock:
@@ -557,6 +564,7 @@ class sfp_nuclei(SpiderFootAsyncPlugin):
         finally:
             with self._lock:
                 self._spent += time.monotonic() - started
+                self._done += 1
 
         for finding in findings:
             if self.checkForStop():

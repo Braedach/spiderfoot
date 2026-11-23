@@ -56,6 +56,27 @@ def get_running_module_count(scan_id: str) -> int:
     return _running_module_counts.get(scan_id, 0)
 
 
+# What the scan is doing right now, for the progress panel: which modules are running (with a progress line when the module
+# offers one) and how many events are waiting. Refreshed by threadsFinished() on the scanner's own loop; read by the poller.
+_scan_activity: dict[str, dict] = {}
+
+
+def get_scan_activity(scan_id: str) -> dict:
+    """``{"running": [{"name", "progress"}], "queued_events": int}`` for a scan the worker is running; {} when unknown."""
+    return _scan_activity.get(scan_id, {})
+
+
+def module_progress_text(module: Any) -> str:
+    """The progress line a module offers ("55 of 118 servers tested"), or "". Never raises: a module's own bug must not
+    reach the scan."""
+    try:
+        text = getattr(module, "progress_text", "")
+        text = text() if callable(text) else text
+        return str(text)[:120] if text else ""
+    except Exception:
+        return ""
+
+
 def startSpiderFootScanner(loggingQueue: Any, *args, **kwargs) -> SpiderFootScanner:
     """Initialize and start the SpiderFootScanner.
 
@@ -772,6 +793,7 @@ class SpiderFootScanner():
                 mod._stopScanning = True
             self.__sharedThreadPool.shutdown(wait=True)
             _running_module_counts.pop(self.__scanId, None)
+            _scan_activity.pop(self.__scanId, None)
 
     @staticmethod
     def _extractIPForSharedCheck(data: str) -> str | None:
@@ -983,6 +1005,11 @@ class SpiderFootScanner():
 
         with suppress(Exception):
             _running_module_counts[self.__scanId] = len(modules_running)
+            _scan_activity[self.__scanId] = {
+                "running": [{"name": m.__name__, "progress": module_progress_text(m)}
+                            for m in self.__moduleInstances.values() if getattr(m, "running", False)],
+                "queued_events": sum(q for _, q in modules_waiting),
+            }
 
         modules_errored = []
         for m in self.__moduleInstances.values():

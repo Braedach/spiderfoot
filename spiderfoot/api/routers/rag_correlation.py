@@ -16,11 +16,17 @@ POST /rag/search       — raw semantic search
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+import os
 import time
+import urllib.request
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from ..dependencies import optional_auth, get_api_key
@@ -509,6 +515,51 @@ async def multidim_analyze(req: MultiDimRequest,
     )
 
 
+def _agents_index(scan_id: str, start: bool) -> dict | None:
+    """Ask the agents service (the only one with the real vector store) for a scan's indexing status, starting it when ``start``.
+
+    None when the agents service cannot be reached.
+    """
+    base = os.environ.get("SF_AGENTS_URL", "http://sf-agents:8100").rstrip("/")
+    request = urllib.request.Request(f"{base}/index/{quote(scan_id, safe='')}", method="POST" if start else "GET",
+                                     data=b"" if start else None)
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            data = json.load(response)
+        return data if isinstance(data, dict) else None
+    except Exception as exc:
+        log.warning("Agents indexing service unavailable for scan %s: %s", scan_id, exc)
+        return None
+
+
+def _indexing_response(status: dict) -> JSONResponse:
+    """202: the scan is not indexed yet. Says how far it has got and where to look."""
+    return JSONResponse(status_code=202, content={
+        "status": status.get("status", "queued"),
+        "scan_id": status.get("scan_id"),
+        "indexed": status.get("indexed"),
+        "total": status.get("total"),
+        "percent": status.get("percent"),
+        "message": "This scan is being indexed for search. Try again shortly; progress is at GET /api/rag/index/{scan_id}.",
+    })
+
+
+@router.get("/rag/index/{scan_id}", summary="How far a scan's indexing for search has got")
+async def index_status(scan_id: str, _auth: str = optional_auth_dep) -> dict:
+    status = await asyncio.to_thread(_agents_index, scan_id, False)
+    if status is None:
+        raise HTTPException(status_code=503, detail="The indexing service is not reachable")
+    return status
+
+
+@router.post("/rag/index/{scan_id}", summary="Index a scan for search now (ahead of the queue)")
+async def index_now(scan_id: str, _auth: str = optional_auth_dep) -> dict:
+    status = await asyncio.to_thread(_agents_index, scan_id, True)
+    if status is None:
+        raise HTTPException(status_code=503, detail="The indexing service is not reachable")
+    return status
+
+
 @router.post("/rag/search", response_model=SearchResponse,
              summary="Raw semantic search in vector store")
 async def semantic_search(req: SearchRequest,
@@ -518,6 +569,9 @@ async def semantic_search(req: SearchRequest,
     When ``scan_id`` is provided, the search is scoped to the per-scan
     collection managed by the collection manager (``scan_{scan_id}``).
     Otherwise falls back to the global ``osint_events`` collection.
+
+    A scan that is not indexed yet answers ``202`` with its indexing progress (and starts the indexing), so a first search of
+    a large scan reports "indexing, 40% done" instead of returning nothing.
     """
     t0 = time.perf_counter()
 
@@ -527,8 +581,16 @@ async def semantic_search(req: SearchRequest,
         emb = get_embedding_service()
         vec = emb.embed_text(req.query)
 
-        # If a scan_id is provided, route through the collection manager
+        # If a scan_id is provided, the scan must be indexed: ask the indexing service (this also starts the indexing of a scan
+        # that is not done, ahead of the queue), and answer 202 with the progress instead of searching an empty index.
+        indexed = None
         if req.scan_id:
+            indexed = await asyncio.to_thread(_agents_index, req.scan_id, True)
+            if indexed is not None and indexed.get("status") != "done":
+                return _indexing_response(indexed)
+
+        if req.scan_id and indexed is None:
+            # The indexing service cannot be reached: the old behaviour (the per-scan collection, if one exists)
             mgr = _get_collection_manager()
             points = mgr.search_scan(
                 scan_id=req.scan_id,
@@ -548,6 +610,8 @@ async def semantic_search(req: SearchRequest,
 
             payload_filter = None
             conditions: dict[str, Any] = {}
+            if req.scan_id:                                       # an indexed scan lives in the shared collection, tagged by scan
+                conditions["scan_id"] = req.scan_id
             if req.event_type:
                 conditions["event_type"] = req.event_type
             if conditions:

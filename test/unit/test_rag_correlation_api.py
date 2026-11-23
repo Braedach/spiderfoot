@@ -245,3 +245,94 @@ class TestModels:
         ])
         assert r.fusion_method == "weighted"
         assert r.min_score == 0.3
+
+
+# ---------------------------------------------------------------------------
+# Searching one scan: the scan must be indexed, and the answer says how far indexing has got
+# ---------------------------------------------------------------------------
+
+class TestScanSearchOnDemand:
+    def _setup(self, mock_qd_fn, mock_emb_fn):
+        from types import SimpleNamespace
+        mock_emb = MagicMock()
+        mock_emb.embed_text.return_value = SimpleNamespace(vector=[0.1] * 384)
+        mock_emb_fn.return_value = mock_emb
+        mock_qd = MagicMock()
+        mock_qd.search.return_value = SimpleNamespace(points=[SimpleNamespace(id="e1", score=0.9, payload={"data": "x"})])
+        mock_qd_fn.return_value = mock_qd
+        return mock_qd
+
+    @patch("spiderfoot.services.embedding_service.get_embedding_service")
+    @patch("spiderfoot.ai.qdrant_client.get_qdrant_client")
+    def test_a_scan_that_is_not_indexed_answers_202_with_progress_and_starts_the_indexing(self, mock_qd_fn, mock_emb_fn):
+        qd = self._setup(mock_qd_fn, mock_emb_fn)
+        with patch.object(rag_mod, "_agents_index", return_value={"scan_id": "S1", "status": "indexing", "indexed": 400,
+                                                                   "total": 1000, "percent": 40.0}) as ask:
+            resp = client.post(f"{API}/search", json={"query": "q", "scan_id": "S1"})
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["status"] == "indexing" and body["percent"] == 40.0 and body["indexed"] == 400 and body["total"] == 1000
+        assert "indexed for search" in body["message"]
+        ask.assert_called_once_with("S1", True)                              # asking also starts it, ahead of the queue
+        qd.search.assert_not_called()                                         # nothing was searched: the index is not ready
+
+    @patch("spiderfoot.services.embedding_service.get_embedding_service")
+    @patch("spiderfoot.ai.qdrant_client.get_qdrant_client")
+    def test_a_finished_index_is_searched_by_scan_in_the_shared_collection(self, mock_qd_fn, mock_emb_fn):
+        qd = self._setup(mock_qd_fn, mock_emb_fn)
+        with patch.object(rag_mod, "_agents_index", return_value={"scan_id": "S1", "status": "done"}):
+            resp = client.post(f"{API}/search", json={"query": "q", "scan_id": "S1", "event_type": "IP_ADDRESS"})
+        assert resp.status_code == 200 and resp.json()["total"] == 1
+        kwargs = qd.search.call_args.kwargs
+        assert kwargs["collection"] == "osint_events"
+        assert len(kwargs["filter_"].must) == 2                                # scan_id and event_type
+
+    @patch("spiderfoot.services.embedding_service.get_embedding_service")
+    @patch("spiderfoot.ai.qdrant_client.get_qdrant_client")
+    def test_a_search_without_a_scan_is_unchanged_and_never_asks_the_indexer(self, mock_qd_fn, mock_emb_fn):
+        self._setup(mock_qd_fn, mock_emb_fn)
+        with patch.object(rag_mod, "_agents_index") as ask:
+            resp = client.post(f"{API}/search", json={"query": "q"})
+        assert resp.status_code == 200
+        ask.assert_not_called()
+
+    @patch("spiderfoot.services.embedding_service.get_embedding_service")
+    @patch("spiderfoot.ai.qdrant_client.get_qdrant_client")
+    def test_when_the_indexing_service_is_unreachable_the_old_per_scan_search_is_used(self, mock_qd_fn, mock_emb_fn):
+        self._setup(mock_qd_fn, mock_emb_fn)
+        mgr = MagicMock()
+        mgr.search_scan.return_value = []
+        with patch.object(rag_mod, "_agents_index", return_value=None), \
+                patch.object(rag_mod, "_get_collection_manager", return_value=mgr):
+            resp = client.post(f"{API}/search", json={"query": "q", "scan_id": "S1"})
+        assert resp.status_code == 200 and resp.json()["total"] == 0
+        mgr.search_scan.assert_called_once()
+
+    def test_the_status_and_start_routes_pass_through_and_say_503_when_unreachable(self):
+        with patch.object(rag_mod, "_agents_index", return_value={"scan_id": "S1", "status": "queued", "percent": 0.0}) as ask:
+            assert client.get(f"{API}/index/S1").json()["status"] == "queued"
+            ask.assert_called_with("S1", False)
+            assert client.post(f"{API}/index/S1").status_code == 200
+            ask.assert_called_with("S1", True)
+        with patch.object(rag_mod, "_agents_index", return_value=None):
+            assert client.get(f"{API}/index/S1").status_code == 503
+            assert client.post(f"{API}/index/S1").status_code == 503
+
+    def test_the_agents_call_is_built_safely_and_failures_return_none(self):
+        import io
+        import json as _json
+
+        class Resp(io.BytesIO):
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        seen = {}
+
+        def fake_urlopen(request, timeout=0):
+            seen["url"], seen["method"] = request.full_url, request.get_method()
+            return Resp(_json.dumps({"status": "done"}).encode())
+        with patch.object(rag_mod.urllib.request, "urlopen", fake_urlopen):
+            assert rag_mod._agents_index("a/b?c", True) == {"status": "done"}
+            assert seen["method"] == "POST" and "a%2Fb%3Fc" in seen["url"]          # the id cannot change the path
+            assert rag_mod._agents_index("S1", False) == {"status": "done"} and seen["method"] == "GET"
+        with patch.object(rag_mod.urllib.request, "urlopen", side_effect=OSError("down")):
+            assert rag_mod._agents_index("S1", False) is None

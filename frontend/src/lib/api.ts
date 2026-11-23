@@ -754,7 +754,28 @@ export const agentApi = {
 };
 
 // ── Agents Report API (used by ReportTab & WorkspaceReportCard) ──
+export interface ReportJobStep { key: string; label: string; state: 'done' | 'running' | 'waiting' }
+export interface ReportJob {
+  job_id: string;
+  status: 'running' | 'done' | 'error';
+  phase: string | null;
+  steps: ReportJobStep[];
+  elapsed_s: number;
+  phase_elapsed_s: number;
+  error?: string | null;
+}
+type ReportRequest = { scan_id?: string; scan_ids?: string[]; target: string; scan_name?: string; findings?: Array<Record<string, unknown>>; correlations?: Array<Record<string, unknown>>; stats?: Record<string, unknown>; agent_results?: Array<Record<string, unknown>>; geo_data?: Record<string, unknown>; workspace_id?: string };
+
 export const agentsApi = {
+  /** Start an AI report as a background job; returns at once with its id and steps. */
+  reportStart: (data: ReportRequest, signal?: AbortSignal) =>
+    api.post<ReportJob>('/api/agents/report/start', data, { signal }).then((r) => r.data),
+  /** Which step the report is on, and for how long. */
+  reportStatus: (jobId: string, signal?: AbortSignal) =>
+    api.get<ReportJob>(`/api/agents/report/status/${jobId}`, { signal }).then((r) => r.data),
+  /** The finished report (the same shape `report` returns). */
+  reportResult: (jobId: string, signal?: AbortSignal) =>
+    api.get(`/api/agents/report/result/${jobId}`, { signal }).then((r) => r.data),
   report: (data: { scan_id?: string; scan_ids?: string[]; target: string; scan_name?: string; findings?: Array<Record<string, unknown>>; correlations?: Array<Record<string, unknown>>; stats?: Record<string, unknown>; agent_results?: Array<Record<string, unknown>>; geo_data?: Record<string, unknown>; workspace_id?: string }, signal?: AbortSignal) =>
     api.post('/api/agents/report', data, { signal }).then((r) => r.data),
 };
@@ -1015,9 +1036,6 @@ export interface Report {
 }
 
 export const reportApi = {
-  generate: (data: { scan_id: string; format?: string; template_id?: string; include_raw?: boolean }, signal?: AbortSignal) =>
-    api.post<{ report_id: string; status: string }>('/api/reports/generate', data, { signal }).then((r) => r.data),
-
   get: (id: string, signal?: AbortSignal) =>
     api.get<Report>(`/api/reports/${id}`, { signal }).then((r) => r.data),
 

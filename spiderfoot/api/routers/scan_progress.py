@@ -123,6 +123,13 @@ def _redis_snapshot(scan_id: str) -> "ProgressSnapshot | None":
     events_total = int(_f("events_produced"))
     progress_pct = _f("progress")
 
+    try:
+        running = json.loads(data.get("running_modules") or "[]")
+        if not isinstance(running, list):
+            running = []
+    except ValueError:
+        running = []
+
     return ProgressSnapshot(
         timestamp=updated_at,
         overall_pct=progress_pct,
@@ -132,6 +139,10 @@ def _redis_snapshot(scan_id: str) -> "ProgressSnapshot | None":
         events_total=events_total,
         throughput_eps=0.0,
         eta_seconds=None,
+        running=running,
+        queued_events=int(_f("queued_events")),
+        events_per_min=_f("events_per_min"),
+        quiet_for_s=_f("quiet_for_s"),
     )
 
 
@@ -164,6 +175,7 @@ async def _sse_generator(
     """
     start = time.monotonic()
     last_pct = -1.0
+    last_data: dict | None = None
 
     while (time.monotonic() - start) < timeout:
         tracker = get_tracker(scan_id)
@@ -182,11 +194,14 @@ async def _sse_generator(
         data = snapshot.to_dict()
         data["scan_id"] = scan_id
 
-        # Always send if progress changed or on first tick
+        # Send when anything changed (not only the percentage: it sits at its cap for hours while the scan's tail runs, and
+        # the page then got nothing but heartbeats), and on the first tick
         pct = snapshot.overall_pct
-        if pct != last_pct:
+        comparable = {k: v for k, v in data.items() if k != "timestamp"}
+        if pct != last_pct or comparable != last_data:
             yield _sse_event("progress", data)
             last_pct = pct
+            last_data = comparable
 
             # Check for completion
             if pct >= 100.0:

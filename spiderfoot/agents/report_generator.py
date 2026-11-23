@@ -323,64 +323,53 @@ SYSTEM_PROMPT = SYSTEM_PROMPT + EVIDENCE_RULES
 # Celery-based scan path — see the FIX note in _get_qdrant_context below)
 # ---------------------------------------------------------------------------
 
+def _load_scan_events(scan_id: str) -> List[Any]:
+    """A scan's events as OSINTEvent objects, read straight from Postgres (ROOT left out). Raises on any failure.
+
+    Row schema, confirmed from the SQL in spiderfoot/db/db_event.py's scanResultEvent() (its own comment: "Legacy tuple order:
+    generated, data, module, hash, type, source_event_hash, confidence, visibility, risk"): 0=generated, 1=data, 2=module, 3=hash,
+    4=type, 5=source_event_hash, 6=confidence, 7=visibility, 8=risk. No separate "source_data" column exists.
+    """
+    from spiderfoot.db import SpiderFootDb
+    from spiderfoot.correlation.vector import OSINTEvent
+
+    dsn = os.environ.get("SF_POSTGRES_DSN")
+    if not dsn:
+        raise RuntimeError("SF_POSTGRES_DSN is not set: cannot read the scan's events")
+    dbh = SpiderFootDb({"__database": dsn, "__dbtype": "postgresql"})
+    try:
+        raw = dbh.scanResultEvent(scan_id) or []
+    finally:
+        dbh.close()
+
+    events: List[Any] = []
+    for row in raw:
+        if not isinstance(row, (list, tuple)) or len(row) < 9:
+            continue
+        event_type = row[4]
+        if event_type == "ROOT":
+            continue
+        events.append(OSINTEvent(
+            event_id=str(row[3]) if row[3] else f"{scan_id}-{len(events)}",
+            event_type=str(event_type),
+            data=str(row[1]) if row[1] is not None else "",
+            source_module=str(row[2]) if row[2] is not None else "",
+            scan_id=scan_id,
+            confidence=float(row[6]) if row[6] is not None else 100.0,
+            risk=int(row[8]) if row[8] is not None else 0,
+            timestamp=float(row[0]) if row[0] else 0.0,
+        ))
+    return events
+
+
 def _backfill_scan_into_qdrant(scan_id: str, engine: "VectorCorrelationEngine") -> int:  # noqa: F821
-    """Read a scan's events straight from Postgres and index them into Qdrant.
+    """Read a scan's events straight from Postgres and index them into Qdrant (the old, in-request path: see _backfill_wanted).
 
-    EventIndexer is meant to do this in real time via EventBus subscription,
-    but spiderfoot.tasks.scan.run_scan (the task this fork's celery-worker
-    actually runs) never publishes to the EventBus and nothing ever starts
-    that indexer — confirmed by grep, zero call sites outside its own
-    definition. Reads via the same direct-SpiderFootDb pattern used to fix
-    the export endpoint (spiderfoot/api/routers/export.py's _get_dbh), since
-    ServiceRegistry's DataService factory is equally unavailable here.
-
-    Returns the number of events actually indexed (0 on any failure — never
-    raises, so a Qdrant/Postgres hiccup degrades the report rather than
-    failing report generation outright).
+    Returns the number of events actually indexed (0 on any failure, never raises), so a Qdrant or Postgres hiccup degrades the
+    report instead of failing it. The background indexer (spiderfoot/agents/indexer.py) is the normal way a scan gets indexed.
     """
     try:
-        from spiderfoot.db import SpiderFootDb
-        from spiderfoot.correlation.vector import OSINTEvent
-
-        dsn = os.environ.get("SF_POSTGRES_DSN")
-        if not dsn:
-            logger.warning("SF_POSTGRES_DSN not set — cannot backfill scan %s", scan_id)
-            return 0
-
-        dbh = SpiderFootDb({"__database": dsn, "__dbtype": "postgresql"})
-        try:
-            raw = dbh.scanResultEvent(scan_id) or []
-        finally:
-            dbh.close()
-
-        # Row schema, confirmed straight from the actual SQL in
-        # spiderfoot/db/db_event.py's scanResultEvent() (its own comment:
-        # "Legacy tuple order: generated, data, module, hash, type,
-        # source_event_hash, confidence, visibility, risk") — NOT the
-        # ordering assumed from export.py's SSE/streaming handlers, which
-        # turned out to be independently wrong too (they were trusted as a
-        # reference without ever being checked against the real query).
-        # 0=generated, 1=data, 2=module, 3=hash, 4=type, 5=source_event_hash,
-        # 6=confidence, 7=visibility, 8=risk. No separate "source_data"
-        # column exists at all.
-        events: List[Any] = []
-        for row in raw:
-            if not isinstance(row, (list, tuple)) or len(row) < 9:
-                continue
-            event_type = row[4]
-            if event_type == "ROOT":
-                continue
-            events.append(OSINTEvent(
-                event_id=str(row[3]) if row[3] else f"{scan_id}-{len(events)}",
-                event_type=str(event_type),
-                data=str(row[1]) if row[1] is not None else "",
-                source_module=str(row[2]) if row[2] is not None else "",
-                scan_id=scan_id,
-                confidence=float(row[6]) if row[6] is not None else 100.0,
-                risk=int(row[8]) if row[8] is not None else 0,
-                timestamp=float(row[0]) if row[0] else 0.0,
-            ))
-
+        events = _load_scan_events(scan_id)
         if not events:
             return 0
         return engine.index_events(events)
@@ -429,12 +418,12 @@ def _load_digest(scan_ids: List[str], target: str) -> dict:
     try:
         from spiderfoot import SpiderFootHelpers
         from spiderfoot.db import SpiderFootDb
-        from spiderfoot.agents.report_digest import build_digest, render_appendix, render_digest
+        from spiderfoot.agents.report_digest import DEFAULT_BUDGET_CHARS, build_digest, render_appendix, render_digest
 
         dsn = os.environ.get("SF_POSTGRES_DSN")
         if not dsn or not scan_ids:
             return empty
-        budget = int(os.environ.get("SF_REPORT_DIGEST_MAX_CHARS", "300000"))
+        budget = int(os.environ.get("SF_REPORT_DIGEST_MAX_CHARS", str(DEFAULT_BUDGET_CHARS)))
         dbh = SpiderFootDb({"__database": dsn, "__dbtype": "postgresql"})
         texts, appendices, digests = [], [], []
         try:
@@ -468,10 +457,59 @@ def _load_digest(scan_ids: List[str], target: str) -> dict:
 # Qdrant Context Retrieval (supports multiple scan IDs for workspace reports)
 # ---------------------------------------------------------------------------
 
+def _backfill_wanted(has_digest: bool) -> bool:
+    """Whether to index a scan's events into Qdrant now, inside the report request.
+
+    Indexing embeds every event on the CPU (about 50 a second: 42,000 events took 16 minutes) and the agent gives up after
+    600 s, so a big scan's first report timed out before the model was even called. When the scan digest is present it
+    carries the report and the vector context is a few hundred characters, so the indexing is skipped. SF_REPORT_BACKFILL:
+    ``auto`` (default: skip when there is a digest), ``always`` (the old behaviour) or ``never``.
+    """
+    mode = os.environ.get("SF_REPORT_BACKFILL", "auto").strip().lower()
+    if mode == "always":
+        return True
+    if mode == "never":
+        return False
+    return not has_digest
+
+
+_RISK_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+MAX_CORRELATIONS = 100
+
+
+def _load_correlations(scan_ids: List[str]) -> List[Dict[str, Any]]:
+    """The correlation results of the scans, read from the database (highest risk first). Never raises: [] on any failure.
+
+    The report used to depend on the browser sending these (and only the first 30, without their risk or event count), so the
+    same scan could give a different report depending on what the page held.
+    """
+    try:
+        from spiderfoot.db import SpiderFootDb
+        dsn = os.environ.get("SF_POSTGRES_DSN")
+        if not dsn or not scan_ids:
+            return []
+        dbh = SpiderFootDb({"__database": dsn, "__dbtype": "postgresql"})
+        out: List[Dict[str, Any]] = []
+        try:
+            for sid in scan_ids:
+                for r in dbh.scanCorrelationList(sid) or []:
+                    # id, title, rule_id, rule_risk, rule_name, rule_descr, rule_logic, event_count
+                    out.append({"rule_id": r[2], "rule_name": r[4] or r[1], "risk": str(r[3] or "").upper(),
+                                "description": r[5] or "", "event_count": int(r[7] or 0), "scan_id": sid})
+        finally:
+            dbh.close()
+        out.sort(key=lambda c: (_RISK_ORDER.get(c["risk"], 5), -c["event_count"]))
+        return out[:MAX_CORRELATIONS]
+    except Exception as e:
+        logger.warning("Correlations unavailable from the database, using what the caller sent: %s", e)
+        return []
+
+
 def _get_qdrant_context(
     scan_ids: List[str],
     target: str,
     max_events_per_scan: int | None = None,
+    backfill: bool = True,
 ) -> dict:
     """Retrieve enriched context from Qdrant vector DB for one or more scans.
 
@@ -542,6 +580,10 @@ def _get_qdrant_context(
                     filter_=Filter(must=[Filter.match("scan_id", sid)]),
                 )
                 if existing:
+                    continue
+                if not backfill:
+                    logger.info("Scan %s is not indexed in Qdrant; not indexing it inside the report request "
+                                "(the scan digest carries the report; SF_REPORT_BACKFILL=always to index)", sid)
                     continue
                 backfilled = _backfill_scan_into_qdrant(sid, engine)
                 logger.info(
@@ -734,6 +776,24 @@ def _get_qdrant_context(
 # Report Generator Agent
 # ---------------------------------------------------------------------------
 
+REPORT_PHASES = (
+    ("digest", "Reading the scan's events"),
+    ("context", "Preparing the context"),
+    ("model", "Writing the report (the model is working; this takes a few minutes)"),
+    ("finish", "Formatting the report"),
+)
+
+
+def _phase(event: Dict[str, Any], key: str) -> None:
+    """Tell a caller that asked for progress (event['_progress']) which step the report has reached. Never raises."""
+    callback = event.get("_progress")
+    if callable(callback):
+        try:
+            callback(key)
+        except Exception:                                   # a progress report must never stop the report
+            logger.debug("progress callback failed", exc_info=True)
+
+
 class ReportGeneratorAgent(BaseAgent):
     """Generates structured CTI reports using Qdrant vector context + LLM."""
 
@@ -756,17 +816,20 @@ class ReportGeneratorAgent(BaseAgent):
         if not scan_ids and scan_id:
             scan_ids = [scan_id]
 
-        # ── Retrieve rich context from Qdrant ──
-        qdrant_ctx = _get_qdrant_context(scan_ids, target)
-
-        # ── The scan digest: built from every event, added to (not replacing) the context above ──
+        # ── The scan digest: built from every event, and the main input of the report ──
+        _phase(event, "digest")
         digest = _load_digest(scan_ids, target)
+        _phase(event, "context")
         digest_section = digest["text"]
+
+        # ── Retrieve rich context from Qdrant (indexing the scan first only when there is no digest to rely on) ──
+        qdrant_ctx = _get_qdrant_context(scan_ids, target, backfill=_backfill_wanted(bool(digest_section)))
 
         # ── Build the comprehensive user prompt ──
         qdrant_section = self._format_qdrant_context(qdrant_ctx, compact=bool(digest_section))
         findings_text = self._format_findings(findings[:100])
-        correlations_text = self._format_correlations(correlations[:30])
+        correlations = _load_correlations(scan_ids) or correlations       # from the database; the caller's list is the fallback
+        correlations_text = self._format_correlations(correlations[:MAX_CORRELATIONS])
         geo_section = self._format_geo_data(geo_data)
 
         title_hint = scan_name or target or "Target"
@@ -838,6 +901,7 @@ following the exact structure specified in your system instructions.
                     scan_id or ",".join(scan_ids), prompt_chars, prompt_chars // 4, len(digest_section), len(qdrant_section))
 
         # ── Call LLM with retries ──
+        _phase(event, "model")
         last_error = None
         for attempt in range(3):
             try:
@@ -855,6 +919,7 @@ following the exact structure specified in your system instructions.
                 )
 
                 # Strip markdown fences if the model wraps output
+                _phase(event, "finish")
                 report_md = self._clean_markdown(response)
                 if digest["appendix"]:
                     report_md = report_md.rstrip() + "\n\n---\n\n" + digest["appendix"] + "\n"
@@ -1038,8 +1103,11 @@ following the exact structure specified in your system instructions.
             return "No correlations found."
         lines = []
         for c in correlations:
+            risk = str(c.get("risk") or c.get("rule_risk") or "").upper()
+            count = c.get("event_count")
             lines.append(
-                f"- {c.get('type', c.get('rule_name', '?'))}: "
+                f"- {'[' + risk + '] ' if risk else ''}{c.get('type', c.get('rule_name', '?'))}"
+                f"{f' ({count} events)' if count else ''}: "
                 f"{c.get('description', c.get('rule_descr', ''))[:300]}"
             )
         return "\n".join(lines)

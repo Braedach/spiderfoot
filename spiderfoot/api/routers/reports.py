@@ -1,13 +1,13 @@
 """
 Report API Endpoints for SpiderFoot.
 
-FastAPI router providing endpoints for LLM-powered report generation,
-retrieval, and export. Supports both synchronous and background generation.
+FastAPI router for stored reports: retrieval, listing, deletion, export and PDF.
+
+The AI report itself is written by the agents service (POST /api/agents/report) and saved into the same store. The routes that
+used to start a report here (/reports/generate and /reports/preview) used a hard-coded mock model and were removed.
 
 Endpoints:
-  POST /api/reports/generate       - Start async report generation
   GET  /api/reports/{report_id}    - Retrieve generated report
-  POST /api/reports/preview        - Quick executive summary (sync)
   GET  /api/reports/{report_id}/export - Export report in various formats
   GET  /api/reports                - List generated reports
   DELETE /api/reports/{report_id}  - Delete a report
@@ -61,7 +61,7 @@ def _get_store() -> ReportStore | None:
         return None
 
 try:
-    from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+    from fastapi import APIRouter, Depends, HTTPException, Query
     from fastapi.responses import StreamingResponse
     HAS_FASTAPI = True
 except ImportError:
@@ -88,26 +88,6 @@ class ReportFormatEnum(str, Enum):
     JSON = "json"
     PLAIN_TEXT = "plain_text"
     CSV = "csv"
-
-
-class ReportGenerateRequest(BaseModel):
-    """Request body for report generation."""
-    scan_id: str = Field(..., description="ID of the scan to generate a report for")
-    report_type: ReportTypeEnum = Field(
-        ReportTypeEnum.FULL,
-        description="Type of report to generate",
-    )
-    title: str | None = Field(None, description="Custom report title")
-    language: str = Field("English", description="Report language")
-    custom_instructions: str | None = Field(
-        None, description="Additional instructions for the LLM"
-    )
-
-
-class ReportPreviewRequest(BaseModel):
-    """Request body for quick executive summary preview."""
-    scan_id: str = Field(..., description="ID of the scan")
-    custom_instructions: str | None = Field(None)
 
 
 class ReportStatusResponse(BaseModel):
@@ -279,106 +259,6 @@ def clear_store() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Background task: generate report
-# ---------------------------------------------------------------------------
-
-def _generate_report_background(
-    report_id: str,
-    scan_id: str,
-    report_type: str,
-    title: str | None,
-    language: str,
-    custom_instructions: str | None,
-    events: list[dict[str, Any]],
-    scan_metadata: dict[str, Any],
-) -> None:
-    """Run report generation as a background task.
-
-    Updates the report store with progress and final result.
-    """
-    from spiderfoot.reporting.report_generator import (
-        GeneratedReport,
-        ReportGenerator,
-        ReportGeneratorConfig,
-        ReportType,
-    )
-
-    stored = get_stored_report(report_id)
-    if stored is None:
-        return
-
-    update_stored_report(report_id, {"status": "generating", "progress_pct": 10.0})
-
-    try:
-        # Map string to enum
-        type_map = {
-            "full": ReportType.FULL,
-            "executive": ReportType.EXECUTIVE,
-            "technical": ReportType.TECHNICAL,
-            "risk_assessment": ReportType.RISK_ASSESSMENT,
-            "recommendations": ReportType.RECOMMENDATIONS,
-        }
-
-        config = ReportGeneratorConfig(
-            report_type=type_map.get(report_type, ReportType.FULL),
-            report_title=title or "",
-            language=language,
-            custom_instructions=custom_instructions or "",
-        )
-
-        # Section completion callback for progress tracking
-        sections_done = [0]
-        total_sections = [3]  # estimate
-
-        def on_section(section_title: str, _content: str) -> None:
-            """Track report section completion progress."""
-            sections_done[0] += 1
-            pct = min(10 + (sections_done[0] / max(total_sections[0], 1)) * 80, 90)
-            update_stored_report(report_id, {
-                "progress_pct": pct,
-                "message": f"Generated: {section_title}",
-            })
-
-        config.on_section_complete = on_section
-
-        generator = ReportGenerator(config)
-        report = generator.generate(events, scan_metadata)
-
-        # Store completed report
-        update_stored_report(report_id, {
-            "status": "completed",
-            "progress_pct": 100.0,
-            "title": report.title,
-            "report_type": report.report_type.value,
-            "executive_summary": report.executive_summary,
-            "recommendations": report.recommendations,
-            "sections": [
-                {
-                    "title": s.title,
-                    "content": s.content,
-                    "section_type": s.section_type,
-                    "source_event_count": s.source_event_count,
-                    "token_count": s.token_count,
-                }
-                for s in report.sections
-            ],
-            "metadata": report.metadata,
-            "generation_time_ms": report.generation_time_ms,
-            "total_tokens_used": report.total_tokens_used,
-            "message": "Report generation completed",
-        })
-
-        log.info("Report %s generated in %.0fms", report_id, report.generation_time_ms)
-
-    except Exception as e:
-        update_stored_report(report_id, {
-            "status": "failed",
-            "message": "Generation failed",
-        })
-        log.error("Report %s generation failed: %s", report_id, e, exc_info=True)
-
-
-# ---------------------------------------------------------------------------
 # Scan event retrieval helper
 # ---------------------------------------------------------------------------
 
@@ -448,63 +328,6 @@ else:
 
     router = APIRouter(dependencies=[Depends(get_api_key)])
 
-    @router.post(
-        "/reports/generate",
-        response_model=ReportStatusResponse,
-        status_code=202,
-        summary="Start report generation",
-        description="Initiates async report generation for a scan. Returns a report ID for polling.",
-    )
-    async def generate_report(
-        request: ReportGenerateRequest,
-        background_tasks: BackgroundTasks,
-        scan_service: ScanService = Depends(get_scan_service),
-    ) -> ReportStatusResponse:
-        """Start asynchronous report generation for a scan."""
-        report_id = str(uuid.uuid4())
-
-        # Retrieve scan events
-        events, scan_metadata = _get_scan_events(request.scan_id, scan_service=scan_service)
-
-        # Initialize report in store
-        store_report(report_id, {
-            "report_id": report_id,
-            "scan_id": request.scan_id,
-            "title": request.title or f"Report: {scan_metadata.get('target', 'Unknown')}",
-            "status": "pending",
-            "report_type": request.report_type.value,
-            "progress_pct": 0.0,
-            "message": "Queued for generation",
-            "executive_summary": None,
-            "recommendations": None,
-            "sections": [],
-            "metadata": {},
-            "generation_time_ms": 0.0,
-            "total_tokens_used": 0,
-            "created_at": time.time(),
-        })
-
-        # Start background generation
-        background_tasks.add_task(
-            _generate_report_background,
-            report_id=report_id,
-            scan_id=request.scan_id,
-            report_type=request.report_type.value,
-            title=request.title,
-            language=request.language,
-            custom_instructions=request.custom_instructions,
-            events=events,
-            scan_metadata=scan_metadata,
-        )
-
-        return ReportStatusResponse(
-            report_id=report_id,
-            scan_id=request.scan_id,
-            status="pending",
-            progress_pct=0.0,
-            message="Report generation queued",
-        )
-
     @router.get(
         "/reports/{report_id}",
         response_model=ReportResponse,
@@ -549,30 +372,6 @@ else:
             progress_pct=stored.get("progress_pct", 0.0),
             message=stored.get("message", ""),
         )
-
-    @router.post(
-        "/reports/preview",
-        summary="Generate executive summary preview",
-        description="Synchronously generates a quick executive summary for immediate display.",
-    )
-    async def preview_report(request: ReportPreviewRequest,
-                            scan_service: ScanService = Depends(get_scan_service)) -> dict[str, Any]:
-        """Generate a quick executive summary preview synchronously."""
-        from spiderfoot.reporting.report_generator import ReportGenerator, ReportGeneratorConfig
-
-        events, scan_metadata = _get_scan_events(request.scan_id, scan_service=scan_service)
-
-        config = ReportGeneratorConfig(
-            custom_instructions=request.custom_instructions or "",
-        )
-        generator = ReportGenerator(config)
-        summary = generator.generate_executive_only(events, scan_metadata)
-
-        return {
-            "scan_id": request.scan_id,
-            "executive_summary": summary,
-            "target": scan_metadata.get("target", "Unknown"),
-        }
 
     @router.get(
         "/reports/{report_id}/export",

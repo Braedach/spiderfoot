@@ -1,13 +1,13 @@
 import { memo, useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { safeSetItem, safeRemoveItem } from '../../lib/safeStorage';
+import { safeSetItem, safeGetItem, safeRemoveItem } from '../../lib/safeStorage';
 import {
   scanApi, agentsApi, reportsApi, formatDuration,
-  type Scan, type ScanEvent, type ScanCorrelation, type EventSummaryDetail,
+  type ReportJob, type Scan, type ScanEvent, type ScanCorrelation, type EventSummaryDetail,
 } from '../../lib/api';
 import {
   Brain, Edit3, Save, Sparkles, Loader2, FileText,
-  AlertTriangle, BarChart3, Shield, MapPin, Download, Trash2,
+  AlertTriangle, BarChart3, Shield, MapPin, Download, Trash2, Check, Circle,
 } from 'lucide-react';
 import { DropdownMenu, DropdownItem, EmptyState, ConfirmDialog } from '../ui';
 import { sanitizeHTML } from '../../lib/sanitize';
@@ -304,41 +304,84 @@ function ReportTab({ scanId, scan }: { scanId: string; scan?: Scan }) {
     return { countries, coordinates, addresses };
   }, [geoInfoData, geoCoordsData, geoCountryData, geoAddrData]);
 
+  // The report is written by a background job on the server: this starts it, then asks every 2 seconds which step it is on.
+  // The job id is kept so a refresh (or another tab) picks the same job up again instead of starting a second one.
+  const jobKey = `sf_report_job_${scanId}`;
+  const [job, setJob] = useState<ReportJob | null>(null);
+  const [jobError, setJobError] = useState<string | null>(null);
+  const isGenerating = job?.status === 'running';
+
   const generateMut = useMutation({
     mutationFn: async () => {
+      // The server builds the report from the scan's own events and correlations in the database, so the page sends only
+      // what the server cannot know: which scan, its name, how long it ran, and the map data. (It used to send the top 20
+      // finding types and 30 correlations; the server dropped their counts and risk, and the report then varied with the page.)
       const details = summaryData?.details ?? [];
-      const correlations = corrData?.correlations ?? [];
-      const findings = details.slice(0, 20).map((d: EventSummaryDetail) => ({
-        type: d.key, description: d.description, total: d.total, unique: d.unique_total,
-      }));
-
-      return agentsApi.report({
+      return agentsApi.reportStart({
         scan_id: scanId,
         target: scan?.target ?? '',
         scan_name: scan?.name ?? '',
-        findings,
-        correlations: correlations.map((c: ScanCorrelation) => ({
-          rule_id: c.rule_id, rule_name: c.rule_name, risk: c.rule_risk,
-          description: c.rule_descr, event_count: c.event_count,
-        })),
         stats: {
           total_events: details.reduce((s: number, d: EventSummaryDetail) => s + d.total, 0),
-          total_types: summaryData?.total_types ?? 0,
           scan_status: scan?.status,
           duration: formatDuration(scan?.started ?? 0, scan?.ended ?? 0),
         },
         geo_data: geoPayload,
       });
     },
-    onSuccess: (data) => {
-      const md = extractReportMarkdown(data, scan?.target ?? '');
-      setReportContent(md);
-      safeSetItem(storageKey, md);
+    onSuccess: (started) => {
+      setJobError(null);
+      setJob(started);
+      safeSetItem(jobKey, started.job_id);
     },
     onError: (err: Error) => {
-      console.error('Failed to generate report:', err);
+      console.error('Failed to start the report:', err);
+      setJobError('The report could not be started. Check that the AI service is running and try again.');
     },
   });
+
+  // Pick up a job this browser started earlier (a refresh, or a return to the page)
+  useEffect(() => {
+    const saved = safeGetItem(jobKey);
+    if (!saved) return;
+    agentsApi.reportStatus(saved)
+      .then((j) => { if (j.status === 'running') setJob(j); else safeRemoveItem(jobKey); })
+      .catch(() => safeRemoveItem(jobKey));
+  }, [jobKey]);
+
+  useEffect(() => {
+    if (!job || job.status !== 'running') return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const j = await agentsApi.reportStatus(job.job_id);
+        if (cancelled) return;
+        setJob(j);
+        if (j.status === 'done') {
+          const data = await agentsApi.reportResult(job.job_id);
+          if (cancelled) return;
+          const md = extractReportMarkdown(data, scan?.target ?? '');
+          setReportContent(md);
+          safeSetItem(storageKey, md);
+          safeRemoveItem(jobKey);
+          queryClient.invalidateQueries({ queryKey: ['stored-reports', scanId] });
+        } else if (j.status === 'error') {
+          setJobError(j.error || 'The report failed.');
+          safeRemoveItem(jobKey);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        const status = (err as { response?: { status?: number } })?.response?.status;
+        setJobError(status === 404
+          ? 'The report was lost because the AI service restarted. Generate it again.'
+          : 'Lost contact with the AI service. The report may still finish: reload this page in a minute.');
+        setJob(null);
+        if (status === 404) safeRemoveItem(jobKey);
+      }
+    };
+    const timer = setInterval(tick, 2000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [job?.job_id, job?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const generateClientReport = useCallback(() => {
     const details = summaryData?.details ?? [];
@@ -519,9 +562,9 @@ ${html}
           <button
             className="btn-primary"
             onClick={() => generateMut.mutate()}
-            disabled={generateMut.isPending}
+            disabled={generateMut.isPending || isGenerating}
           >
-            {generateMut.isPending ? (
+            {generateMut.isPending || isGenerating ? (
               <><Loader2 className="h-4 w-4 animate-spin" /> Generating...</>
             ) : (
               <><Sparkles className="h-4 w-4" /> Generate AI Report</>
@@ -533,10 +576,29 @@ ${html}
         </div>
       </div>
 
-      {generateMut.isError && (
-        <div className="flex items-center gap-2 text-red-400 text-sm bg-red-900/10 border border-red-800/30 rounded-lg px-4 py-2">
-          <AlertTriangle className="h-4 w-4" />
-          Report generation failed. Try 'Quick Report' for a client-side summary.
+      {jobError && (
+        <div role="alert" className="flex items-center gap-2 text-red-400 text-sm bg-red-900/10 border border-red-800/30 rounded-lg px-4 py-2">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>{jobError} You can also try 'Quick Report' for a client-side summary.</span>
+        </div>
+      )}
+
+      {isGenerating && job && (
+        <div role="status" aria-live="polite" className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-sm space-y-2">
+          <div className="font-medium">
+            Writing the AI report: {Math.floor(job.elapsed_s / 60)}m {Math.floor(job.elapsed_s % 60)}s so far
+          </div>
+          <ul className="space-y-1">
+            {job.steps.map((step) => (
+              <li key={step.key} className={step.state === 'waiting' ? 'opacity-50 flex items-center gap-2' : 'flex items-center gap-2'}>
+                {step.state === 'done' ? <Check className="h-4 w-4 text-green-400" />
+                  : step.state === 'running' ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : <Circle className="h-4 w-4" />}
+                <span>{step.label}{step.state === 'running' ? ` (${Math.floor(job.phase_elapsed_s)}s)` : ''}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="text-xs opacity-70">A large scan can take several minutes. You can leave this page: the report keeps being written.</div>
         </div>
       )}
 
@@ -590,7 +652,7 @@ ${html}
           description="Click 'Generate AI Report' to create a comprehensive threat intelligence report based on the scan data, or 'Quick Report' for a client-side summary."
           action={
             <div className="flex gap-2">
-              <button className="btn-primary" onClick={() => generateMut.mutate()} disabled={generateMut.isPending}>
+              <button className="btn-primary" onClick={() => generateMut.mutate()} disabled={generateMut.isPending || isGenerating}>
                 <Sparkles className="h-4 w-4" /> Generate AI Report
               </button>
               <button className="btn-secondary" onClick={generateClientReport}>

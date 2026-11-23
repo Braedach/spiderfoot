@@ -198,3 +198,10 @@ def test_concurrent_events_run_each_server_once_and_account_every_second():
         [t.join() for t in threads]
     assert run.call_count == 20 and m._runs == 20 and clock["n"] == 0
     assert m._spent > 0.0
+
+
+def test_progress_line_counts_servers_done_of_servers_found():
+    m = make()
+    assert m.progress_text() == ""                                        # nothing found yet: no line
+    run_hosts(m, [f"https://h{i}.example.org/" for i in range(3)])
+    assert m.progress_text() == "3 of 3 servers tested so far"

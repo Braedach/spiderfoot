@@ -13,6 +13,7 @@ import {
   GeoMapTab, ReportTab, SettingsTab, LogTab, ExportDropdown, IaCTab,
 } from '../components/scan';
 import { useScanProgress } from '../hooks/useScanProgress';
+import { ScanActivity } from '../components/scan/ScanActivity';
 import { useNotificationStore } from '../lib/notifications';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 
@@ -164,6 +165,7 @@ export default function ScanDetailPage() {
               />
             </div>
           )}
+          {isRunning(scan) && progress && <ScanActivity progress={progress} />}
           {/* Celebration banner */}
           {showCelebration && (
             <div className="flex items-center gap-3 px-4 py-3 bg-green-900/20 border border-green-800/40 rounded-xl animate-fade-in-up">

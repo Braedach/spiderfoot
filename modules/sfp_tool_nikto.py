@@ -54,6 +54,7 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
     _spent = 0.0  # seconds of nikto time used so far this scan (reset in setup)
     _skipped = ()  # servers not tested because the limit or budget was spent (a list, set in setup)
     _reported = 0  # how many of _skipped finish() has already put in the log
+    _done = 0  # runs finished this scan (for the progress line)
     _lock = threading.Lock()  # handleEvent runs in a thread pool: the counters and the seen-set need it (replaced in setup)
 
     opts = {
@@ -99,6 +100,7 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
         self._spent = 0.0
         self._skipped = []
         self._reported = 0
+        self._done = 0
         self._lock = threading.Lock()
         self._catchall = None
 
@@ -190,6 +192,11 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
                        f"{int(self._spent)} s used) is spent. The full list is in the log when the scan ends.")
         else:
             self.info(f"nikto: not testing {target} (limit or time budget spent)")
+
+    def progress_text(self):
+        """One line for the scan's progress panel."""
+        seen = len(self.results or {})
+        return f"{self._done} of {seen} servers tested so far" if seen else ""
 
     def finish(self):
         """Called when the scan wraps up (possibly more than once): list the servers that were left untested."""
@@ -324,6 +331,7 @@ class sfp_tool_nikto(SpiderFootAsyncPlugin):
         finally:
             with self._lock:
                 self._spent += time.monotonic() - started
+                self._done += 1
             try:
                 os.unlink(output_path)
             except OSError:
