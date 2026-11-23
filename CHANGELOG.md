@@ -3,10 +3,20 @@
 All notable changes to SpiderFoot are documented in this file.  
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased (rc.52: AI report on large scans)
+## Unreleased (rc.52: AI report on large scans, and honest scan progress)
+
+### Added
+- **The AI report shows its progress.** It now runs as a background job on the AI service: the page gets an id at once and shows the steps (reading the scan's events, preparing the context, writing the report, formatting), the time spent, and a clear message if it fails. A refresh picks the same job up again. (`POST /report/start`, `GET /report/status/{id}`, `GET /report/result/{id}` on the agents service; `POST /report` still works.)
+- **The scan page shows what the scan is doing.** Under the progress bar: the modules working now, each with its own progress line where it has one (nikto, nuclei and naabu say "55 of 118 servers tested so far"), how many events are waiting, results a minute, and how long since the last result, with a plain warning after ten quiet minutes. The bar is labelled as modules that have produced results, not time remaining.
 
 ### Fixed
 - **The first AI report of a large scan timed out.** Before writing, the report agent indexed every event of the scan into the vector store by embedding it on the CPU (about 50 events a second: a 42,000-event scan took 16 minutes), and the agent gives up after 600 seconds, so the model was never called. The index was kept, so a second try worked. The scan digest now carries the report and the vector context is a few hundred characters, so the indexing is skipped when a digest is present. `SF_REPORT_BACKFILL` can set it to `always` (the old behaviour) or `never`.
+- **On a large scan the report saw only the first findings discovered.** Each finding type listed its first 200 items in discovery order, so findings from hosts reached later never reached the model (1,119 nikto findings: 200 listed, all from the earliest hosts). Items are now confirmed-before-unconfirmed and spread across hosts, and a type that is cut says how many findings each host has. The account-confidence list (1.4 million characters on a 42,000-event scan) could take the whole budget and starve related context, other event types and third-party data; it is now limited to a fifth of it.
+- **Correlations in the report no longer depend on the page.** The agent reads them from the database, highest risk first, with their risk and event count (the page used to send 30 of them without either). The page no longer sends findings or correlations.
+- **The scan progress bar showed 0%.** The server sent `overall_pct` and `modules_completed` while the page read `overall_percent` and `modules_finished`; both names are now sent. The progress stream also only sent an update when the percentage changed, so with the percentage at its cap for hours the page received nothing but heartbeats; it now sends whenever anything changes.
+
+### Removed
+- The mock AI report routes `POST /api/reports/generate` and `POST /api/reports/preview`. They used a hard-coded mock model (since February) and the web page did not call them; the AI report is `POST /api/agents/report`. The routes that list, fetch, export and delete stored reports are unchanged.
 
 ## Unreleased (rc.51: nikto and nuclei coverage)
 
