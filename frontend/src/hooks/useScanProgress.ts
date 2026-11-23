@@ -19,6 +19,12 @@ export interface ModuleProgress {
   finished_at?: number;
 }
 
+export interface RunningModule {
+  name: string;
+  /** A line the module offers about its own progress, e.g. "55 of 118 servers tested so far" (may be empty). */
+  progress: string;
+}
+
 export interface ScanProgressSnapshot {
   scan_id: string;
   status: string;
@@ -28,6 +34,14 @@ export interface ScanProgressSnapshot {
   modules_running: number;
   modules: ModuleProgress[];
   timestamp: number;
+  /** Which modules are working right now. */
+  running: RunningModule[];
+  /** Events waiting for a module to take them. */
+  queued_events: number;
+  /** Results stored per minute over the last few minutes. */
+  events_per_min: number;
+  /** Seconds since the last result was stored. */
+  quiet_for_s: number;
 }
 
 interface UseScanProgressOpts {
@@ -133,6 +147,12 @@ export function useScanProgress(
               finished_at: m.finished_at,
             })),
             timestamp: data.timestamp ?? Date.now() / 1000,
+            running: Array.isArray(data.running)
+              ? data.running.map((m: Record<string, unknown>) => ({ name: String(m.name ?? ''), progress: String(m.progress ?? '') }))
+              : [],
+            queued_events: Number(data.queued_events ?? 0),
+            events_per_min: Number(data.events_per_min ?? 0),
+            quiet_for_s: Number(data.quiet_for_s ?? 0),
           };
           setProgress(snapshot);
         } catch {
