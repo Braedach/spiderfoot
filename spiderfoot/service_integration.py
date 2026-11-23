@@ -244,6 +244,18 @@ def _index_scan_events_to_qdrant(scan_id: str) -> None:
         log.debug("Vector auto-indexing disabled for scan %s", scan_id)
         return
 
+    # A worker with no Qdrant server configured uses the in-memory store, which is discarded with the process: embedding every event
+    # of the scan into it (6 minutes for 39,000 events, holding the worker after the scan) produces nothing anyone can read. Say so
+    # and skip it. (Set SF_QDRANT_BACKEND=http and the SF_QDRANT_HOST for the worker to index into the real server.)
+    try:
+        from spiderfoot.ai.qdrant_client import QdrantBackend, QdrantConfig
+        if QdrantConfig.from_env().backend == QdrantBackend.MEMORY:
+            log.info("Not indexing scan %s into Qdrant: this worker has no Qdrant server configured "
+                     "(SF_QDRANT_BACKEND is not 'http'), so the index would be discarded", scan_id)
+            return
+    except Exception as e:                                      # a broken check must not change what happened before
+        log.debug("Could not check the Qdrant backend for scan %s: %s", scan_id, e)
+
     try:
         from spiderfoot.correlation.vector_collection_manager import get_collection_manager
         from spiderfoot.ai.qdrant_client import VectorPoint
