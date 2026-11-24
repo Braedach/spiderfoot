@@ -79,6 +79,7 @@ def _poll_scan_progress(
             # the scanner keeps updated on its own wait loop - safe to read
             # from here since the poller runs as a separate thread in the
             # same worker process as the scanner, not a separate process.
+            from spiderfoot.scan.scan_progress import enrich_running
             from spiderfoot.scan.scanner import get_running_module_count, get_scan_activity
             modules_running = get_running_module_count(scan_id)
             now = time.time()
@@ -90,10 +91,12 @@ def _poll_scan_progress(
             span = history[-1][0] - history[0][0]
             per_min = (history[-1][1] - history[0][1]) / span * 60 if span >= 30 else 0.0
             activity = get_scan_activity(scan_id)
+            results_by_module = {r[0]: r[3] for r in rows} if rows else {}
             update_scan_progress(
                 scan_id, progress, modules_with_events, modules_total, events_produced,
                 modules_running=modules_running,
-                running_modules=activity.get("running", []), queued_events=activity.get("queued_events", 0),
+                running_modules=enrich_running(activity.get("running", []), results_by_module, now),
+                queued_events=activity.get("queued_events", 0),
                 events_per_min=round(per_min, 1), quiet_for_s=round(now - last_change, 1),
             )
         except Exception as poll_err:

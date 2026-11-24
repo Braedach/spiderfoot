@@ -25,12 +25,12 @@ Needs Docker with the compose plugin, or Podman with `podman-compose`. About 2 G
 
 ```bash
 git clone https://github.com/Braedach/spiderfoot.git && cd spiderfoot
-git checkout v6.1.0-bd.1-rc.52                      # the stack file must come from the tag you deploy
+git checkout v6.1.0-bd.1-rc.53                      # the stack file must come from the tag you deploy
 
 sudo mkdir -p /srv/spiderfoot/{postgres,redis,qdrant,embeddings-cache}
 sudo chown -R 1000:1000 /srv/spiderfoot/embeddings-cache
 ./deploy/bootstrap-spiderfoot-env.sh                # prints the secrets once: save them in a password manager
-sudo nano /srv/spiderfoot/stack-spiderfoot-env.env  # set SPIDERFOOT_TAG=v6.1.0-bd.1-rc.52 (required, no default)
+sudo nano /srv/spiderfoot/stack-spiderfoot-env.env  # set SPIDERFOOT_TAG=v6.1.0-bd.1-rc.53 (required, no default)
 
 export COMPOSE_PROFILES=scan
 docker compose --env-file /srv/spiderfoot/stack-spiderfoot-env.env -f deploy/stack-docker.yml up -d
@@ -51,7 +51,7 @@ and the stack file runs it unchanged. Allow 30 GB of disk, 6 GB of RAM and 20 to
 compiles Go and C tools).
 
 ```bash
-TAG=v6.1.0-bd.1-rc.52
+TAG=v6.1.0-bd.1-rc.53
 R=ghcr.io/braedach/spiderfoot
 docker build -f deploy/docker/Dockerfile.base -t $R-base:$TAG .
 docker build -f docker/Dockerfile.api             --build-arg BASE_IMAGE=$R-base:$TAG -t $R-api:$TAG .
@@ -78,10 +78,10 @@ stack files.
 
 ```bash
 git checkout main && git pull --ff-only
-git tag -a v6.1.0-bd.1-rc.52 -m "rc.52: what changed" && git push origin v6.1.0-bd.1-rc.52
-nohup ./deploy/publish.sh v6.1.0-bd.1-rc.52 > build-rc52.log 2>&1 < /dev/null &
-tail -f build-rc52.log                              # healthy run ends: Scan gate passed, Pushed 5 images, Release URL
-./deploy/publish.sh v6.1.0-bd.1-rc.52 --check       # status only
+git tag -a v6.1.0-bd.1-rc.53 -m "rc.53: what changed" && git push origin v6.1.0-bd.1-rc.53
+nohup ./deploy/publish.sh v6.1.0-bd.1-rc.53 > build-rc53.log 2>&1 < /dev/null &
+tail -f build-rc53.log                              # healthy run ends: Scan gate passed, Pushed 5 images, Release URL
+./deploy/publish.sh v6.1.0-bd.1-rc.53 --check       # status only
 ```
 
 Run it in a login shell on a dedicated build host. If the gate fails, nothing is pushed: fix the cause in a pull
