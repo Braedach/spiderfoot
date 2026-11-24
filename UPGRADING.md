@@ -5,6 +5,29 @@ For the full list of changes see [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
+## Upgrading to rc.52 (from rc.51 or earlier): stack file settings for `sf-api`
+
+**rc.52 needs a stack file change.** `sf-api` must have `SF_QDRANT_BACKEND=http`, `SF_QDRANT_HOST`, `SF_QDRANT_PORT`, `SF_QDRANT_GRPC_PORT`,
+`SF_QDRANT_PREFIX` and `SF_AGENTS_URL=http://sf-agents:8100`; they are in `deploy/stack-podman.yml` 2.17.0 and `deploy/stack-docker.yml` 2.7.0. If you
+manage the stack yourself, add them to the `sf-api` service (the stack file must come from the tag you deploy). Without them the AI report still
+works, but search cannot reach the vector store. The optional AI report and indexing settings are in `sf-agents` with their defaults; see
+`deploy/REFERENCE.md`, "AI report and search indexing". No database change.
+
+- **First start.** `sf-agents` indexes every finished scan of the last 14 days (`SF_INDEX_RECENT_DAYS`) that is not indexed yet, one at a time at low
+  priority. Expect it to use several CPU cores for a while on a deployment with many scans; set `SF_INDEX_AUTO=false` to turn it off.
+- **Removed:** `POST /api/reports/generate` and `POST /api/reports/preview` (mock model, not used by the web page). Use `POST /api/agents/report`.
+- **New:** `POST /api/rag/search` with a `scan_id` answers `202` with `indexed`, `total` and `percent` while that scan is being indexed;
+  `GET`/`POST /api/rag/index/{scan_id}`.
+- **The AI report** now reads a 900,000-character digest (`SF_REPORT_DIGEST_MAX_CHARS`). A report takes about three minutes on a 42,000-event scan.
+
+## Upgrading to rc.51 (from rc.50 or earlier): old saved defaults no longer win
+
+Saved module settings that equal a default a release has replaced (nikto and nuclei `max_targets` 20, naabu 50, nikto `total_budget` 7200, the
+old arjun settings) are now ignored, so the current default applies for every scan, including one with your own module list. Nothing needs
+resetting. A value you chose on purpose is kept, unless it is exactly a retired value. No stack file change.
+
+---
+
 ## Upgrading to rc.50 (from rc.49 or earlier): old saved limits for nikto and naabu
 
 rc.50 removes the count limits that made nikto test only the first 20 web servers and naabu scan only the first 50 hosts of a scan.

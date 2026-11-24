@@ -1,9 +1,10 @@
 import { memo, useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { safeSetItem, safeGetItem, safeRemoveItem } from '../../lib/safeStorage';
+import { safeSetItem, safeRemoveItem } from '../../lib/safeStorage';
+import { useReportJob } from '../../hooks/useReportJob';
 import {
   scanApi, agentsApi, reportsApi, formatDuration,
-  type ReportJob, type Scan, type ScanEvent, type ScanCorrelation, type EventSummaryDetail,
+  type Scan, type ScanEvent, type ScanCorrelation, type EventSummaryDetail,
 } from '../../lib/api';
 import {
   Brain, Edit3, Save, Sparkles, Loader2, FileText,
@@ -304,12 +305,17 @@ function ReportTab({ scanId, scan }: { scanId: string; scan?: Scan }) {
     return { countries, coordinates, addresses };
   }, [geoInfoData, geoCoordsData, geoCountryData, geoAddrData]);
 
-  // The report is written by a background job on the server: this starts it, then asks every 2 seconds which step it is on.
-  // The job id is kept so a refresh (or another tab) picks the same job up again instead of starting a second one.
-  const jobKey = `sf_report_job_${scanId}`;
-  const [job, setJob] = useState<ReportJob | null>(null);
-  const [jobError, setJobError] = useState<string | null>(null);
-  const isGenerating = job?.status === 'running';
+  // The report is written by a background job on the server: this starts it, and useReportJob follows it (every 2 seconds, and
+  // again after a refresh) and hands over the finished report.
+  const { job, error: jobError, isGenerating, begin: beginJob, fail: failJob } = useReportJob({
+    storageKey: `sf_report_job_${scanId}`,
+    onDone: (data) => {
+      const md = extractReportMarkdown(data, scan?.target ?? '');
+      setReportContent(md);
+      safeSetItem(storageKey, md);
+      queryClient.invalidateQueries({ queryKey: ['stored-reports', scanId] });
+    },
+  });
 
   const generateMut = useMutation({
     mutationFn: async () => {
@@ -329,59 +335,12 @@ function ReportTab({ scanId, scan }: { scanId: string; scan?: Scan }) {
         geo_data: geoPayload,
       });
     },
-    onSuccess: (started) => {
-      setJobError(null);
-      setJob(started);
-      safeSetItem(jobKey, started.job_id);
-    },
+    onSuccess: (started) => beginJob(started),
     onError: (err: Error) => {
       console.error('Failed to start the report:', err);
-      setJobError('The report could not be started. Check that the AI service is running and try again.');
+      failJob('The report could not be started. Check that the AI service is running and try again.');
     },
   });
-
-  // Pick up a job this browser started earlier (a refresh, or a return to the page)
-  useEffect(() => {
-    const saved = safeGetItem(jobKey);
-    if (!saved) return;
-    agentsApi.reportStatus(saved)
-      .then((j) => { if (j.status === 'running') setJob(j); else safeRemoveItem(jobKey); })
-      .catch(() => safeRemoveItem(jobKey));
-  }, [jobKey]);
-
-  useEffect(() => {
-    if (!job || job.status !== 'running') return;
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const j = await agentsApi.reportStatus(job.job_id);
-        if (cancelled) return;
-        setJob(j);
-        if (j.status === 'done') {
-          const data = await agentsApi.reportResult(job.job_id);
-          if (cancelled) return;
-          const md = extractReportMarkdown(data, scan?.target ?? '');
-          setReportContent(md);
-          safeSetItem(storageKey, md);
-          safeRemoveItem(jobKey);
-          queryClient.invalidateQueries({ queryKey: ['stored-reports', scanId] });
-        } else if (j.status === 'error') {
-          setJobError(j.error || 'The report failed.');
-          safeRemoveItem(jobKey);
-        }
-      } catch (err) {
-        if (cancelled) return;
-        const status = (err as { response?: { status?: number } })?.response?.status;
-        setJobError(status === 404
-          ? 'The report was lost because the AI service restarted. Generate it again.'
-          : 'Lost contact with the AI service. The report may still finish: reload this page in a minute.');
-        setJob(null);
-        if (status === 404) safeRemoveItem(jobKey);
-      }
-    };
-    const timer = setInterval(tick, 2000);
-    return () => { cancelled = true; clearInterval(timer); };
-  }, [job?.job_id, job?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const generateClientReport = useCallback(() => {
     const details = summaryData?.details ?? [];
@@ -645,7 +604,7 @@ ${html}
             dangerouslySetInnerHTML={{ __html: sanitizeHTML(renderMarkdown(reportContent) ?? '') }}
           />
         </div>
-      ) : (
+      ) : isGenerating ? null : (
         <EmptyState
           icon={Brain}
           title="No report generated"

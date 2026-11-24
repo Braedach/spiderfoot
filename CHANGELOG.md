@@ -3,11 +3,15 @@
 All notable changes to SpiderFoot are documented in this file.  
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased (rc.53: scan progress panel, per-module detail)
+## Unreleased (rc.53: scan progress panel details, AI report page fix)
 
 ### Added
 - **Each module in the scan progress panel shows how long it has been working and how many results it has stored** (for example "nikto: 55 of 118 servers tested so far, 1h 12m, 1,235 results"). A module's clock starts when it is first seen working and starts again if it runs again later.
 - **A plain "slow tail" note.** When most of the scan's modules have produced results and only a few are still working, the panel says so and names them, and that the scan ends when they do. It does not appear early in a scan, or while many modules are still working.
+- **A shorter, more useful module list.** Early in a scan about 40 modules work at once; the panel now leaves out the internal storage module, lists the eight most relevant (those with a progress line of their own first, then the longest running) and says "and N more working".
+
+### Fixed
+- **A finished AI report was thrown away, and the page said "No report generated".** When the job finished, the page changed its state to "done" before it had fetched the result, and that change cancelled the fetch, so the finished report never reached the screen (it was saved on the server, and showed after leaving the tab and coming back). The result is now fetched and shown first. The "No report generated" message also no longer appears under the progress steps while a report is being written. The job-following logic is its own hook with tests, including one that fails on the old behaviour.
 
 ## Unreleased (rc.52: AI report on large scans, and honest scan progress)
 

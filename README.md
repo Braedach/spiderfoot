@@ -4,7 +4,7 @@ A hardened fork of [poppopjmp/spiderfoot](https://github.com/poppopjmp/spiderfoo
 kept public for licence reasons and run internally. For general SpiderFoot use, documentation and issues, go to
 upstream.
 
-**Current release candidate: `v6.1.0-bd.1-rc.50`.** Release candidates are built, deployed and tested with live scans
+**Current release candidate: `v6.1.0-bd.1-rc.53`.** Release candidates are built, deployed and tested with live scans
 before any public release; a public build takes no new fixes. See the [changelog](CHANGELOG.md) for what each build
 changed and [`UPGRADING.md`](UPGRADING.md) before moving between builds.
 
@@ -31,12 +31,12 @@ You need Docker or Podman with Compose. The stack runs nine containers and publi
 
 ```bash
 git clone https://github.com/Braedach/spiderfoot.git && cd spiderfoot
-git checkout v6.1.0-bd.1-rc.50
+git checkout v6.1.0-bd.1-rc.53
 
 sudo mkdir -p /srv/spiderfoot/{postgres,redis,qdrant,embeddings-cache}
 sudo chown -R 1000:1000 /srv/spiderfoot/embeddings-cache
 ./deploy/bootstrap-spiderfoot-env.sh        # writes /srv/spiderfoot/stack-spiderfoot-env.env, prints secrets once
-# edit that file: SPIDERFOOT_TAG=v6.1.0-bd.1-rc.50
+# edit that file: SPIDERFOOT_TAG=v6.1.0-bd.1-rc.53
 
 COMPOSE_PROFILES=scan docker compose --env-file /srv/spiderfoot/stack-spiderfoot-env.env \
   -f deploy/stack-docker.yml up -d
@@ -46,7 +46,7 @@ Open http://localhost:5001 and log in with the admin password the script printed
 *AI Connections* page if you want AI reports. Details, Podman, upgrades and building your own images:
 [`deploy/README.md`](deploy/README.md).
 
-Guides: [CVEs by software version](docs/cve-by-version.md), [scan coverage and saved settings](docs/scan-coverage.md).
+Guides: [CVEs by software version](docs/cve-by-version.md), [scan coverage and saved settings](docs/scan-coverage.md), [AI report, search indexing and scan progress](docs/ai-report.md).
 
 Only scan targets you are authorised to test.
 
