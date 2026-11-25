@@ -89,6 +89,8 @@ flowchart TD
     P --> E["new events emitted<br/>zero, one or many"]
     E -->|back onto the queue| Q
     Q -.->|"all queues empty AND every module idle<br/>(3 consecutive passes)"| F["FINISHED sentinel to every module"]
+    MT -.->|"progress poller, every few seconds (rc.52)"| PR["Redis sf:scan:progress:ID<br/>modules working, queue depth, results a minute,<br/>per-module time, results and progress line"]
+    PR -.->|"server-sent events, on any change"| UI["scan page progress panel"]
 ```
 
 Bottlenecks this design had, and how they are handled:
