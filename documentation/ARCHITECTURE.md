@@ -1065,8 +1065,9 @@ layer and the database.
   `Depends(get_config_repository)`. New `ConfigRepository.get_event_types()`
   method wraps `dbh.eventTypes()`.
 - **reports.py** — `_get_scan_events()` helper rewritten to accept an
-  injected `ScanService`. Endpoints `POST /reports/generate` and
-  `POST /reports/preview` pass their `Depends(get_scan_service)` instance.
+  injected `ScanService`. Its former
+  `POST /reports/generate` and `POST /reports/preview` endpoints were removed in rc.52 (they used a mock model); the AI report is
+  `POST /api/agents/report`.
 - **websocket.py** — `_polling_mode()` rewritten to build a `ScanService`
   from `RepositoryFactory` instead of raw `SpiderFootDb`. Proper cleanup
   via `svc.close()` in `finally` block.
