@@ -1,6 +1,6 @@
 # Target reachability check: plan
 
-Status: PROPOSAL, nothing built. For discussion; decisions are listed at the end.
+Status: PROPOSAL, nothing built. Decisions 1 to 3 are settled (2026-11-27); decision 4 is open. See the end.
 
 ## Why
 
@@ -64,7 +64,8 @@ a dead target costs seconds, not the scan's whole run.
   and in the AI report's "Coverage and limitations" section, so a report never reads as "tested, nothing found".
 - **`silent`, `no-dns`:** the active modules are not started. Their results would be errors, not findings. The passive
   modules still run (DNS, certificate logs, search engines, whois), because they do not need the host to be up. The scan
-  ends `FINISHED` with the unreachable flag set, not `ERROR`, because the scan did what it could.
+  ends with its own status, `TARGET-UNREACHABLE` (see below), not `FINISHED` and not `ERROR-FAILED`: the passive modules did
+  run, so it did not fail, but the target was not tested, so it must not read as complete.
 - **`closed`, or `reachable` on other ports only:** a warning; web modules that need 80 or 443 are skipped with the reason
   ("no web port open"), network-service modules still run on the ports that are open.
 - **A switch:** `_reachability_gate` = `enforce` (default for active profiles), `warn` (record and show, but run everything),
@@ -102,13 +103,33 @@ exact text from this scan.
   "quiet scan" warnings' job.
 - **It is not an authorisation check.**
 
-## Decisions needed
+## The new status: `TARGET-UNREACHABLE`
 
-1. **Gate or warn by default for active profiles.** Recommendation: enforce (skip active modules when `silent` or `no-dns`),
-   with `warn` per scan. The alternative is to warn only.
-2. **Should a `silent` result end the scan `FINISHED` with a flag, or with a distinct status** (for example `FINISHED-NO-TARGET`)?
-   Recommendation: a flag, so existing counts and filters keep working, and the page shows it prominently.
-3. **Port list.** The 15 ports above, or only web ports for web profiles? Recommendation: the fixed list for every active
-   profile; it is cheap and the result is also useful in the report.
-4. **Per host checks now or later.** Recommendation: seed target and the nikto fix first (one release candidate), per-host
-   skips in the next.
+Decided: a scan whose active modules were not run because the target did not answer is not `FINISHED`. It gets a distinct
+final status (name proposed: `TARGET-UNREACHABLE`; the person-facing label "Target did not respond"). It is neither a failure
+(the passive modules ran and their results are kept) nor a success.
+
+What a new status touches, found by searching the code (each needs a change and a test):
+
+- `spiderfoot/scan/scan_state.py` and `scan_state_map.py`: the Python enum, the legacy database string and the wire (protobuf)
+  enum are mapped in one place. The protobuf enum may need a new value; if regenerating it is a problem, map the status to
+  the closest existing wire state and keep the exact string in the database.
+- `scanner.py` (where the final status is set) and `tasks/scan.py` (the worker and the reaper; a scan in this status must never
+  be reaped or treated as running).
+- Correlation rules and the AI report must still run on it, and the report must say the target was not tested.
+- Frontend: the status badge and colour (a warning colour, not red), the status lists in `lib/api.ts`, the Scans and Dashboard
+  counts (`failedCount`, facets), filters and exports that name statuses.
+- Anything outside the app that matches on `FINISHED` to mean "a complete scan" (scripts, the deploy script's running-scan
+  check treats it as not running, which is right).
+
+A scan stopped by the person, or that fails for another reason, keeps its existing status.
+
+## Decisions
+
+1. **Enforce by default for active profiles. DECIDED.** `silent` and `no-dns` skip the active modules; `warn` and `off`
+   remain per-scan switches.
+2. **A distinct status, not `FINISHED`. DECIDED** (this reverses the earlier recommendation of a flag on `FINISHED`; the owner
+   is right that a scan that did not test its target should not read as finished).
+3. **The fixed 15-port list for every active profile. DECIDED.**
+4. **Per-host checks now or later. OPEN.** Recommendation: seed target and the nikto fix first, per-host skips in the next
+   release candidate.
